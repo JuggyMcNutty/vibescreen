@@ -15,6 +15,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
+#include <cerrno>
 #include <experimental/filesystem>
 #include <regex>
 
@@ -161,16 +162,34 @@ namespace KUtils {
   }
 
   std::string interface_ip(const std::string &interface) {
+    // The name comes from get_wifi_interface below, which reads it out of the
+    // configurable wpa_supplicant directory, so it is not a fixed string and
+    // must be bounded against IFNAMSIZ.
+    if (interface.empty() || interface.size() >= IFNAMSIZ) {
+      spdlog::warn("interface name '{}' is empty or too long", interface);
+      return "";
+    }
+
     int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (fd < 0) {
+      spdlog::warn("cannot open socket to query {}: {}", interface, strerror(errno));
+      return "";
+    }
 
     struct ifreq ifr{};
-    strcpy(ifr.ifr_name, interface.c_str());
-    ioctl(fd, SIOCGIFADDR, &ifr);
+    std::strncpy(ifr.ifr_name, interface.c_str(), IFNAMSIZ - 1);
+
+    // Without this check a failed ioctl leaves ifr_addr as the zero from the
+    // initialiser and the function confidently reports 0.0.0.0.
+    if (ioctl(fd, SIOCGIFADDR, &ifr) < 0) {
+      spdlog::debug("no address for {}: {}", interface, strerror(errno));
+      close(fd);
+      return "";
+    }
     close(fd);
 
-    char ip[INET_ADDRSTRLEN];
-    strcpy(ip, inet_ntoa(((sockaddr_in *) &ifr.ifr_addr)->sin_addr));
-    return ip;
+    const char *ip = inet_ntoa(((sockaddr_in *) &ifr.ifr_addr)->sin_addr);
+    return ip != NULL ? std::string(ip) : std::string();
   }
 
   std::string get_wifi_interface() {
