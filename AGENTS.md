@@ -1,8 +1,9 @@
 # AGENTS.md
 
-Onboarding for anyone new to this repo, human or AI. Read this before the
-upstream `README.md` or `DEVELOPMENT.md`, both of which are stale in ways that
-will waste your time.
+Onboarding for anyone new to this repo, human or AI. `README.md` is for people
+installing it, `DEVELOPMENT.md` covers the toolchain and build. This file is the
+working reference: what is known about the hardware, what is known to be broken,
+and the rules that are not obvious from reading the code.
 
 ## What this is
 
@@ -24,15 +25,16 @@ values.
 | --- | --- |
 | `docs/k1max-facts.md` | Real hardware, firmware, framebuffer and input values from the printer |
 | `docs/audit.md` | Known bugs in the inherited code, with severity and suggested order |
-| `DEVELOPMENT.md` | Upstream's. **Wrong about the toolchain.** See below |
+| `DEVELOPMENT.md` | Toolchain, build targets and running the simulator |
 
 ## Build
 
-Two targets. Both go through one script.
+Three targets, all through one script.
 
 ```sh
 scripts/setup-toolchain.sh          # once, downloads the cross toolchain
 scripts/build.sh mips               # K1 / K1 Max binary
+scripts/build.sh arm                # aarch64, Raspberry Pi and BTT Pad
 scripts/build.sh sim                # x86_64 SDL build that runs on your desktop
 ```
 
@@ -41,7 +43,6 @@ Useful variants:
 ```sh
 scripts/build.sh mips zbolt         # Z-Bolt icon set instead of Material
 scripts/build.sh mips --small       # Ender 3 V3 KE / Nebula Pad sized panel
-scripts/build.sh arm                # aarch64, Raspberry Pi and BTT Pad
 scripts/build.sh mips --clean       # rebuild the vendored libs too
 PRINTER_HOST=192.168.1.202 scripts/build.sh sim   # point the sim at a printer
 ```
@@ -130,17 +131,18 @@ handler and dies on `SIGTERM` normally, so the printer's init script is fine.
 Host packages needed: `base-devel`, `cmake`, `sdl2` (or `sdl2-compat`),
 `sshpass` for the printer probe.
 
-### The toolchain, and why DEVELOPMENT.md is wrong
+### The toolchain, and the trap it replaced
 
-`DEVELOPMENT.md` tells you to use the Ingenic `mips-gcc720-glibc229` toolchain.
-That is what built the last tagged release, `0.0.26-beta`, which is dynamically
-linked against `/lib/ld-linux-mipsn8.so.1` and only runs on firmware carrying
-glibc 2.29. That is why upstream's `installer.sh` refuses to install unless it
-finds `/lib/ld-2.29.so`.
+Upstream's `DEVELOPMENT.md` told you to use the Ingenic
+`mips-gcc720-glibc229` toolchain. That is what built their last tagged release,
+`0.0.26-beta`, which is dynamically linked against `/lib/ld-linux-mipsn8.so.1`
+and only runs on firmware carrying glibc 2.29. It is why their `installer.sh`
+refuses to install unless it finds `/lib/ld-2.29.so`. Meanwhile their own CI had
+moved to a Bootlin musl toolchain and static linking back at `a42427cb`, so the
+documented route produced a binary that would not run for most people.
 
-Since commit `a42427cb` the real build, and every published nightly, uses a
-Bootlin musl toolchain and links fully static. `.github/workflows/build.yml` is
-the source of truth, not the docs.
+Our `DEVELOPMENT.md` has been rewritten and no longer says that, but the history
+is worth knowing before trusting anything else inherited from upstream.
 
 We use Bootlin `mips32el--musl--stable-2025.08-1`: gcc 14.3.0, binutils 2.43.1,
 musl 1.2.5. Static, so the K1's glibc version is irrelevant to us.
@@ -152,8 +154,8 @@ Known-good fallback if gcc 14 ever becomes more trouble than it is worth:
 
 ### Verifying a mips build without a printer
 
-Compare the ELF against upstream's published nightly, which is the binary
-currently installed on our K1 Max:
+Check the ELF. These are the properties that decide whether it runs at all, and
+CI asserts the static one on every build:
 
 ```sh
 toolchains/mips32el--musl--stable-2025.08-1/bin/mipsel-linux-readelf -h build/bin/guppyscreen
@@ -161,7 +163,12 @@ toolchains/mips32el--musl--stable-2025.08-1/bin/mipsel-linux-readelf -h build/bi
 
 Expect `ELF32`, little endian, `EXEC`, `MIPS`, and flags **`0x50001007`**
 (`noreorder, pic, cpic, o32, mips32`). There must be no `INTERP` or `DYNAMIC`
-program header. Stripped size lands near 6.3 MB against upstream's 6.0 MB.
+program header, because the K1's glibc version moves between firmware releases
+and only a static binary is immune to that. Stripped it comes to about 6.4 MB.
+
+To compare against a known good binary, pull one of our own releases rather
+than anything of upstream's; ours are built by the same script with the same
+toolchain.
 
 XBurst2 is MIPS32r2, so never emit MIPS r6 instructions.
 
@@ -180,6 +187,7 @@ k1/                   payload installed onto the printer, init scripts and klipp
 assets/               generated LVGL C arrays for icons and fonts
 debian/               Raspberry Pi and Debian packaging, plus the config template
 scripts/              ours, see below
+tools/                ours, fake_moonraker.py for local testing
 docs/                 ours
 ```
 
@@ -189,7 +197,7 @@ docs/                 ours
 | --- | --- |
 | `setup-toolchain.sh` | Downloads and unpacks the cross toolchain. Idempotent |
 | `apply-patches.sh` | Applies `patches/` to submodules. Idempotent |
-| `build.sh` | Builds either target |
+| `build.sh` | Builds any target: `mips`, `arm` or `sim` |
 | `probe-printer.sh` | Read-only fact gathering from a printer over SSH |
 
 ### The patches
@@ -235,10 +243,21 @@ bulk merge. Detail in `docs/audit.md`.
 
 ## The printer
 
-Development printer is a K1 Max. Rules:
+Development printer is a K1 Max at `192.168.1.202`. It is a **production
+machine**, the one its owner actually prints with, and it runs our published
+builds.
 
-- **Read only.** We pull facts off it, we do not install onto it. Ask before
-  anything that writes.
+- **Deploying is allowed, but ask first and back up first.** A bad write can
+  leave the display path broken on a machine someone needs.
+- The normal route is `/usr/data/guppyscreen/update.sh` on the printer, which
+  pulls the newest release. Prefer that over copying a binary by hand.
+- Hand-installing a local build is for testing something not yet pushed. Back
+  up, stop the service, smoke test the new binary from the install directory,
+  then install. A locally built binary is versioned `dev-<sha>` and `update.sh`
+  will refuse to replace it without `--force`.
+- Rollbacks live in `/usr/data/guppyscreen/`: `guppyscreen.orig-07409cb` is the
+  upstream build that was there before we touched it, and
+  `guppyscreen-backup-dev4f563d8.tar.gz` is a full directory snapshot.
 - Credentials come from the environment, never from a committed file:
   `PRINTER_HOST=... PRINTER_PASS=... scripts/probe-printer.sh`
 - Never commit the SSID, PSK, MAC addresses, printer serial or the Moonraker API
