@@ -94,5 +94,19 @@ if [ "$target" = "mips" ]; then
     make kd_graphic_mode
 fi
 
+# The simulator reads guppyconfig.json from beside the binary and will not
+# start without one. Seed a usable default, but never overwrite an existing
+# file, since that is where the developer's printer address lives.
+if [ "$target" = "sim" ] && [ ! -f build/bin/guppyconfig.json ]; then
+    sim_host="${PRINTER_HOST:-127.0.0.1}"
+    mkdir -p "$REPO_ROOT/build/bin/thumbnails"
+    sed -e "s|<PRINTER_DATA_DIR>/logs|$REPO_ROOT/build/bin|" \
+        -e "s|<GUPPY_DIR>/thumbnails|$REPO_ROOT/build/bin/thumbnails|" \
+        -e "s|\"moonraker_host\": \"127.0.0.1\"|\"moonraker_host\": \"$sim_host\"|" \
+        debian/guppyconfig.json > build/bin/guppyconfig.json
+    echo "Wrote build/bin/guppyconfig.json pointing at moonraker on $sim_host"
+    echo "Override with PRINTER_HOST=<ip>, or just edit the file."
+fi
+
 echo
 echo "Built: $(ls -l build/bin/guppyscreen | awk '{print $5}') bytes -> build/bin/guppyscreen"
