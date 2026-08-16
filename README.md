@@ -1,115 +1,115 @@
-# Guppy Screen for Klipper
+# vibescreen
 
-Guppy Screen is a touch UI for Klipper using APIs exposed by Moonraker. It builds on LVGL as a standalone executable, has no dependency on any display servers such as X/Wayland.
-<p align="center">
-    <a aria-label="Downloads" href="https://github.com/ballaswag/guppyscreen/releases">
-      <img src="https://img.shields.io/github/downloads/ballaswag/guppyscreen/total?style=flat-square">
-  </a>
-    <a aria-label="Stars" href="https://github.com/ballaswag/guppyscreen/stargazers">
-      <img src="https://img.shields.io/github/stars/ballaswag/guppyscreen?style=flat-square">
-  </a>
-    <a aria-label="Forks" href="https://github.com/ballaswag/guppyscreen/network/members">
-      <img src="https://img.shields.io/github/forks/ballaswag/guppyscreen?style=flat-square">
-  </a>
-    <a aria-label="License" href="https://github.com/ballaswag/guppyscreen/blob/develop/LICENSE">
-      <img src="https://img.shields.io/github/license/ballaswag/guppyscreen?style=flat-square">
-  </a>
-    <a aria-label="Last commit" href="https://github.com/ballswag/guppyscreen/commits/">
-      <img src="https://img.shields.io/github/last-commit/ballaswag/guppyscreen?style=flat-square">
-  </a>
-</p>
+A touch UI for Klipper printers. It talks to Moonraker over a websocket and
+draws straight to the framebuffer, so there is no X or Wayland underneath and
+nothing else to install alongside it.
 
-## Installation / Update
-Run the following interactive script via SSH on your K1/Max/CR-10 SE/Ender 3 V3 KE/Nebula Pad to install Guppy Screen.
+This is a maintained fork of [guppyscreen](https://github.com/ballaswag/guppyscreen),
+which stopped receiving commits in July 2024 with 69 issues open.
 
-#### Material Design Theme
-```
-sh -c "$(wget --no-check-certificate -qO - https://raw.githubusercontent.com/ballaswag/guppyscreen/main/installer.sh)"
-```
+![Material theme](screenshots/material/material_screenshot.png)
 
-#### Z-Bolt Theme (Only for the K1/Max)
-```
-sh -c "$(wget --no-check-certificate -qO - https://raw.githubusercontent.com/ballaswag/guppyscreen/main/installer.sh)" -s zbolt
-```
+## Scope
 
-### Install on a PI (Debian/Raspbian)
-Tested on a BTT Pad 7. Please install with care and make sure you're okay with resetting your setup if things break.
-```
-wget -O - https://raw.githubusercontent.com/ballaswag/guppyscreen/main/installer-deb.sh | bash
+Built and tested on a **Creality K1 Max**. That is the machine the work is
+aimed at and the only one anything is verified on.
+
+CI also builds two other variants, both inherited from upstream and neither
+tested here:
+
+- `guppyscreen-smallscreen.tar.gz` for the Ender 3 V3 KE and Nebula Pad
+- `guppyscreen-arm.tar.gz` for aarch64 boards such as a Pi or BTT Pad
+
+They compile on every push. Whether they run is unknown. Treat them as a
+starting point rather than a supported target.
+
+Android is not supported. Upstream shipped an APK built from a separate branch
+and that has been removed.
+
+## Installing
+
+SSH into the printer and run:
+
+```sh
+sh -c "$(wget --no-check-certificate -qO - https://raw.githubusercontent.com/JuggyMcNutty/vibescreen/main/installer.sh)"
 ```
 
-### Nightly Builds
-#### Material (Nightly)
-```
-sh -c "$(wget --no-check-certificate -qO - https://raw.githubusercontent.com/ballaswag/guppyscreen/main/installer.sh)" -s nightly
+Add `-s zbolt` for the Z-Bolt icon set instead of Material Design.
+
+The installer replaces Creality's display server, so the stock UI will be gone
+afterwards. It backs up what it displaces to `/usr/data/guppyify-backup` and
+offers to disable the rest of Creality's services while it is there.
+
+This installs as `guppyscreen`, in `/usr/data/guppyscreen`, using the same
+service name and config file as upstream. It is a drop-in replacement: an
+existing guppyscreen install can be moved across without touching anything
+else.
+
+### Raspberry Pi and Debian
+
+```sh
+wget -O - https://raw.githubusercontent.com/JuggyMcNutty/vibescreen/main/installer-deb.sh | bash
 ```
 
-#### Z-Bolt (Nightly)
-```
-sh -c "$(wget --no-check-certificate -qO - https://raw.githubusercontent.com/ballaswag/guppyscreen/main/installer.sh)" -s zbolt nightly
+Untested here. Have a way back to your current setup before running it.
+
+## Updating
+
+From the printer:
+
+```sh
+/usr/data/guppyscreen/update.sh
 ```
 
-#### Raspbian Variant (Nightly)
-```
-wget -O - https://raw.githubusercontent.com/ballaswag/guppyscreen/main/installer-deb.sh | bash -s nightly
-```
+or press Update in the settings panel.
 
-### Android
-Guppy Screen works on Android! Download and try with the latest [APK](https://github.com/ballaswag/guppyscreen/releases/latest/download/app-release.apk).  
-  
-<img src="https://github.com/ballaswag/guppyscreen/assets/145094472/d0437cd6-9b82-470f-8889-c4a5b74bfa6e" alt="guppyscreen on android" width="600" />
+Releases are rolling. Every push to `main` that builds cleanly replaces the
+`rolling` release, and there is no separate stable track. Builds are not tested
+on hardware before they are published.
 
-## Uninstall
-ssh into your K1/Max and run the follwow command:
-```
+If you built the binary yourself, `.version` will say `dev-<sha>` and the
+updater will refuse to overwrite it unless you pass `--force`.
+
+## Uninstalling
+
+```sh
 /usr/data/guppyscreen/reinstall-creality.sh
 ```
 
-## Features
-:white_check_mark: Console/Macro Shell  
-:white_check_mark: Bedmesh  
-:white_check_mark: Input Shaper (PSD graphs)  
-:white_check_mark: Belt Calibration/Excitate  
-:white_check_mark: Print Status  
-:white_check_mark: Spoolman Integration  
-:white_check_mark: Extrude/Retract  
-:white_check_mark: Temperature Control  
-:white_check_mark: Fans/LED/Move Control  
-:white_check_mark: Fine Tune (speed, flow, z-offset, Pressure Advance)  
-:white_check_mark: Limits (Velocity, Acel, Square Corner Velocity, etc.)  
-:white_check_mark: File Browser  
-:white_check_mark: Supports multiple screen resolutions  
-:white_check_mark: Cross platform releases (MIPS/ARM/x86)  
-:white_check_mark: TMC Metrics  
-:white_check_mark: Multi-Printer support  
+That restores the Creality services and display server from the backup the
+installer made.
 
-## Roadmap
-:bangbang: Exclude Object  
-:bangbang: Firmware Retraction  
+## What it does
 
-Open for feature requests.
+Print status with thumbnails, file browser, console and macro shell, bed mesh
+viewer, input shaper with PSD graphs, belt calibration, TMC metrics and tuning,
+temperature control, fan, LED and movement control, extrude and retract,
+fine tuning for speed, flow, z-offset and pressure advance, velocity and
+acceleration limits, Spoolman integration, and multi-printer support.
 
-## Documentation
-You can find various Guppy Screen documents [here](https://ballaswag.github.io/docs/guppyscreen/configuration/).
+## Building
 
-## Screenshot
-### Material Theme
-![Material Theme Guppy Screen](https://github.com/ballaswag/guppyscreen/blob/main/screenshots/material/material_screenshot.png)
+`scripts/setup-toolchain.sh` once, then `scripts/build.sh mips` for the printer
+or `scripts/build.sh sim` for an SDL build that runs on your desktop against a
+real or fake Moonraker.
 
-Earlier development screenshots can be found [here](https://github.com/ballaswag/guppyscreen/blob/main/screenshots)
-
-## Video Demo
-https://www.reddit.com/r/crealityk1/comments/17jp59g/new_touch_ui_for_the_k1/
-
-## Support Guppy Screen
-You can directly support this project by <a href='https://ko-fi.com/ballaswag' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi3.png?v=3' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
-or
-[![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/ballaswag)
+[DEVELOPMENT.md](DEVELOPMENT.md) covers the toolchain and the build targets.
+[AGENTS.md](AGENTS.md) is the working reference for anyone changing the code,
+including the hardware details in [docs/k1max-facts.md](docs/k1max-facts.md)
+and the known defects in [docs/audit.md](docs/audit.md).
 
 ## Credits
-[Material Design Icons](https://pictogrammers.com/library/mdi/)  
-[Z-Bolt Icons](https://github.com/Z-Bolt/OctoScreen)  
-[Moonraker](https://github.com/Arksine/moonraker)  
-[KlipperScreen](https://github.com/KlipperScreen/KlipperScreen)  
-[Fluidd](https://github.com/fluidd-core/fluidd)  
-[Klippain-shaketune](https://github.com/Frix-x/klippain-shaketune)  
+
+guppyscreen was written by [ballaswag](https://github.com/ballaswag). This fork
+exists because that work was worth keeping.
+
+[pellcorp/grumpyscreen](https://github.com/pellcorp/grumpyscreen) is another
+active fork, narrowed to the Simple AF firmware.
+
+Icons from [Material Design Icons](https://pictogrammers.com/library/mdi/) and
+[Z-Bolt](https://github.com/Z-Bolt/OctoScreen). Built on
+[LVGL](https://github.com/lvgl/lvgl), [libhv](https://github.com/ithewei/libhv)
+and [spdlog](https://github.com/gabime/spdlog). Input shaper and belt
+calibration borrow from [Klippain-shaketune](https://github.com/Frix-x/klippain-shaketune).
+
+GPL-3.0, same as upstream.
