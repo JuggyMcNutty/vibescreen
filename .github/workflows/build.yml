@@ -12,9 +12,10 @@ name: build
 # CI and a developer's machine cannot drift apart. Adding a build flag means
 # editing the script, not this file.
 #
-# Every push to main that builds cleanly publishes its own release, tagged
-# <date>-<sha>, so the release list is a build history rather than a single
-# entry that keeps getting overwritten. There is no separate stable track, so
+# A push to main that changes source and builds cleanly publishes its own
+# release, tagged <date>-<sha>, so the release list is a build history rather
+# than a single entry that keeps getting overwritten. Documentation-only pushes
+# still build, they just do not publish. There is no separate stable track, so
 # these are normal releases and the newest one is what releases/latest resolves
 # to, which is what update.sh and the installers follow.
 
@@ -26,25 +27,71 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Worked out once and shared, so the string compiled into the binary and
-  # written into .version cannot disagree with the tag the release ends up
-  # under. Computing it in both places races across UTC midnight.
+  # Works out the version once and decides whether this push earns a release.
+  #
+  # The version is shared rather than recomputed, because working it out in both
+  # the build and release jobs races across UTC midnight and would tag a release
+  # differently from the string compiled into the binary.
   version:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.pick.outputs.version }}
       release: ${{ steps.pick.outputs.release }}
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - id: pick
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "version=$(date -u +%Y.%m.%d)-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
-            echo "release=true" >> $GITHUB_OUTPUT
-          else
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             # Not published anywhere, and update.sh refuses to overwrite a
             # binary versioned this way.
             echo "version=dev-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
             echo "release=false" >> $GITHUB_OUTPUT
+            echo "pull request, building without publishing"
+            exit 0
+          fi
+
+          echo "version=$(date -u +%Y.%m.%d)-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+
+          # A manual run always publishes. That is the escape hatch if the
+          # filter below ever skips something it should not have.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "release=true" >> $GITHUB_OUTPUT
+            echo "manual run, publishing"
+            exit 0
+          fi
+
+          before='${{ github.event.before }}'
+          if [ -z "$before" ] \
+             || [ "$before" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$before^{commit}" 2>/dev/null; then
+            echo "release=true" >> $GITHUB_OUTPUT
+            echo "cannot tell what changed, publishing rather than silently skipping"
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$before" "$GITHUB_SHA")
+          echo "changed in this push:"
+          printf '%s\n' "$changed" | sed 's/^/  /'
+
+          # Anything that is not documentation counts. Listing what to ignore
+          # rather than what to build means an unrecognised path errs towards
+          # publishing, which is the harmless direction. Note that installer.sh,
+          # update.sh, k1/ and themes/ all ship inside the tarball, so they are
+          # source as far as this is concerned.
+          non_doc=$(printf '%s\n' "$changed" | grep -v '^$' \
+            | grep -vE '\.md$|^docs/|^screenshots/|^LICENSE$' || true)
+
+          if [ -n "$non_doc" ]; then
+            echo "release=true" >> $GITHUB_OUTPUT
+            echo "source changed, publishing"
+          else
+            echo "release=false" >> $GITHUB_OUTPUT
+            echo "documentation only, no release for this push"
           fi
 
   build:
