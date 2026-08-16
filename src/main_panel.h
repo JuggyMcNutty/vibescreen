@@ -2,6 +2,7 @@
 #define __MAIN_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "notify_consumer.h"
 #include "sensor_container.h"
 #include "button_container.h"
@@ -58,28 +59,38 @@ class MainPanel : public NotifyConsumer {
 			       lv_color_t color);
   
   static void _handle_homing_cb(lv_event_t *event) {
-    MainPanel *panel = (MainPanel*)event->user_data;
-    panel->handle_homing_cb(event);
+    KGuard::event("MainPanel::_handle_homing_cb", [&] {
+      MainPanel *panel = (MainPanel*)event->user_data;
+      panel->handle_homing_cb(event);
+    });
   };
 
   static void _handle_extrude_cb(lv_event_t *event) {
-    MainPanel *panel = (MainPanel*)event->user_data;
-    panel->handle_extrude_cb(event);
+    KGuard::event("MainPanel::_handle_extrude_cb", [&] {
+      MainPanel *panel = (MainPanel*)event->user_data;
+      panel->handle_extrude_cb(event);
+    });
   };
 
   static void _handle_fanpanel_cb(lv_event_t *event) {
-    MainPanel *panel = (MainPanel*)event->user_data;
-    panel->handle_fanpanel_cb(event);
+    KGuard::event("MainPanel::_handle_fanpanel_cb", [&] {
+      MainPanel *panel = (MainPanel*)event->user_data;
+      panel->handle_fanpanel_cb(event);
+    });
   };
 
   static void _handle_ledpanel_cb(lv_event_t *event) {
-    MainPanel *panel = (MainPanel*)event->user_data;
-    panel->handle_ledpanel_cb(event);
+    KGuard::event("MainPanel::_handle_ledpanel_cb", [&] {
+      MainPanel *panel = (MainPanel*)event->user_data;
+      panel->handle_ledpanel_cb(event);
+    });
   };
 
   static void _handle_print_cb(lv_event_t *event) {
-    MainPanel *panel = (MainPanel*)event->user_data;
-    panel->handle_print_cb(event);
+    KGuard::event("MainPanel::_handle_print_cb", [&] {
+      MainPanel *panel = (MainPanel*)event->user_data;
+      panel->handle_print_cb(event);
+    });
   };
 
  private:

@@ -2,6 +2,7 @@
 #define __SENSOR_CONTAINER_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "numpad.h"
 #include "lvgl/lvgl.h"
 
@@ -43,8 +44,10 @@ class SensorContainer {
   void handle_edit(lv_event_t *event);
 
   static void _handle_edit(lv_event_t *event) {
-    SensorContainer *panel = (SensorContainer*)event->user_data;
-    panel->handle_edit(event);
+    KGuard::event("SensorContainer::_handle_edit", [&] {
+      SensorContainer *panel = (SensorContainer*)event->user_data;
+      panel->handle_edit(event);
+    });
   };
 
  private:

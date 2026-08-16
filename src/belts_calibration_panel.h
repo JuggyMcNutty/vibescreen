@@ -2,6 +2,7 @@
 #define __BELTS_CALIBRATION_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
 
@@ -19,18 +20,24 @@ class BeltsCalibrationPanel {
   void handle_update_slider(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {
-    BeltsCalibrationPanel *panel = (BeltsCalibrationPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("BeltsCalibrationPanel::_handle_callback", [&] {
+      BeltsCalibrationPanel *panel = (BeltsCalibrationPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
   
   static void _handle_image_clicked(lv_event_t *event) {
-    BeltsCalibrationPanel *panel = (BeltsCalibrationPanel*)event->user_data;
-    panel->handle_image_clicked(event);
+    KGuard::event("BeltsCalibrationPanel::_handle_image_clicked", [&] {
+      BeltsCalibrationPanel *panel = (BeltsCalibrationPanel*)event->user_data;
+      panel->handle_image_clicked(event);
+    });
   };
 
   static void _handle_update_slider(lv_event_t *event) {
-    BeltsCalibrationPanel *panel = (BeltsCalibrationPanel*)event->user_data;
-    panel->handle_update_slider(event);
+    KGuard::event("BeltsCalibrationPanel::_handle_update_slider", [&] {
+      BeltsCalibrationPanel *panel = (BeltsCalibrationPanel*)event->user_data;
+      panel->handle_update_slider(event);
+    });
   };
 
  private:

@@ -2,6 +2,7 @@
 #define __PRINTERTUNE_PANEL_H__
 
 #include "finetune_panel.h"
+#include "event_guard.h"
 #include "limits_panel.h"
 #include "bedmesh_panel.h"
 #include "inputshaper_panel.h"
@@ -25,8 +26,10 @@ class PrinterTunePanel {
   void handle_callback(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {
-    PrinterTunePanel *panel = (PrinterTunePanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("PrinterTunePanel::_handle_callback", [&] {
+      PrinterTunePanel *panel = (PrinterTunePanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
  private:

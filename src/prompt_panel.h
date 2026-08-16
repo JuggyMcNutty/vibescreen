@@ -2,6 +2,7 @@
 #define __PROMPT_PANEL_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 #include "websocket_client.h"
 #include "notify_consumer.h"
 #include "button_container.h"
@@ -27,8 +28,10 @@ class PromptPanel : public NotifyConsumer {
         void handle_callback(lv_event_t *event);
 
         static void _handle_callback(lv_event_t *event) {
-            PromptPanel *panel = (PromptPanel*)event->user_data;
-            panel->handle_callback(event);
+          KGuard::event("PromptPanel::_handle_callback", [&] {
+              PromptPanel *panel = (PromptPanel*)event->user_data;
+              panel->handle_callback(event);
+          });
         };
 
         void foreground();

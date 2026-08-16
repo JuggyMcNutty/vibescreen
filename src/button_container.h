@@ -2,6 +2,7 @@
 #define __BUTTON_CONTAINER_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 
 #include <string>
 #include <functional>
@@ -31,8 +32,10 @@ class ButtonContainer {
   void run_callback();
   
   static void _handle_callback(lv_event_t *event) {
-    ButtonContainer *button_container = (ButtonContainer*)event->user_data;
-    button_container->handle_callback(event);
+    KGuard::event("ButtonContainer::_handle_callback", [&] {
+      ButtonContainer *button_container = (ButtonContainer*)event->user_data;
+      button_container->handle_callback(event);
+    });
   };
 
  private:

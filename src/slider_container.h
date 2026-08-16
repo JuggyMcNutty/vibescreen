@@ -2,6 +2,7 @@
 #define __SLIDER_CONTAINER_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 #include "button_container.h"
 
 #include <string>
@@ -53,8 +54,10 @@ class SliderContainer {
   void handle_value_update(lv_event_t *event);
 
   static void _handle_value_update(lv_event_t *event) {
-    SliderContainer *obj = (SliderContainer*)event->user_data;
-    obj->handle_value_update(event);
+    KGuard::event("SliderContainer::_handle_value_update", [&] {
+      SliderContainer *obj = (SliderContainer*)event->user_data;
+      obj->handle_value_update(event);
+    });
   };
   
 

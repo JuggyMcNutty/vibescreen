@@ -2,6 +2,7 @@
 #define __FAN_PANEL_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 #include "websocket_client.h"
 #include "notify_consumer.h"
 #include "slider_container.h"
@@ -27,23 +28,31 @@ class FanPanel : public NotifyConsumer {
   void handle_fan_update_generic(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {
-    FanPanel *panel = (FanPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("FanPanel::_handle_callback", [&] {
+      FanPanel *panel = (FanPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
   static void _handle_fan_update(lv_event_t *event) {
-    FanPanel *panel = (FanPanel*)event->user_data;
-    panel->handle_fan_update(event);
+    KGuard::event("FanPanel::_handle_fan_update", [&] {
+      FanPanel *panel = (FanPanel*)event->user_data;
+      panel->handle_fan_update(event);
+    });
   };
 
   static void _handle_fan_update_part_fan(lv_event_t *event) {
-    FanPanel *panel = (FanPanel*)event->user_data;
-    panel->handle_fan_update_part_fan(event);
+    KGuard::event("FanPanel::_handle_fan_update_part_fan", [&] {
+      FanPanel *panel = (FanPanel*)event->user_data;
+      panel->handle_fan_update_part_fan(event);
+    });
   };
   
   static void _handle_fan_update_generic(lv_event_t *event) {
-    FanPanel *panel = (FanPanel*)event->user_data;
-    panel->handle_fan_update_generic(event);
+    KGuard::event("FanPanel::_handle_fan_update_generic", [&] {
+      FanPanel *panel = (FanPanel*)event->user_data;
+      panel->handle_fan_update_generic(event);
+    });
   };
 
  private:

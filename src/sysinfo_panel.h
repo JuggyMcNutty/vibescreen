@@ -2,6 +2,7 @@
 #define __SYSINFO_PANEL_H__
 
 #include "button_container.h"
+#include "event_guard.h"
 #include "lvgl/lvgl.h"
 
 #include <vector>
@@ -16,8 +17,10 @@ class SysInfoPanel {
   void handle_callback(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {
-    SysInfoPanel *panel = (SysInfoPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("SysInfoPanel::_handle_callback", [&] {
+      SysInfoPanel *panel = (SysInfoPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
  private:

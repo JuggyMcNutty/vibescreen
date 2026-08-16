@@ -2,6 +2,7 @@
 #define __FINETINE_PANEL_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 #include "button_container.h"
 #include "selector.h"
 #include "image_label.h"
@@ -24,28 +25,38 @@ class FineTunePanel : public NotifyConsumer {
   void consume(json &j);  
   
   static void _handle_callback(lv_event_t *event) {
-    FineTunePanel *panel = (FineTunePanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("FineTunePanel::_handle_callback", [&] {
+      FineTunePanel *panel = (FineTunePanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
   static void _handle_zoffset(lv_event_t *event) {
-    FineTunePanel *panel = (FineTunePanel*)event->user_data;
-    panel->handle_zoffset(event);
+    KGuard::event("FineTunePanel::_handle_zoffset", [&] {
+      FineTunePanel *panel = (FineTunePanel*)event->user_data;
+      panel->handle_zoffset(event);
+    });
   };
 
   static void _handle_pa(lv_event_t *event) {
-    FineTunePanel *panel = (FineTunePanel*)event->user_data;
-    panel->handle_pa(event);
+    KGuard::event("FineTunePanel::_handle_pa", [&] {
+      FineTunePanel *panel = (FineTunePanel*)event->user_data;
+      panel->handle_pa(event);
+    });
   };
 
   static void _handle_speed(lv_event_t *event) {
-    FineTunePanel *panel = (FineTunePanel*)event->user_data;
-    panel->handle_speed(event);
+    KGuard::event("FineTunePanel::_handle_speed", [&] {
+      FineTunePanel *panel = (FineTunePanel*)event->user_data;
+      panel->handle_speed(event);
+    });
   };
   
   static void _handle_flow(lv_event_t *event) {
-    FineTunePanel *panel = (FineTunePanel*)event->user_data;
-    panel->handle_flow(event);
+    KGuard::event("FineTunePanel::_handle_flow", [&] {
+      FineTunePanel *panel = (FineTunePanel*)event->user_data;
+      panel->handle_flow(event);
+    });
   };
 
  private:

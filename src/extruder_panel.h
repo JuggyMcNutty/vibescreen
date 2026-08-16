@@ -2,6 +2,7 @@
 #define __EXTRUDER_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "notify_consumer.h"
 #include "spoolman_panel.h"
 #include "selector.h"
@@ -26,8 +27,10 @@ class ExtruderPanel : public NotifyConsumer {
   void init(json &j);
 
   static void _handle_callback(lv_event_t *event) {
-    ExtruderPanel *panel = (ExtruderPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("ExtruderPanel::_handle_callback", [&] {
+      ExtruderPanel *panel = (ExtruderPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
  private:

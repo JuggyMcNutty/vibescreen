@@ -2,6 +2,7 @@
 #define __WIFI_PANEL_H__
 
 #include "wpa_event.h"
+#include "event_guard.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
 #include <mutex>
@@ -25,18 +26,24 @@ class WifiPanel {
   bool find_current_network();
 
   static void _handle_back_btn(lv_event_t *event) {
-    WifiPanel *panel = (WifiPanel*)event->user_data;
-    panel->handle_back_btn(event);
+    KGuard::event("WifiPanel::_handle_back_btn", [&] {
+      WifiPanel *panel = (WifiPanel*)event->user_data;
+      panel->handle_back_btn(event);
+    });
   };
   
   static void _handle_callback(lv_event_t *event) {
-    WifiPanel *panel = (WifiPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("WifiPanel::_handle_callback", [&] {
+      WifiPanel *panel = (WifiPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
   
   static void _handle_kb_input(lv_event_t *e) {
-    WifiPanel *panel = (WifiPanel*)e->user_data;
-    panel->handle_kb_input(e);
+    KGuard::event("WifiPanel::_handle_kb_input", [&] {
+      WifiPanel *panel = (WifiPanel*)e->user_data;
+      panel->handle_kb_input(e);
+    });
   };
 
  private:

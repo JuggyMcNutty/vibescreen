@@ -2,6 +2,7 @@
 #define __CONSOLE_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "lvgl/lvgl.h"
 
 #include <mutex>
@@ -22,23 +23,31 @@ class ConsolePanel {
   void handle_clear_input(lv_event_t *e);
 
   static void _handle_kb_input(lv_event_t *e) {
-    ConsolePanel *panel = (ConsolePanel*)e->user_data;
-    panel->handle_kb_input(e);
+    KGuard::event("ConsolePanel::_handle_kb_input", [&] {
+      ConsolePanel *panel = (ConsolePanel*)e->user_data;
+      panel->handle_kb_input(e);
+    });
   };
 
   static void _handle_select_macro(lv_event_t *e) {
-    ConsolePanel *panel = (ConsolePanel*)e->user_data;
-    panel->handle_select_macro(e);
+    KGuard::event("ConsolePanel::_handle_select_macro", [&] {
+      ConsolePanel *panel = (ConsolePanel*)e->user_data;
+      panel->handle_select_macro(e);
+    });
   };
 
   static void _handle_send_macro(lv_event_t *e) {
-    ConsolePanel *panel = (ConsolePanel*)e->user_data;
-    panel->handle_send_macro(e);
+    KGuard::event("ConsolePanel::_handle_send_macro", [&] {
+      ConsolePanel *panel = (ConsolePanel*)e->user_data;
+      panel->handle_send_macro(e);
+    });
   };
 
   static void _handle_clear_input(lv_event_t *e) {
-    ConsolePanel *panel = (ConsolePanel*)e->user_data;
-    panel->handle_clear_input(e);
+    KGuard::event("ConsolePanel::_handle_clear_input", [&] {
+      ConsolePanel *panel = (ConsolePanel*)e->user_data;
+      panel->handle_clear_input(e);
+    });
   };
   
  private:

@@ -22,7 +22,15 @@ WARNINGS		:= -Wall -Wextra -Wno-unused-function -Wno-error=strict-prototypes -Wp
 					-Wno-unused-value -Wno-unused-parameter -Wno-missing-field-initializers -Wuninitialized -Wmaybe-uninitialized -Wall -Wextra -Wno-unused-parameter \
 					-Wno-missing-field-initializers -Wtype-limits -Wsizeof-pointer-memaccess -Wno-format-nonliteral -Wpointer-arith -Wno-cast-qual \
 					-Wunreachable-code -Wno-switch-default -Wreturn-type -Wmultichar -Wformat-security -Wno-sign-compare
-CFLAGS 			?= -O3 -g0 -MD -MP -I$(LVGL_DIR)/ $(WARNINGS) 
+# -funwind-tables is needed on the C sources, not just the C++ ones. Panel
+# callbacks are invoked by LVGL, so an exception thrown in one has to unwind
+# back through LVGL's C frames to reach any catch of ours. Without unwind tables
+# in those objects the unwinder gives up and calls std::terminate instead.
+#
+# x86-64 emits them for C by default and mips does not, so leaving this out
+# makes exception handling appear to work in the simulator while doing nothing
+# on the printer.
+CFLAGS 			?= -O3 -g0 -MD -MP -funwind-tables -I$(LVGL_DIR)/ $(WARNINGS)
 LDFLAGS 		?= $(LINK_MODE) -lm -Llibhv/lib -Lspdlog/build -l:libhv.a -latomic -lpthread -Lwpa_supplicant/wpa_supplicant/ -l:libwpa_client.a -lstdc++fs -l:libspdlog.a
 BIN 			= guppyscreen
 BUILD_DIR 		= ./build

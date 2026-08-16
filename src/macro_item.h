@@ -2,6 +2,7 @@
 #define __MACRO_ITEM_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "lvgl/lvgl.h"
 
 #include <string>
@@ -28,18 +29,24 @@ class MacroItem {
   void show();
 
   static void _handle_kb_input(lv_event_t *e) {
-    MacroItem *panel = (MacroItem*)e->user_data;
-    panel->handle_kb_input(e);
+    KGuard::event("MacroItem::_handle_kb_input", [&] {
+      MacroItem *panel = (MacroItem*)e->user_data;
+      panel->handle_kb_input(e);
+    });
   };
 
   static void _handle_send_macro(lv_event_t *e) {
-    MacroItem *panel = (MacroItem*)e->user_data;
-    panel->handle_send_macro(e);
+    KGuard::event("MacroItem::_handle_send_macro", [&] {
+      MacroItem *panel = (MacroItem*)e->user_data;
+      panel->handle_send_macro(e);
+    });
   };
 
   static void _handle_hide_show(lv_event_t *e) {
-    MacroItem *panel = (MacroItem*)e->user_data;
-    panel->handle_hide_show(e);
+    KGuard::event("MacroItem::_handle_hide_show", [&] {
+      MacroItem *panel = (MacroItem*)e->user_data;
+      panel->handle_hide_show(e);
+    });
   };
 
  private:

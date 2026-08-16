@@ -198,9 +198,40 @@ void GuppyScreen::loop() {
 #endif
 
   while (1) {
-    lv_lock.lock();
-    lv_timer_handler();
-    lv_lock.unlock();
+    // lv_timer_handler runs every LVGL timer and dispatches every input event,
+    // so this is where all panel callbacks execute and therefore where a stray
+    // exception from one would surface. Nothing above catches, so that used to
+    // end the process with no log line.
+    //
+    // The lock_guard matters as much as the catch: this was a bare lock and
+    // unlock pair, so a throw skipped the unlock and left the UI deadlocked.
+    // Adding the catch without it would have turned a crash into a hang.
+    //
+    // Exceptions are contained at the event callbacks themselves, see
+    // KGuard::event in event_guard.h. Nothing should reach here.
+    //
+    // If something does, LVGL is already unrecoverable: its timer re-entrancy
+    // guard is left set and its input state machine is interrupted mid gesture,
+    // so carrying on gives a frozen UI that re-dispatches the same event and
+    // floods the log. Both were measured. Log what happened and let the process
+    // die so the init script restarts it, which is the better failure mode on a
+    // printer.
+    //
+    // The lock_guard is not decoration: this was a bare lock and unlock pair, so
+    // a throw would have skipped the unlock and deadlocked the UI.
+    try {
+      std::lock_guard<std::mutex> guard(lv_lock);
+      lv_timer_handler();
+    } catch (const std::exception &e) {
+      spdlog::critical("exception reached the main loop, {}. lvgl cannot be "
+		       "recovered from here, exiting so we get restarted", e.what());
+      spdlog::shutdown();
+      std::abort();
+    } catch (...) {
+      spdlog::critical("unknown exception reached the main loop, exiting so we get restarted");
+      spdlog::shutdown();
+      std::abort();
+    }
 
 #if !defined(SIMULATOR) && !defined(OS_ANDROID)
     if (display_sleep != -1) {

@@ -2,6 +2,7 @@
 #define __POWER_PANEL_H__
 
 #include "button_container.h"
+#include "event_guard.h"
 #include "lvgl/lvgl.h"
 #include "websocket_client.h"
 
@@ -19,8 +20,10 @@ class PowerPanel {
     void handle_callback(lv_event_t *event);
 
     static void _handle_callback(lv_event_t *event) {
-      PowerPanel *panel = (PowerPanel*)event->user_data;
-      panel->handle_callback(event);
+      KGuard::event("PowerPanel::_handle_callback", [&] {
+        PowerPanel *panel = (PowerPanel*)event->user_data;
+        panel->handle_callback(event);
+      });
     };
 
   private:

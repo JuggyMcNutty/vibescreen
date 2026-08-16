@@ -2,6 +2,7 @@
 #define __HOMING_PANEL_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 #include "button_container.h"
 #include "websocket_client.h"
 #include "selector.h"
@@ -21,13 +22,17 @@ class HomingPanel : public NotifyConsumer {
   void handle_selector_cb(lv_event_t *event);
   
   static void _handle_callback(lv_event_t *event) {
-    HomingPanel *panel = (HomingPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("HomingPanel::_handle_callback", [&] {
+      HomingPanel *panel = (HomingPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
   static void _handle_selector_cb(lv_event_t *event) {
-    HomingPanel *panel = (HomingPanel*)event->user_data;
-    panel->handle_selector_cb(event);
+    KGuard::event("HomingPanel::_handle_selector_cb", [&] {
+      HomingPanel *panel = (HomingPanel*)event->user_data;
+      panel->handle_selector_cb(event);
+    });
   };
 
  private:

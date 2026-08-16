@@ -2,6 +2,7 @@
 #define __BEDMESH_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "notify_consumer.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
@@ -27,33 +28,45 @@ class BedMeshPanel : public NotifyConsumer {
   void mesh_draw_cb(lv_event_t *e);
 
   static void _handle_callback(lv_event_t *event) {
-    BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("BedMeshPanel::_handle_callback", [&] {
+      BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
   static void _handle_profile_action(lv_event_t *event) {
-    BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
-    panel->handle_profile_action(event);
+    KGuard::event("BedMeshPanel::_handle_profile_action", [&] {
+      BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
+      panel->handle_profile_action(event);
+    });
   };
   
   static void _handle_prompt_save(lv_event_t *event) {
-    BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
-    panel->handle_prompt_save(event);
+    KGuard::event("BedMeshPanel::_handle_prompt_save", [&] {
+      BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
+      panel->handle_prompt_save(event);
+    });
   };
   
   static void _handle_prompt_cancel(lv_event_t *event) {
-    BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
-    panel->handle_prompt_cancel(event);
+    KGuard::event("BedMeshPanel::_handle_prompt_cancel", [&] {
+      BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
+      panel->handle_prompt_cancel(event);
+    });
   };
 
   static void _handle_kb_input(lv_event_t *e) {
-    BedMeshPanel *panel = (BedMeshPanel*)e->user_data;
-    panel->handle_kb_input(e);
+    KGuard::event("BedMeshPanel::_handle_kb_input", [&] {
+      BedMeshPanel *panel = (BedMeshPanel*)e->user_data;
+      panel->handle_kb_input(e);
+    });
   };
 
   static void _mesh_draw_cb(lv_event_t *e) {
-    BedMeshPanel *panel = (BedMeshPanel*)e->user_data;
-    panel->mesh_draw_cb(e);
+    KGuard::event("BedMeshPanel::_mesh_draw_cb", [&] {
+      BedMeshPanel *panel = (BedMeshPanel*)e->user_data;
+      panel->mesh_draw_cb(e);
+    });
   };
 
  private:

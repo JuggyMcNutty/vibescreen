@@ -2,6 +2,7 @@
 #define __SPOOLMAN_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "notify_consumer.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
@@ -23,13 +24,17 @@ class SpoolmanPanel {
   void handle_spoolman_action(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {
-    SpoolmanPanel *panel = (SpoolmanPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("SpoolmanPanel::_handle_callback", [&] {
+      SpoolmanPanel *panel = (SpoolmanPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
   
   static void _handle_spoolman_action(lv_event_t *event) {
-    SpoolmanPanel *panel = (SpoolmanPanel*)event->user_data;
-    panel->handle_spoolman_action(event);
+    KGuard::event("SpoolmanPanel::_handle_spoolman_action", [&] {
+      SpoolmanPanel *panel = (SpoolmanPanel*)event->user_data;
+      panel->handle_spoolman_action(event);
+    });
   };
 
  private:

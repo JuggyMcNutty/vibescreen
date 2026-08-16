@@ -2,6 +2,7 @@
 #define __NUMPAD_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 #include <functional>
 
 class Numpad {
@@ -15,8 +16,10 @@ class Numpad {
   void foreground_reset();
 
   static void _handle_input(lv_event_t *event) {
-    Numpad *panel = (Numpad*)event->user_data;
-    panel->handle_input(event);
+    KGuard::event("Numpad::_handle_input", [&] {
+      Numpad *panel = (Numpad*)event->user_data;
+      panel->handle_input(event);
+    });
   };
 
   /* static void _handle_defocused(lv_event_t *event) { */

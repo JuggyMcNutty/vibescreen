@@ -2,6 +2,7 @@
 #define __INPUTSHAPER_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
 
@@ -20,18 +21,24 @@ class InputShaperPanel {
   void handle_update_slider(lv_event_t *event);
   
   static void _handle_callback(lv_event_t *event) {
-    InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("InputShaperPanel::_handle_callback", [&] {
+      InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
   static void _handle_image_clicked(lv_event_t *event) {
-    InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
-    panel->handle_image_clicked(event);
+    KGuard::event("InputShaperPanel::_handle_image_clicked", [&] {
+      InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
+      panel->handle_image_clicked(event);
+    });
   };
 
   static void _handle_update_slider(lv_event_t *event) {
-    InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
-    panel->handle_update_slider(event);
+    KGuard::event("InputShaperPanel::_handle_update_slider", [&] {
+      InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
+      panel->handle_update_slider(event);
+    });
   };
 
   uint32_t find_shaper_index(const std::vector<std::string> &s,

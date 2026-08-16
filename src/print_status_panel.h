@@ -2,6 +2,7 @@
 #define __PRINT_STATUS_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "notify_consumer.h"
 #include "button_container.h"
 #include "image_label.h"
@@ -29,8 +30,10 @@ class PrintStatusPanel : public NotifyConsumer {
   void handle_callback(lv_event_t *event);
   
   static void _handle_callback(lv_event_t *event) {
-    PrintStatusPanel *panel = (PrintStatusPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("PrintStatusPanel::_handle_callback", [&] {
+      PrintStatusPanel *panel = (PrintStatusPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
   void consume(json &j);

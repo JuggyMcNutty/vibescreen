@@ -2,6 +2,7 @@
 #define __LIMITS_PANEL_H__
 
 #include "slider_container.h"
+#include "event_guard.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
 #include "websocket_client.h"
@@ -21,8 +22,10 @@ class LimitsPanel : public NotifyConsumer {
   void handle_callback(lv_event_t *event);
   
   static void _handle_callback(lv_event_t *event) {
-    LimitsPanel *panel = (LimitsPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("LimitsPanel::_handle_callback", [&] {
+      LimitsPanel *panel = (LimitsPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
  private:

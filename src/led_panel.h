@@ -2,6 +2,7 @@
 #define __LED_PANEL_H__
 
 #include "lvgl/lvgl.h"
+#include "event_guard.h"
 #include "websocket_client.h"
 #include "notify_consumer.h"
 #include "slider_container.h"
@@ -25,18 +26,24 @@ class LedPanel : public NotifyConsumer {
   void handle_led_update_generic(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {
-    LedPanel *panel = (LedPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("LedPanel::_handle_callback", [&] {
+      LedPanel *panel = (LedPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
   static void _handle_led_update(lv_event_t *event) {
-    LedPanel *panel = (LedPanel*)event->user_data;
-    panel->handle_led_update(event);
+    KGuard::event("LedPanel::_handle_led_update", [&] {
+      LedPanel *panel = (LedPanel*)event->user_data;
+      panel->handle_led_update(event);
+    });
   };
 
   static void _handle_led_update_generic(lv_event_t *event) {
-    LedPanel *panel = (LedPanel*)event->user_data;
-    panel->handle_led_update_generic(event);
+    KGuard::event("LedPanel::_handle_led_update_generic", [&] {
+      LedPanel *panel = (LedPanel*)event->user_data;
+      panel->handle_led_update_generic(event);
+    });
   };
 
 

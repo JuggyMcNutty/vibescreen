@@ -2,6 +2,7 @@
 #define __MACROS_PANEL_H__
 
 #include "websocket_client.h"
+#include "event_guard.h"
 #include "macro_item.h"
 #include "lvgl/lvgl.h"
 
@@ -18,8 +19,10 @@ class MacrosPanel {
   void handle_hide_show(lv_event_t *e);
 
   static void _handle_hide_show(lv_event_t *e) {
-    MacrosPanel *panel = (MacrosPanel*)e->user_data;
-    panel->handle_hide_show(e);
+    KGuard::event("MacrosPanel::_handle_hide_show", [&] {
+      MacrosPanel *panel = (MacrosPanel*)e->user_data;
+      panel->handle_hide_show(e);
+    });
   };
 
  private:

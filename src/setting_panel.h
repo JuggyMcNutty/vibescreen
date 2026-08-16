@@ -2,6 +2,7 @@
 #define __SETTING_PANEL_H__
 
 #include "platform.h"
+#include "event_guard.h"
 
 #ifndef OS_ANDROID
 #include "wifi_panel.h"
@@ -27,8 +28,10 @@ class SettingPanel {
   void handle_callback(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {
-    SettingPanel *panel = (SettingPanel*)event->user_data;
-    panel->handle_callback(event);
+    KGuard::event("SettingPanel::_handle_callback", [&] {
+      SettingPanel *panel = (SettingPanel*)event->user_data;
+      panel->handle_callback(event);
+    });
   };
 
  private:
