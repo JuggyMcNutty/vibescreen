@@ -13,91 +13,73 @@ Dependencies:
    Handles wireless connections
 
 ## Toolchains
-The Guppy Screen uses features (filesystem) from C++17, so a gcc/g++ version (7.2+) with C++17 support is required.
 
-### Environment Variables
-`CROSS_COMPILE` - The prefix to the toolchain architecture, e.g. `mips-linux-gnu-`
-`SIMULATION` - Define it to build with SDL for running on your local machine.
-`ZBOLT` - Define it to use the Z-Bolt icon set. By default the build uses the Material Design Icons.
-`GUPPYSCREEN_VERSION` - Version string displayed in the System Panel in the UI.
+Guppy Screen uses C++17, so gcc/g++ 7.2 or newer is required.
 
-### Build Environment
+> The toolchain instructions here used to point at the Ingenic
+> `mips-gcc720-glibc229` toolchain. That was already wrong: it produces a
+> dynamically linked binary that only runs on firmware shipping glibc 2.29,
+> which is why the installer has to check for `/lib/ld-2.29.so` before it will
+> install. Every nightly since `a42427cb` has been built by CI against a Bootlin
+> musl toolchain and linked statically. See `AGENTS.md` for the full history.
 
-#### Ubuntu and Debian
-For Ubuntu/Debian install build essentials and libsdl2-dev packages.
+### Environment variables
 
-`sudo apt-get install -y build-essential cmake libsdl2-dev`
+`CROSS_COMPILE` - toolchain prefix, `mipsel-linux-` for the K1 family
+`GUPPY_THEME` - `material` (default) or `zbolt`
+`GUPPY_ROTATE` - set for the K1/Max, whose panel is portrait
+`GUPPY_SMALL_SCREEN` - set for panels under 800px on the long edge
+`EVDEV_CALIBRATE` - set where the touch panel needs calibration
+`GUPPYSCREEN_VERSION` - version string shown in the System panel
+`NPROC` - cap the parallelism of the vendored library builds
 
-#### Arch and Derivatives
+The SDL simulator is selected by `CROSS_COMPILE` being unset, not by a variable
+of its own.
 
-For Arch and derivatives install 'base-devel' and 'sdl2' packages.
+### Build environment
 
-`sudo pacman -S base-devel cmake sdl2`
+Ubuntu and Debian:
 
-#### Mipsel Tool chain
+    sudo apt-get install -y build-essential cmake libsdl2-dev
 
-To build guppyscreen for Mipsel (Ingenic X2000E) - specific to the K1 SoC, you will need the mips-gcc720 tool chain.
+Arch and derivatives (`sdl2` is `sdl2-compat` on current Arch):
 
-1. Download the toolchain [here](https://github.com/ballaswag/k1-discovery/releases/download/1.0.0/mips-gcc720-glibc229.tar.gz)
-2. `tar xf mips-gcc720-glibc229.tar.gz && export PATH=<path-to-mips-toolchain/bin>:$PATH`
+    sudo pacman -S base-devel cmake sdl2-compat
 
-### The Code
+### Building
 
-Clone the guppyscreen repo (and submodules) and apply a couple of patches locally.
+    git clone --recursive <your fork> && cd guppyscreen
+    scripts/setup-toolchain.sh      # downloads the cross toolchain, once
+    scripts/build.sh mips           # K1 / K1 Max
+    scripts/build.sh sim            # x86_64 SDL build for this machine
 
-1. `git clone --recursive https://github.com/ballaswag/guppyscreen && cd guppyscreen`
-2. `(cd lv_drivers/ && git apply ../patches/0001-lv_driver_fb_ioctls.patch)`
-3. `(cd spdlog/ && git apply ../patches/0002-spdlog_fmt_initializer_list.patch)`
+`scripts/build.sh` applies the patches in `patches/`, builds the vendored
+libraries if they are missing, rebuilds them when you switch target, and picks
+the right flags per target. The executable is `./build/bin/guppyscreen`.
 
-### Mipsel (Ingenic X2000E) - specific to the K1 SoC
-Building for the K1/Max
+Variants:
 
-1. `export CROSS_COMPILE=mips-linux-gnu-`
-2. `make clean && make -j$(nproc) build`
+    scripts/build.sh mips zbolt     # Z-Bolt icon set
+    scripts/build.sh mips --clean   # rebuild the vendored libraries too
 
-After an initial `make build`, you can make changes to src guppy files and then use `make` to compile the files that need compiling.
-
-The executable is ./build/bin/guppyscreen
-
-### x86_64 (Intel/AMD)
-Building and running Guppy Screen on your local machine speeds up development. Changes can be tested on the local machine before rebuilding for the other architectures.
-
-1. `unset CROSS_COMPILE`
-2. `make clean && make -j$(nproc) build`
-
-After an initial `make build`, you can make changes to src guppy files and then use `make` to compile the files that need compiling.
-
-The executable is ./build/bin/guppyscreen
+Driving `make` directly still works, but then applying `patches/` and setting
+the flags is on you. `scripts/apply-patches.sh` is idempotent and safe to run
+at any time.
 
 ### Simulation
-Guppy Screen default configurations (guppyconfig.json) is configured for the K1/Max. In order to run it remotely as a simulator build, a few thing needs to be setup.
-The following attributes need to be configured in `build/bin/guppyconfig.json`
 
-1. `log_path` - Absolute path to `guppyscreen.log`. Directory must exist locally.
-2. `thumbnail_path` - Absolute path to a local directory for storing gcode thumbnails.
-3. `moonraker_host` - Moonraker IP address
-4. `moonraker_port` - Moonraker Port
-5. `wpa_supplicant` - Path to the wpa_supplicant socket (usually under /var/run/wpa_supplicant/)
+`scripts/build.sh sim` writes a working `build/bin/guppyconfig.json` on the
+first build if there is not one already. Point it at a printer with:
 
-```
-{
-  "default_printer": "k1",
-  "log_path": "<local_path_to_guppyscreen.log>",
-  "printers": {
-    "k1": {
-      "display_sleep_sec": 300,
-      "moonraker_api_key": false,
-      "moonraker_host": "<remote_ip_to_moonraker>",
-      "moonraker_port": <moonraker_port_if_not_7125>
-    }
-  },
-  "thumbnail_path": "<local_path_to_thumbnail_directory_for_storing_gcode_thumbs>",
-  "wpa_supplicant": "<path_to_the_wireless_interface_wpa_supplicant_socket-e.g. /var/run/wpa_supplicant/wlo1>"
-}
+    PRINTER_HOST=<printer ip> scripts/build.sh sim
 
-```
+Log and thumbnail paths default to directories beside the binary in simulator
+builds, so nothing needs `/usr/data` to exist.
 
-Note: Guppy Screen currently requires running as `root` because it directly interacts with wpa_supplicant.
+To test against something other than a real printer, `tools/fake_moonraker.py`
+speaks enough of the Moonraker protocol for the UI to start, and can be told to
+reject gcode so error handling can be exercised. Use it for anything that would
+otherwise command real hardware.
 
 ### Virtual Klipper
 
