@@ -80,11 +80,20 @@ void Config::init(std::string config_path, const std::string thumbdir) {
   json extrude_lengths_conf = {5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200};
   json extrude_speeds_conf = {1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 40, 50};
 
+  // /usr/data only exists on the printer. A simulator build defaulted its log
+  // there too, where it cannot be written, so put it beside the config instead.
+#ifdef SIMULATOR
+  std::string default_log_path =
+    (fs::path(config_path).parent_path() / "guppyscreen.log").string();
+#else
+  std::string default_log_path = "/usr/data/printer_data/logs/guppyscreen.log";
+#endif
+
   if (stat(config_path.c_str(), &buffer) == 0) {
     data = json::parse(std::fstream(config_path));
   } else {
     data = {
-        {"log_path", "/usr/data/printer_data/logs/guppyscreen.log"},
+        {"log_path", default_log_path},
         {"thumbnail_path", thumbdir},
         {"wpa_supplicant", "/var/run/wpa_supplicant"},
         {"display_sleep_sec", 600}

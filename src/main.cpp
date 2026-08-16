@@ -36,12 +36,24 @@ using namespace hv;
 
 int main(void)
 {
-    // config
-    spdlog::debug("current path {}", std::string(fs::canonical("/proc/self/exe").parent_path()));
-
     Config *conf = Config::get_instance();
-    auto config_path = fs::canonical("/proc/self/exe").parent_path() / "guppyconfig.json";
-    conf->init(config_path.string(), "/usr/data/printer_data/thumbnails");
+    auto exe_dir = fs::canonical("/proc/self/exe").parent_path();
+    auto config_path = exe_dir / "guppyconfig.json";
+
+    // Only the printer has /usr/data. A simulator build put its thumbnails
+    // there anyway, which is not writable on a desktop, so default to a
+    // directory beside the binary instead.
+#ifdef SIMULATOR
+    auto thumbnail_path = (exe_dir / "thumbnails").string();
+#else
+    auto thumbnail_path = std::string("/usr/data/printer_data/thumbnails");
+#endif
+
+    conf->init(config_path.string(), thumbnail_path);
+
+    // Logged after Config::init, which is what installs the sinks and sets the
+    // level. Before that this went to the default logger and was dropped.
+    spdlog::debug("current path {}", std::string(exe_dir));
 
     GuppyScreen::init(hal_init);
     GuppyScreen::loop();
