@@ -24,9 +24,7 @@ LV_IMG_DECLARE(print);
 SettingPanel::SettingPanel(KWebSocketClient &c, std::mutex &l, lv_obj_t *parent, SpoolmanPanel &sm)
   : ws(c)
   , cont(lv_obj_create(parent))
-#ifndef OS_ANDROID
   , wifi_panel(l)
-#endif
   , sysinfo_panel()
   , spoolman_panel(sm)
   , wifi_btn(cont, &network_img, "WIFI", &SettingPanel::_handle_callback, this)
@@ -46,9 +44,6 @@ SettingPanel::SettingPanel(KWebSocketClient &c, std::mutex &l, lv_obj_t *parent,
   lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
 
   spoolman_btn.disable();
-#ifdef OS_ANDROID
-  wifi_btn.disable();
-#endif
 
   static lv_coord_t grid_main_row_dsc[] = {LV_GRID_FR(2), LV_GRID_FR(5), LV_GRID_FR(5), LV_GRID_TEMPLATE_LAST};
   static lv_coord_t grid_main_col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
@@ -87,9 +82,7 @@ void SettingPanel::handle_callback(lv_event_t *event) {
 
     if (btn == wifi_btn.get_container()) {
       spdlog::trace("wifi pressed");
-#ifndef OS_ANDROID
       wifi_panel.foreground();
-#endif
     } else if (btn == sysinfo_btn.get_container()) {
       spdlog::trace("setting system info pressed");
       sysinfo_panel.foreground();

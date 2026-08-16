@@ -1,5 +1,4 @@
 #include "config.h"
-#include "platform.h"
 
 #include <sys/stat.h>
 #include <fstream>
@@ -96,9 +95,8 @@ void Config::init(std::string config_path, const std::string thumbdir) {
         {"log_path", default_log_path},
         {"thumbnail_path", thumbdir},
         {"wpa_supplicant", "/var/run/wpa_supplicant"},
-        {"display_sleep_sec", 600}
-#ifndef OS_ANDROID
-        , {"default_printer", "k1"},
+        {"display_sleep_sec", 600},
+        {"default_printer", "k1"},
         {"printers", {{"k1", {
                                  {"moonraker_api_key", false},
                                  {"moonraker_host", "127.0.0.1"},
@@ -108,7 +106,6 @@ void Config::init(std::string config_path, const std::string thumbdir) {
                                  {"default_macros", default_macros_conf},
                              }}}
         }
-#endif
     };
   }
 

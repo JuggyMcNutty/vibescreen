@@ -2,16 +2,10 @@
 
 #include "config.h"
 #include "utils.h"
-#ifndef OS_ANDROID
-  #include "lv_drivers/display/fbdev.h"
-  #include "lv_drivers/indev/evdev.h"
-  
-  #include "spdlog/sinks/rotating_file_sink.h"
-  #include "spdlog/sinks/stdout_sinks.h"
-
-#else
-  #include "spdlog/sinks/android_sink.h"
-#endif
+#include "lv_drivers/display/fbdev.h"
+#include "lv_drivers/indev/evdev.h"
+#include "spdlog/sinks/rotating_file_sink.h"
+#include "spdlog/sinks/stdout_sinks.h"
 
 #include "printer_select_panel.h"
 #include "spdlog/spdlog.h"
@@ -25,9 +19,7 @@ lv_style_t GuppyScreen::style_imgbtn_pressed;
 lv_style_t GuppyScreen::style_imgbtn_disabled;
 lv_theme_t GuppyScreen::th_new;
 
-#ifndef OS_ANDROID
 lv_obj_t *GuppyScreen::screen_saver = NULL;
-#endif
 
 KWebSocketClient GuppyScreen::ws(NULL);
 
@@ -77,16 +69,10 @@ GuppyScreen *GuppyScreen::init(std::function<void(lv_color_t, lv_color_t)> hal_i
           ? lv_color_hex(0xF44336)
           : lv_color_hex(KUtils::parse_hex(theme_conf->get<std::string>("/secondary_color"), 0xF44336));
 
-#ifndef OS_ANDROID
   auto console_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
       conf->get<std::string>("/log_path"), 1048576 * 10, 3);
   spdlog::sinks_init_list log_sinks{console_sink, file_sink};
-
-#else
-  auto android_sink = std::make_shared<spdlog::sinks::android_sink_mt>();
-  spdlog::sinks_init_list log_sinks{android_sink};
-#endif  // OS_ANDROID
 
   auto klogger = std::make_shared<spdlog::logger>("guppyscreen", log_sinks);
   spdlog::register_logger(klogger);
@@ -103,11 +89,11 @@ GuppyScreen *GuppyScreen::init(std::function<void(lv_color_t, lv_color_t)> hal_i
   /*LittlevGL init*/
   lv_init();
 
-#if !defined(SIMULATOR) && !defined(OS_ANDROID)
+#ifndef SIMULATOR
   /*Linux frame buffer device init*/
   fbdev_init();
   fbdev_unblank();
-#endif  // OS_ANDROID
+#endif  // SIMULATOR
 
   hal_init(primary_color, secondary_color);
   lv_png_init();
@@ -154,7 +140,6 @@ GuppyScreen *GuppyScreen::init(std::function<void(lv_color_t, lv_color_t)> hal_i
     gs->connect_ws(ws_url);
   }
 
-#ifndef OS_ANDROID
   screen_saver = lv_obj_create(lv_scr_act());
 
   lv_obj_set_size(screen_saver, LV_PCT(100), LV_PCT(100));
@@ -185,29 +170,19 @@ GuppyScreen *GuppyScreen::init(std::function<void(lv_color_t, lv_color_t)> hal_i
       }
     }
   }
-#endif // OS_ANDROID
 
   return gs;
 }
 
 void GuppyScreen::loop() {
   /*Handle LitlevGL tasks (tickless mode)*/
-#if !defined(SIMULATOR) && !defined(OS_ANDROID)
+#ifndef SIMULATOR
   std::atomic_bool is_sleeping(false);
   Config *conf = Config::get_instance();
   int32_t display_sleep = conf->get<int32_t>("/display_sleep_sec") * 1000;
 #endif
 
   while (1) {
-    // lv_timer_handler runs every LVGL timer and dispatches every input event,
-    // so this is where all panel callbacks execute and therefore where a stray
-    // exception from one would surface. Nothing above catches, so that used to
-    // end the process with no log line.
-    //
-    // The lock_guard matters as much as the catch: this was a bare lock and
-    // unlock pair, so a throw skipped the unlock and left the UI deadlocked.
-    // Adding the catch without it would have turned a crash into a hang.
-    //
     // Exceptions are contained at the event callbacks themselves, see
     // KGuard::event in event_guard.h. Nothing should reach here.
     //
@@ -234,7 +209,7 @@ void GuppyScreen::loop() {
       std::abort();
     }
 
-#if !defined(SIMULATOR) && !defined(OS_ANDROID)
+#ifndef SIMULATOR
     if (display_sleep != -1) {
       if (lv_disp_get_inactive_time(NULL) > display_sleep) {
         if (!is_sleeping.load()) {
@@ -253,7 +228,7 @@ void GuppyScreen::loop() {
         }
       }
     }
-#endif  // SIMULATOR/OS_ANDROID
+#endif  // SIMULATOR
 
     usleep(5000);
   }

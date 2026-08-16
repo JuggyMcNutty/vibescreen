@@ -1,5 +1,4 @@
 #include "theme.h"
-#include "platform.h"
 
 #include <sys/stat.h>
 #include <fstream>

@@ -8,7 +8,6 @@
 #include "lv_tc_screen.h"
 #include "lvgl/lvgl.h"
 
-#include "platform.h"
 #include "init_panel.h"
 #include "main_panel.h"
 #include "spoolman_panel.h"
@@ -22,9 +21,7 @@ class GuppyScreen {
   static lv_style_t style_imgbtn_pressed;
   static lv_style_t style_imgbtn_disabled;
   static lv_theme_t th_new;
-#ifndef OS_ANDROID
   static lv_obj_t *screen_saver;
-#endif
   static std::mutex lv_lock;
   static KWebSocketClient ws;
   // At most one error dialog at a time, see show_error.

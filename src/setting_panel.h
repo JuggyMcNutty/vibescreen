@@ -1,12 +1,9 @@
 #ifndef __SETTING_PANEL_H__
 #define __SETTING_PANEL_H__
 
-#include "platform.h"
 #include "event_guard.h"
 
-#ifndef OS_ANDROID
 #include "wifi_panel.h"
-#endif
 
 #include "sysinfo_panel.h"
 #include "spoolman_panel.h"
@@ -38,9 +35,7 @@ class SettingPanel {
   KWebSocketClient &ws;
   lv_obj_t *cont;
 
-#ifndef OS_ANDROID
   WifiPanel wifi_panel;
-#endif
 
   SysInfoPanel sysinfo_panel;
   SpoolmanPanel &spoolman_panel;
