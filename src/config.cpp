@@ -65,6 +65,21 @@ void Config::init(std::string config_path, const std::string thumbdir) {
     {"unload_filament", "_GUPPY_QUIT_MATERIAL"}
   };
 
+  // Options offered on the extruder panel. Wide enough to cover exotic
+  // filaments: PC and nylon blends want 260 to 300, PPS-CF and similar go
+  // higher still, and composite purges need far more than the 35mm this used
+  // to top out at.
+  //
+  // These are only what the UI offers. What the printer will actually accept
+  // is read from the live Klipper config at runtime and anything out of range
+  // is greyed out, so a generous list here is safe on a smaller hotend.
+  //
+  // The panel splits each list in half to make two rows, so an even count
+  // gives an even layout.
+  json extrude_temps_conf = {170, 190, 200, 210, 220, 230, 240, 250, 260, 280, 300, 320};
+  json extrude_lengths_conf = {5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200};
+  json extrude_speeds_conf = {1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 40, 50};
+
   if (stat(config_path.c_str(), &buffer) == 0) {
     data = json::parse(std::fstream(config_path));
   } else {
@@ -112,6 +127,24 @@ void Config::init(std::string config_path, const std::string thumbdir) {
       if (!default_macros.contains("cooldown")) {
         default_macros.merge_patch(cooldown_conf);
       }
+    }
+
+    // Backfilled rather than only set in the defaults block above, because
+    // that block is skipped entirely when a config file already exists. An
+    // upgrade would otherwise land on empty extruder selectors.
+    auto &extrude_temps = data[json::json_pointer(df() + "extrude_temps")];
+    if (extrude_temps.is_null()) {
+      data[json::json_pointer(df() + "extrude_temps")] = extrude_temps_conf;
+    }
+
+    auto &extrude_lengths = data[json::json_pointer(df() + "extrude_lengths")];
+    if (extrude_lengths.is_null()) {
+      data[json::json_pointer(df() + "extrude_lengths")] = extrude_lengths_conf;
+    }
+
+    auto &extrude_speeds = data[json::json_pointer(df() + "extrude_speeds")];
+    if (extrude_speeds.is_null()) {
+      data[json::json_pointer(df() + "extrude_speeds")] = extrude_speeds_conf;
     }
 
     auto &guppy_init = data["/guppy_init_script"_json_pointer];
