@@ -327,15 +327,23 @@ void BedMeshPanel::handle_callback(lv_event_t *event) {
     
   } else if (btn == calibrate_btn.get_container()) {
     spdlog::trace("mesh calibrate pressed");
+    // Probing needs all three axes homed, Z included, because the probe lifts
+    // to horizontal_move_z before it starts. The old test was for the exact
+    // string "xy", which got it wrong both ways round: it skipped homing in
+    // the one state that cannot probe, and re-homed the fully homed printer
+    // that Klipper reports as "xyz" after any print.
     auto v = State::get_instance()
       ->get_data("/printer_state/toolhead/homed_axes"_json_pointer);
     if (!v.is_null()) {
-      if (v.template get<std::string>() == "xy") {
+      const auto homed = v.template get<std::string>();
+      if (homed.find('x') != std::string::npos &&
+	  homed.find('y') != std::string::npos &&
+	  homed.find('z') != std::string::npos) {
 	ws.gcode_script("BED_MESH_CALIBRATE");
 	return;
       }
     }
-    ws.gcode_script("G28 X Y Z\nBED_MESH_CALIBRATE");
+    ws.gcode_script("G28\nBED_MESH_CALIBRATE");
 
   } else if (btn == back_btn.get_container()) {
     spdlog::trace("back button pressed");
