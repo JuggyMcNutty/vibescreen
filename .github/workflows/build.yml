@@ -107,13 +107,20 @@ jobs:
             exit 1
           fi
 
-      # GUPPY_THEME has to be set here too. scripts/build.sh exports it for the
-      # compile, but release.sh runs in a fresh shell and writes it into
-      # .version, which was coming out empty.
+      # This step runs in a fresh shell, so everything scripts/build.sh exported
+      # for the compile has to be set again. GUPPY_THEME goes into .version, and
+      # CROSS_COMPILE picks the right strip and readelf. Without the latter,
+      # release.sh silently ran the host strip and shipped an unstripped binary.
       - name: package
         env:
           GUPPY_THEME: ${{ matrix.theme }}
         run: |
+          if [ "${{ matrix.target }}" = "mips" ]; then
+            export PATH="$PWD/toolchains/mips32el--musl--stable-2025.08-1/bin:$PATH"
+            export CROSS_COMPILE=mipsel-linux-
+          else
+            export CROSS_COMPILE=aarch64-linux-gnu-
+          fi
           chmod +x ./release.sh
           ./release.sh ${{ matrix.asset }}
 
