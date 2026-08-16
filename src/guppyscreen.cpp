@@ -1,6 +1,7 @@
 #include "guppyscreen.h"
 
 #include "config.h"
+#include "utils.h"
 #ifndef OS_ANDROID
   #include "lv_drivers/display/fbdev.h"
   #include "lv_drivers/indev/evdev.h"
@@ -69,11 +70,11 @@ GuppyScreen *GuppyScreen::init(std::function<void(lv_color_t, lv_color_t)> hal_i
 
   auto primary_color = theme_conf->get_json("/primary_color").empty()
           ? lv_color_hex(0x2196F3)
-          : lv_color_hex(std::stoul(theme_conf->get<std::string>("/primary_color"), nullptr, 16));
+          : lv_color_hex(KUtils::parse_hex(theme_conf->get<std::string>("/primary_color"), 0x2196F3));
 
   auto secondary_color = theme_conf->get_json("/secondary_color").empty()
           ? lv_color_hex(0xF44336)
-          : lv_color_hex(std::stoul(theme_conf->get<std::string>("/secondary_color"), nullptr, 16));
+          : lv_color_hex(KUtils::parse_hex(theme_conf->get<std::string>("/secondary_color"), 0xF44336));
 
 #ifndef OS_ANDROID
   auto console_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
@@ -269,11 +270,11 @@ void GuppyScreen::refresh_theme() {
   ThemeConfig *theme_conf = ThemeConfig::get_instance();
   auto primary_color = theme_conf->get_json("/primary_color").empty()
                        ? lv_color_hex(0x2196F3)
-                       : lv_color_hex(std::stoul(theme_conf->get<std::string>("/primary_color"), nullptr, 16));
+                       : lv_color_hex(KUtils::parse_hex(theme_conf->get<std::string>("/primary_color"), 0x2196F3));
 
   auto secondary_color = theme_conf->get_json("/secondary_color").empty()
                          ? lv_color_hex(0xF44336)
-                         : lv_color_hex(std::stoul(theme_conf->get<std::string>("/secondary_color"), nullptr, 16));
+                         : lv_color_hex(KUtils::parse_hex(theme_conf->get<std::string>("/secondary_color"), 0xF44336));
 
   lv_disp_t *disp = lv_disp_get_default();
   lv_theme_t * new_theme =  lv_theme_default_init(disp, primary_color, secondary_color, true, th->font_normal);

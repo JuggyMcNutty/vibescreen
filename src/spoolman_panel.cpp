@@ -416,8 +416,10 @@ void SpoolmanPanel::handle_spoolman_action(lv_event_t *e) {
 	if (spool != spools.end()) {
 	  auto &c = spool->second["/filament/color_hex"_json_pointer];
 	  if (!c.is_null()) {
-	    dsc->rect_dsc->bg_color = lv_color_hex(std::stoul(c.template get<std::string>(),
-							      nullptr, 16));
+	    // Colour comes from Spoolman, so it is third party input. Fall back
+	    // to grey rather than letting a bad value take the UI down.
+	    dsc->rect_dsc->bg_color =
+	      lv_color_hex(KUtils::parse_hex(c.template get<std::string>(), 0x808080));
 	  }
 	}
       }

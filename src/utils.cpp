@@ -306,6 +306,21 @@ namespace KUtils {
     }
   }
 
+  uint32_t parse_hex(const std::string &s, uint32_t fallback) {
+    try {
+      size_t consumed = 0;
+      unsigned long v = std::stoul(s, &consumed, 16);
+      if (consumed != s.size()) {
+        spdlog::warn("parse_hex: trailing characters in '{}', using {:#x}", s, fallback);
+        return fallback;
+      }
+      return (uint32_t)v;
+    } catch (const std::exception &e) {
+      spdlog::warn("parse_hex: cannot parse '{}' ({}), using {:#x}", s, e.what(), fallback);
+      return fallback;
+    }
+  }
+
   double parse_double(const std::string &s, double fallback) {
     try {
       size_t consumed = 0;

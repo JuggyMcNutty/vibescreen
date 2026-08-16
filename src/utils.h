@@ -49,6 +49,9 @@ namespace KUtils {
   int parse_int(const std::string &s, int fallback);
   double parse_double(const std::string &s, double fallback);
 
+  // Hex colour values out of theme files and the Spoolman API.
+  uint32_t parse_hex(const std::string &s, uint32_t fallback);
+
   template<typename T, typename U> void sort_map_values(std::map<T, U> v,
 							std::vector<U> &out_vect,
 							std::function<bool(U&, U&)> sorter) {
