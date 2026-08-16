@@ -4,3 +4,22 @@ build/
 *.o
 *.a
 /.idea
+
+# Cross-compile toolchains, downloaded by scripts/setup-toolchain.sh
+/toolchains/
+
+# Release packaging output from release.sh
+/releases/
+/*.tar.gz
+/*.tar.bz2
+/*.tar.xz
+
+# Local editor and tooling state
+/compile_commands.json
+/.cache/
+/.vscode/
+
+# Local build config that should never be shared. The simulator writes its
+# runtime config next to the binary, but keep a stray copy at the root ignored
+# too since it can carry a printer IP.
+/guppyconfig.json
