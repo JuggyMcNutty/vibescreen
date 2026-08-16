@@ -101,15 +101,26 @@ and the known defects in [docs/audit.md](docs/audit.md).
 ## Credits
 
 guppyscreen was written by [ballaswag](https://github.com/ballaswag). This fork
-exists because that work was worth keeping.
+exists because that work was worth keeping, and nearly all of the code here is
+still theirs.
 
-[pellcorp/grumpyscreen](https://github.com/pellcorp/grumpyscreen) is another
-active fork, narrowed to the Simple AF firmware.
+Everything it talks to and borrows from:
 
-Icons from [Material Design Icons](https://pictogrammers.com/library/mdi/) and
-[Z-Bolt](https://github.com/Z-Bolt/OctoScreen). Built on
-[LVGL](https://github.com/lvgl/lvgl), [libhv](https://github.com/ithewei/libhv)
-and [spdlog](https://github.com/gabime/spdlog). Input shaper and belt
-calibration borrow from [Klippain-shaketune](https://github.com/Frix-x/klippain-shaketune).
+- [Klipper](https://github.com/Klipper3d/klipper), the firmware this is a front
+  end for
+- [Moonraker](https://github.com/Arksine/moonraker), the API it speaks to
+- [KlipperScreen](https://github.com/KlipperScreen/KlipperScreen), prior art
+  that shaped what a Klipper touch UI should do
+- [Fluidd](https://github.com/fluidd-core/fluidd), for interface ideas and the
+  print status calculations
+- [Klippain-shaketune](https://github.com/Frix-x/klippain-shaketune), behind the
+  input shaper graphs and belt calibration
+- [Material Design Icons](https://pictogrammers.com/library/mdi/) and
+  [Z-Bolt](https://github.com/Z-Bolt/OctoScreen) for the two icon sets
+
+Built on [LVGL](https://github.com/lvgl/lvgl),
+[libhv](https://github.com/ithewei/libhv),
+[spdlog](https://github.com/gabime/spdlog) and
+[wpa_supplicant](https://w1.fi/wpa_supplicant/).
 
 GPL-3.0, same as upstream.
