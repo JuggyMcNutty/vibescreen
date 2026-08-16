@@ -3,6 +3,12 @@
 
 #include <limits>
 
+namespace {
+  bool is_row_break(const std::string &s) {
+    return s == "\n";
+  }
+}
+
 Selector::Selector(lv_obj_t *parent,
 		   const char *label_text,
 		   std::vector<const char*> m,
@@ -14,7 +20,6 @@ Selector::Selector(lv_obj_t *parent,
   : cont(lv_obj_create(parent))
   , label(lv_label_create(cont))
   , btnm(lv_btnmatrix_create(cont))
-  , map(m)
   , selector_idx(default_idx)
 {
   lv_obj_set_size(cont, LV_PCT(width_pct), LV_SIZE_CONTENT);
@@ -27,23 +32,25 @@ Selector::Selector(lv_obj_t *parent,
   auto height = (double)lv_disp_get_physical_ver_res(NULL) * (height_pct / 100.0);
   height = height < 50 ? 50 : height;
   lv_obj_set_size(btnm, LV_PCT(100), height);
-  lv_label_set_text(label, label_text);  
-  lv_obj_set_width(label, LV_PCT(100));  
+  lv_label_set_text(label, label_text);
+  lv_obj_set_width(label, LV_PCT(100));
   lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-  
-  lv_btnmatrix_set_map(btnm, &map[0]);
-  lv_obj_set_style_pad_all(btnm, 4, LV_PART_MAIN);
 
+  lv_obj_set_style_pad_all(btnm, 4, LV_PART_MAIN);
   lv_obj_set_style_outline_width(btnm, 0, LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
-    
+
   lv_obj_add_event_cb(btnm, cb, LV_EVENT_VALUE_CHANGED, cb_data);
-  
-  // select one only
-  lv_btnmatrix_set_btn_ctrl_all(btnm, LV_BTNMATRIX_CTRL_CHECKABLE);
-  lv_btnmatrix_set_one_checked(btnm, true);
-  if (selector_idx != std::numeric_limits<uint32_t>::max()) {
-    lv_btnmatrix_set_btn_ctrl(btnm, selector_idx, LV_BTNMATRIX_CTRL_CHECKED);
-  } 
+
+  // Copy the incoming literals into owned storage so there is a single code
+  // path shared with the config driven set_options.
+  std::vector<std::string> opts;
+  for (const char *s : m) {
+    if (s == NULL || s[0] == '\0') {
+      continue;  // trailing terminator, apply_options adds its own
+    }
+    opts.push_back(s);
+  }
+  apply_options(opts, default_idx);
 }
 
 Selector::Selector(lv_obj_t *parent,
@@ -55,12 +62,93 @@ Selector::Selector(lv_obj_t *parent,
   : Selector(parent, label_text, m, default_idx, 62, 15, cb, cb_data)
 {
 }
-		   
+
 Selector::~Selector() {
   if (cont != NULL) {
     lv_obj_del(cont);
     cont = NULL;
   }
+}
+
+void Selector::apply_options(const std::vector<std::string> &opts, uint32_t default_idx) {
+  if (opts.empty()) {
+    spdlog::error("selector given an empty option list, leaving it unchanged");
+    return;
+  }
+
+  // Assign in one shot. Nothing may be appended after the pointers in map are
+  // taken, since a reallocation would move short strings stored inline.
+  owned = opts;
+  owned.push_back("");
+
+  map.clear();
+  map.reserve(owned.size());
+  for (const std::string &s : owned) {
+    map.push_back(s.c_str());
+  }
+
+  lv_btnmatrix_set_map(btnm, &map[0]);
+
+  // set_map reallocates the control bits and clears them, so the checkable
+  // flags have to be reapplied every time the map changes.
+  lv_btnmatrix_set_btn_ctrl_all(btnm, LV_BTNMATRIX_CTRL_CHECKABLE);
+  lv_btnmatrix_set_one_checked(btnm, true);
+
+  uint32_t count = option_count();
+  if (default_idx != std::numeric_limits<uint32_t>::max()) {
+    if (default_idx >= count) {
+      spdlog::warn("selector default index {} is past the last of {} options, using 0",
+		   default_idx, count);
+      default_idx = 0;
+    }
+    selector_idx = default_idx;
+    lv_btnmatrix_set_btn_ctrl(btnm, selector_idx, LV_BTNMATRIX_CTRL_CHECKED);
+  } else {
+    selector_idx = default_idx;
+  }
+}
+
+void Selector::set_options(const std::vector<std::string> &opts, uint32_t default_idx) {
+  apply_options(opts, default_idx);
+}
+
+void Selector::set_enabled(uint32_t idx, bool enabled) {
+  if (idx >= option_count()) {
+    return;
+  }
+
+  if (enabled) {
+    lv_btnmatrix_clear_btn_ctrl(btnm, idx, LV_BTNMATRIX_CTRL_DISABLED);
+  } else {
+    lv_btnmatrix_set_btn_ctrl(btnm, idx, LV_BTNMATRIX_CTRL_DISABLED);
+  }
+}
+
+uint32_t Selector::option_count() const {
+  uint32_t count = 0;
+  for (const std::string &s : owned) {
+    if (s.empty()) {
+      break;
+    }
+    if (!is_row_break(s)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+const char *Selector::selected_text() {
+  if (selector_idx == std::numeric_limits<uint32_t>::max() || selector_idx >= option_count()) {
+    spdlog::error("selector has no valid selection (index {}, {} options)",
+		  selector_idx, option_count());
+    return nullptr;
+  }
+
+  const char *text = lv_btnmatrix_get_btn_text(btnm, selector_idx);
+  if (text == NULL) {
+    spdlog::error("selector index {} has no button text", selector_idx);
+  }
+  return text;
 }
 
 lv_obj_t *Selector::get_container() {
