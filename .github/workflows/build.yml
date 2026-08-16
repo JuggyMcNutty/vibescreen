@@ -106,7 +106,12 @@ jobs:
             exit 1
           fi
 
+      # GUPPY_THEME has to be set here too. scripts/build.sh exports it for the
+      # compile, but release.sh runs in a fresh shell and writes it into
+      # .version, which was coming out empty.
       - name: package
+        env:
+          GUPPY_THEME: ${{ matrix.theme }}
         run: |
           chmod +x ./release.sh
           ./release.sh ${{ matrix.asset }}
