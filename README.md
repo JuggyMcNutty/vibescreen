@@ -101,8 +101,7 @@ and the known defects in [docs/audit.md](docs/audit.md).
 ## Credits
 
 guppyscreen was written by [ballaswag](https://github.com/ballaswag). This fork
-exists because that work was worth keeping, and nearly all of the code here is
-still theirs.
+exists because that work was worth keeping, and all original code belongs to them.
 
 Everything it talks to and borrows from:
 
