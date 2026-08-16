@@ -38,51 +38,79 @@ int KWebSocketClient::connect(const char* url,
     connected();
   };
   onmessage = [this, connected, disconnected](const std::string &msg) {
-    // if (msg.find("notify_proc_stat_update") == std::string::npos) {
-    //   spdlog::trace("onmessage(type={} len={}): {}", opcode() == WS_OPCODE_TEXT ? "text" : "binary",
-    // 	     (int)msg.size(), msg);
-    // }
-    auto j = json::parse(msg);
+    // This runs on libhv's event loop thread, not the LVGL thread. Nothing
+    // above us catches, so an escaping exception here would take the process
+    // down, and json::parse throws on anything malformed.
+    try {
+      json j = json::parse(msg);
 
-    if (j.contains("id")) {
-      // XXX: get rid of consumers and use function ptrs for callback
-      const auto &entry = consumers.find(j["id"]);
-      if (entry != consumers.end()) {
-        entry->second->consume(j);
-        consumers.erase(entry);
-      }
+      if (j.contains("id")) {
+        uint64_t rpc_id = j["id"].template get<uint64_t>();
 
-      const auto &cb_entry = callbacks.find(j["id"]);
-      if (cb_entry != callbacks.end()) {
-        cb_entry->second(j);
-        callbacks.erase(cb_entry);
-      }
-    }
+        // Take the handlers out under the lock, then release before invoking.
+        // See the note on cb_lock in the header for why this matters.
+        NotifyConsumer *consumer = nullptr;
+        std::function<void(json&)> cb;
+        {
+          std::lock_guard<std::mutex> guard(cb_lock);
 
-    if (j.contains("method")) {
-      std::string method = j["method"].template get<std::string>();
-      if ("notify_status_update" == method) {
-        for (const auto &entry : notify_consumers) {
-          entry->consume(j);
-        }
-      }  //  else if ("notify_gcode_response" == method) {
-      // 	for (const auto &gcode_cb : gcode_resp_cbs) {
-      // 	  gcode_cb(j);
-      // 	}
-      // }
-      else if ("notify_klippy_disconnected" == method) {
-        disconnected();
-      } else if ("notify_klippy_ready" == method) {
-        connected();
-      }
+          // XXX: get rid of consumers and use function ptrs for callback
+          const auto &entry = consumers.find(rpc_id);
+          if (entry != consumers.end()) {
+            consumer = entry->second;
+            consumers.erase(entry);
+          }
 
-      for (const auto &entry : method_resp_cbs) {
-        if (method == entry.first) {
-          for (const auto &handler_entry : entry.second) {
-            handler_entry.second(j);
+          const auto &cb_entry = callbacks.find(rpc_id);
+          if (cb_entry != callbacks.end()) {
+            cb = cb_entry->second;
+            callbacks.erase(cb_entry);
           }
         }
+
+        if (consumer != nullptr) {
+          consumer->consume(j);
+        }
+        if (cb) {
+          cb(j);
+        }
       }
+
+      if (j.contains("method")) {
+        std::string method = j["method"].template get<std::string>();
+
+        std::vector<NotifyConsumer*> status_consumers;
+        std::vector<std::function<void(json&)>> method_cbs;
+        {
+          std::lock_guard<std::mutex> guard(cb_lock);
+          if ("notify_status_update" == method) {
+            status_consumers = notify_consumers;
+          }
+
+          const auto &entry = method_resp_cbs.find(method);
+          if (entry != method_resp_cbs.end()) {
+            for (const auto &handler_entry : entry->second) {
+              method_cbs.push_back(handler_entry.second);
+            }
+          }
+        }
+
+        for (const auto &entry : status_consumers) {
+          entry->consume(j);
+        }
+
+        if ("notify_klippy_disconnected" == method) {
+          disconnected();
+        } else if ("notify_klippy_ready" == method) {
+          connected();
+        }
+
+        for (const auto &cb : method_cbs) {
+          cb(j);
+        }
+      }
+    } catch (const std::exception &e) {
+      spdlog::error("dropping websocket message, {}", e.what());
     }
   };
 
@@ -108,77 +136,78 @@ int KWebSocketClient::connect(const char* url,
 int KWebSocketClient::send_jsonrpc(const std::string &method,
 				   const json &params,
 				   std::function<void(json&)> cb) {
-  const auto &entry = callbacks.find(id);
-  if (entry == callbacks.end()) {
-    // spdlog::debug("registering consume %d, %x\n", id, consumer);
-    callbacks.insert({id, cb});
-    // XXX: check success, remove consumer if send is unsuccessfull
-    return send_jsonrpc(method, params);
-  } else {
-    // spdlog::debug("WARN: id %d is already register with a consumer\n", id);
+  uint64_t rpc_id;
+  {
+    std::lock_guard<std::mutex> guard(cb_lock);
+    rpc_id = id++;
+    // XXX: check success, remove callback if send is unsuccessfull
+    callbacks.insert({rpc_id, cb});
   }
 
-  return 0;
+  return send_rpc(method, &params, rpc_id);
 }
 
 int KWebSocketClient::send_jsonrpc(const std::string &method,
 				   std::function<void(json&)> cb) {
-  const auto &entry = callbacks.find(id);
-  if (entry == callbacks.end()) {
-    // spdlog::debug("registering consume %d, %x\n", id, consumer);
-    callbacks.insert({id, cb});
-    // XXX: check success, remove consumer if send is unsuccessfull
-    return send_jsonrpc(method);
-  } else {
-    // spdlog::debug("WARN: id %d is already register with a consumer\n", id);
+  uint64_t rpc_id;
+  {
+    std::lock_guard<std::mutex> guard(cb_lock);
+    rpc_id = id++;
+    callbacks.insert({rpc_id, cb});
   }
 
-  return 0;
+  return send_rpc(method, nullptr, rpc_id);
 }
 
 int KWebSocketClient::send_jsonrpc(const std::string &method, const json &params, NotifyConsumer *consumer) {
-  const auto &entry = consumers.find(id);
-  if (entry == consumers.end()) {
-    consumers.insert({id, consumer});
-    return send_jsonrpc(method, params);
+  uint64_t rpc_id;
+  {
+    std::lock_guard<std::mutex> guard(cb_lock);
+    rpc_id = id++;
+    consumers.insert({rpc_id, consumer});
   }
-  return 0;
+
+  return send_rpc(method, &params, rpc_id);
 }
 
 void KWebSocketClient::register_notify_update(NotifyConsumer *consumer) {
+  std::lock_guard<std::mutex> guard(cb_lock);
   if (std::find(notify_consumers.begin(), notify_consumers.end(), consumer) == std::end(notify_consumers)) {
     notify_consumers.push_back(consumer);
   }
 }
 
 void KWebSocketClient::unregister_notify_update(NotifyConsumer *consumer) {
+  std::lock_guard<std::mutex> guard(cb_lock);
+  // This was erase(remove_if(...)) with no end iterator. When the consumer was
+  // not in the list remove_if returns end() and erasing that is undefined.
   notify_consumers.erase(std::remove_if(
     notify_consumers.begin(), notify_consumers.end(),
     [consumer](NotifyConsumer *c) {
       return c == consumer;
-    }));
+    }), notify_consumers.end());
+}
+
+int KWebSocketClient::send_rpc(const std::string &method, const json *params, uint64_t rpc_id) {
+  json rpc;
+  rpc["jsonrpc"] = "2.0";
+  rpc["method"] = method;
+  if (params != nullptr) {
+    rpc["params"] = *params;
+  }
+  rpc["id"] = rpc_id;
+
+  spdlog::debug("send_jsonrpc: {}", rpc.dump());
+  return send(rpc.dump());
 }
 
 int KWebSocketClient::send_jsonrpc(const std::string &method,
 				   const json &params) {
-  json rpc;
-  rpc["jsonrpc"] = "2.0";
-  rpc["method"] = method;
-  rpc["params"] = params;
-  rpc["id"] = id++;
-
-  spdlog::debug("send_jsonrpc: {}", rpc.dump());
-  return send(rpc.dump());
+  return send_rpc(method, &params, id++);
 }
 
 int KWebSocketClient::send_jsonrpc(const std::string &method) {
-  json rpc;
-  rpc["jsonrpc"] = "2.0";
-  rpc["method"] = method;
-  rpc["id"] = id++;
-
-  spdlog::debug("send_jsonrpc: {}", rpc.dump());
-  return send(rpc.dump());
+  return send_rpc(method, nullptr, id++);
 }
 
 int KWebSocketClient::gcode_script(const std::string &gcode) {
@@ -189,6 +218,7 @@ int KWebSocketClient::gcode_script(const std::string &gcode) {
 void KWebSocketClient::register_method_callback(std::string resp_method,
 						std::string handler_name,
 						std::function<void(json&)> cb) {
+  std::lock_guard<std::mutex> guard(cb_lock);
 
   const auto &entry = method_resp_cbs.find(resp_method);
   if (entry == method_resp_cbs.end()) {

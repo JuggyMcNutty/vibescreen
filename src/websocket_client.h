@@ -9,6 +9,7 @@
 #include <vector>
 #include <atomic>
 #include <functional>
+#include <mutex>
 
 using json = nlohmann::json;
 
@@ -38,8 +39,28 @@ class KWebSocketClient : public hv::WebSocketClient {
 				std::function<void(json&)> cb);
   
  private:
-  std::map<uint32_t, std::function<void(json&)>> callbacks;
-  std::map<uint32_t, NotifyConsumer*> consumers;
+  // Sends the request and returns, without registering anything. The id is
+  // allocated by the caller so that a caller which also registers a handler can
+  // do both under one lock, otherwise a concurrent send can consume the id the
+  // handler was filed under and the reply is delivered to the wrong caller.
+  int send_rpc(const std::string &method, const json *params, uint64_t rpc_id);
+
+  // Guards every container below.
+  //
+  // These are touched from two threads: panels call the send and register
+  // methods from the LVGL thread, and libhv's onmessage dispatches from its own
+  // event loop thread.
+  //
+  // Never invoke a handler while holding this. Two things go wrong if you do.
+  // InputShaperPanel::handle_macro_response calls back into gcode_script from
+  // inside a reply handler, which self deadlocks on a non recursive mutex. And
+  // every consume() takes lv_lock, so holding this and then waiting on lv_lock
+  // inverts the order against the LVGL thread, which holds lv_lock and can wait
+  // on this from a panel destructor. Copy what you need out, unlock, then call.
+  std::mutex cb_lock;
+
+  std::map<uint64_t, std::function<void(json&)>> callbacks;
+  std::map<uint64_t, NotifyConsumer*> consumers;
   std::vector<NotifyConsumer*> notify_consumers;
   // std::vector<std::function<void(json&)>> gcode_resp_cbs;
 
