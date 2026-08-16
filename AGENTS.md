@@ -40,12 +40,41 @@ Useful variants:
 
 ```sh
 scripts/build.sh mips zbolt         # Z-Bolt icon set instead of Material
+scripts/build.sh mips --small       # Ender 3 V3 KE / Nebula Pad sized panel
+scripts/build.sh arm                # aarch64, Raspberry Pi and BTT Pad
 scripts/build.sh mips --clean       # rebuild the vendored libs too
 PRINTER_HOST=192.168.1.202 scripts/build.sh sim   # point the sim at a printer
 ```
 
-Output is `build/bin/guppyscreen` for both. Switching targets rebuilds the
-vendored libraries automatically, tracked via `.vendor-target`.
+Output is `build/bin/guppyscreen` for every target. Two stamp files track what
+was last built so nothing stale gets linked: `.vendor-target` for the
+architecture, which is all libhv, spdlog and libwpa_client care about, and
+`.build-flags` for architecture plus theme plus small screen, since those change
+`-D` defines that affect every object of ours.
+
+## CI
+
+One workflow, `.github/workflows/build.yml`. It builds the same four variants
+CI has always built, plus the simulator, and it **calls `scripts/build.sh`**
+rather than repeating the flags. If you add a build option, put it in the script
+and reference it from the matrix, so the two cannot drift.
+
+It runs on push to `main`, on pull requests, and on tags. **Releases are
+published on tags only.** The inherited workflow overwrote a `nightly` release
+on every push to main, which handed out installable binaries built from
+whatever was last committed.
+
+It also asserts the mips binary is statically linked, which is the property that
+decides whether it runs at all, since the glibc version moves between Creality
+firmware releases.
+
+Two workflows were deleted with the fork's cleanup: `guppydroid.yml`, which
+built an Android APK from an `android` branch this repo does not have and so
+failed on every push, and `pull_request.yml`, which duplicated the build matrix.
+
+Do not reintroduce the `ballaswag/guppydev` container. It is unpinned, sits on
+the abandoned upstream's account, and carries a different toolchain from the one
+we develop against, so a green run in it says nothing about a local build.
 
 The simulator ignores `SIGTERM` and only exits on `SIGINT`, because SDL installs
 its own handler and nothing consumes the resulting quit event. So `timeout 20
