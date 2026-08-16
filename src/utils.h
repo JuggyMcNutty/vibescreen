@@ -36,6 +36,19 @@ namespace KUtils {
   std::string eta_string(int64_t s);
   size_t bytes_to_mb(size_t s);
 
+  // Numeric parsing that returns a fallback instead of throwing.
+  //
+  // std::stoi and std::stod throw on empty or non-numeric input, and there is
+  // no try/catch anywhere in this codebase, so an unguarded parse of anything
+  // user or config supplied takes the whole process down. Use these wherever
+  // the input is not already known to be a well formed number.
+  //
+  // Note these also reject trailing garbage, which plain std::stoi accepts:
+  // std::stoi("0.5") silently returns 0, which turned a fractional extrude
+  // speed into a rejected "F0" move.
+  int parse_int(const std::string &s, int fallback);
+  double parse_double(const std::string &s, double fallback);
+
   template<typename T, typename U> void sort_map_values(std::map<T, U> v,
 							std::vector<U> &out_vect,
 							std::function<bool(U&, U&)> sorter) {

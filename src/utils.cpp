@@ -289,4 +289,35 @@ namespace KUtils {
 
     return macros;
   }
+
+  int parse_int(const std::string &s, int fallback) {
+    try {
+      size_t consumed = 0;
+      int v = std::stoi(s, &consumed);
+      // Reject trailing junk. std::stoi("0.5") happily returns 0.
+      if (consumed != s.size()) {
+        spdlog::warn("parse_int: trailing characters in '{}', using {}", s, fallback);
+        return fallback;
+      }
+      return v;
+    } catch (const std::exception &e) {
+      spdlog::warn("parse_int: cannot parse '{}' ({}), using {}", s, e.what(), fallback);
+      return fallback;
+    }
+  }
+
+  double parse_double(const std::string &s, double fallback) {
+    try {
+      size_t consumed = 0;
+      double v = std::stod(s, &consumed);
+      if (consumed != s.size()) {
+        spdlog::warn("parse_double: trailing characters in '{}', using {}", s, fallback);
+        return fallback;
+      }
+      return v;
+    } catch (const std::exception &e) {
+      spdlog::warn("parse_double: cannot parse '{}' ({}), using {}", s, e.what(), fallback);
+      return fallback;
+    }
+  }
   }  // namespace KUtils
