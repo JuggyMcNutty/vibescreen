@@ -94,20 +94,26 @@ endif
 COMPILE_CC				= $(CC) $(CFLAGS) $(INC) $(DEFINES)
 COMPILE_CXX				= $(CC) $(CFLAGS) $(INC) $(DEFINES)
 
+# Job count for the sub-makes below. This has to be a real shell call
+# rather than -j$(nproc): make expands $(nproc) itself, finds no variable
+# by that name, substitutes nothing, and leaves a bare -j that forks one
+# job per source file. Override with NPROC=<n> to cap it.
+NPROC ?= $(shell nproc)
+
 ## MAINOBJ -> OBJFILES
 
 all: default
 
 libhv.a:
-	$(MAKE) -C libhv -j$(nproc) libhv
+	$(MAKE) -C libhv -j$(NPROC) libhv
 
 libspdlog.a:
 	@mkdir -p $(SPDLOG_DIR)/build
 	@cmake -B $(SPDLOG_DIR)/build -S $(SPDLOG_DIR)/ -DCMAKE_CXX_COMPILER=$(CXX)
-	$(MAKE) -C $(SPDLOG_DIR)/build -j$(nproc)
+	$(MAKE) -C $(SPDLOG_DIR)/build -j$(NPROC)
 
 wpaclient:
-	$(MAKE) -C wpa_supplicant/wpa_supplicant -j$(nproc) libwpa_client.a
+	$(MAKE) -C wpa_supplicant/wpa_supplicant -j$(NPROC) libwpa_client.a
 
 $(BUILD_OBJ_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
@@ -159,6 +165,6 @@ build:
 	$(MAKE) spdlogclean
 	$(MAKE) libspdlog.a
 	$(MAKE) clean
-	$(MAKE) -j$(nproc)
+	$(MAKE) -j$(NPROC)
 
 -include			$(DEPS)
