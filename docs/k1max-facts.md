@@ -1,7 +1,8 @@
 # Creality K1 Max target facts
 
 Captured 2026-08-16 from the development printer with `scripts/probe-printer.sh`.
-Read only, nothing on the printer was modified.
+The probe itself only reads; the printer has since been updated to run our own
+builds, which is noted where it matters below.
 
 Serial numbers, MAC addresses and the WiFi SSID are deliberately not recorded here.
 Re-run the probe if you need fresh values.
@@ -35,22 +36,27 @@ GUPPY_ROTATE=true
 # EVDEV_CALIBRATE unset     # goodix reports absolute coords, no calibration needed
 ```
 
-## Already installed
+## What was on it when we found it
 
-The printer is running guppyscreen built from the exact commit we forked:
+Upstream guppyscreen, built from the exact commit we forked:
 
 ```
-/usr/data/guppyscreen/.version
 {"version": "nightly-07409cb031bbbfc57cd7817ba295e5385e3d5565", "theme": "material", "asset_name": "guppyscreen.tar.gz"}
 ```
 
-`07409cb` is upstream `main` HEAD and our fork point. The installed binary is
-6011904 bytes, byte-for-byte the size of upstream's published `nightly` asset.
-That gives us a known-good reference: a binary we build from an unmodified tree
-should land very close to it.
+`07409cb` is upstream `main` HEAD and our fork point, and that binary was
+6011904 bytes, matching upstream's published `nightly` asset. It was a useful
+reference while we were still building from an unmodified tree.
 
-Launched by `/etc/init.d/S99guppyscreen` under OpenRC `supervise-daemon`, which
-restarts it if it dies. Logs to `/usr/data/printer_data/logs/guppyscreen.log`.
+It runs our builds now, so that comparison no longer applies. The original is
+kept on the printer as `/usr/data/guppyscreen/guppyscreen.orig-07409cb` if it is
+ever needed again.
+
+Either way it is launched by `/etc/init.d/S99guppyscreen` under OpenRC
+`supervise-daemon`, which restarts it if it dies, and logs to
+`/usr/data/printer_data/logs/guppyscreen.log`. A crashed process comes back; a
+wedged one does not, which is why the main loop aborts rather than continuing,
+see `docs/audit.md` C10.
 
 Other mods present in `/usr/data`: `fluidd`, `helper-script`, `moonraker`,
 `nginx`. Creality's `S99start_app` is gone from `/etc/init.d`, so whoever
