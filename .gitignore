@@ -23,3 +23,6 @@ build/
 # runtime config next to the binary, but keep a stray copy at the root ignored
 # too since it can carry a printer IP.
 /guppyconfig.json
+
+# Records which target the vendored libs were last built for
+/.vendor-target
