@@ -63,12 +63,14 @@ From the printer:
 
 or press Update in the settings panel.
 
-Releases are rolling. Every push to `main` that builds cleanly replaces the
-`rolling` release, and there is no separate stable track. Builds are not tested
-on hardware before they are published.
+Releases are rolling and there is no separate stable track. Every push to
+`main` that changes something other than documentation publishes its own
+release, tagged by date and commit, so the
+[release list](https://github.com/JuggyMcNutty/vibescreen/releases) doubles as a
+build history. The updater always takes the newest.
 
-If you built the binary yourself, `.version` will say `dev-<sha>` and the
-updater will refuse to overwrite it unless you pass `--force`.
+Coming from the original guppyscreen, run the installer above instead. That
+project's updater points at its own releases and will not see these.
 
 ## Uninstalling
 
