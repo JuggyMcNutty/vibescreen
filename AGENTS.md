@@ -59,10 +59,29 @@ CI has always built, plus the simulator, and it **calls `scripts/build.sh`**
 rather than repeating the flags. If you add a build option, put it in the script
 and reference it from the matrix, so the two cannot drift.
 
-It runs on push to `main`, on pull requests, and on tags. **Releases are
-published on tags only.** The inherited workflow overwrote a `nightly` release
-on every push to main, which handed out installable binaries built from
-whatever was last committed.
+It runs on push to `main`, on pull requests, and on tags.
+
+Publishing has three shapes, and `update.sh` keys off the version string:
+
+| Trigger | Version | Published as |
+| --- | --- | --- |
+| local `scripts/build.sh` | `dev-<sha>` | nothing, never published |
+| push to `main` | `nightly-<sha>` | `nightly` prerelease, replaced each push |
+| tag | the tag | a normal release |
+
+The nightly is published from its own job, after the whole matrix **and** the
+simulator build pass. Do not move it back into the matrix: four parallel jobs
+race to create the same tag, and a broken variant would produce a half
+populated release.
+
+The `nightly` tag never changes while its contents change every push, so the
+tag cannot identify a build. The release *name* carries `nightly-<sha>`, the
+same string `release.sh` writes into `.version`, and that pairing is what lets
+`update.sh` tell whether you already have it. If you change one, change the
+other.
+
+`update.sh` skips prereleases unless given `--nightly`, so a stable install is
+never quietly moved onto whatever last landed on main.
 
 It also asserts the mips binary is statically linked, which is the property that
 decides whether it runs at all, since the glibc version moves between Creality
