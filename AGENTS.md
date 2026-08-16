@@ -175,6 +175,54 @@ Development printer is a K1 Max. Rules:
 - Moonraker is at `192.168.1.202:7125` and healthy. Point the sim at it with
   `PRINTER_HOST=192.168.1.202 scripts/build.sh sim`.
 
+## Sending gcode
+
+Two rules, both learned the hard way. See `docs/audit.md` C6 and C8.
+
+**Wrap modal gcode.** `M83`, `M82`, `G90`, `G91` and friends change state
+globally, not just for the next command. A panel that sets one and does not put
+it back will corrupt a print that is merely paused, not stopped. Always:
+
+```
+SAVE_GCODE_STATE NAME=guppy_<what>
+<the modal command and the move>
+RESTORE_GCODE_STATE NAME=guppy_<what>
+```
+
+`RESTORE_GCODE_STATE` defaults to `MOVE=0`, so it restores the mode without
+moving the toolhead.
+
+**Nothing checks whether Klipper accepted it.** `KWebSocketClient::gcode_script`
+logs the payload and never looks at the reply. So any limit a panel enforces is
+advisory, and a rejected command is silent in that panel. Validate before
+sending rather than relying on the error coming back.
+
+Where a panel offers preset values, clamp them against the printer's own limits
+read from `/printer_state/configfile/settings/...` in `State`. `LimitsPanel::init`
+and `ExtruderPanel::init` are the two worked examples, both dispatched from
+`MainPanel::init`.
+
+## Testing UI changes without touching the printer
+
+The printer is read-only, and pressing Extrude against a live Moonraker really
+does heat the hotend. To exercise those paths safely, run a fake Moonraker
+locally and point the simulator at `127.0.0.1`. It needs to accept a websocket
+on 7125, answer `server.info` with `klippy_connected` and `klippy_state: ready`,
+answer `printer.objects.subscribe` with a status blob, and push
+`notify_status_update`. About 100 lines with the python `websockets` package.
+Logging the `printer.gcode.script` payloads it receives is what makes it useful.
+
+For screenshots, SDL picks Wayland when it can and the X root window is not
+capturable under XWayland. Force X11 and grab the window by name:
+
+```sh
+SDL_VIDEODRIVER=x11 ./build/bin/guppyscreen &
+xwd -silent -name "TFT Simulator" | xwdtopnm | pnmtopng > shot.png
+```
+
+`xdotool` can drive it, but LVGL polls its input device, so an instantaneous
+click gets missed. Move, then `mousedown`, wait ~0.4s, then `mouseup`.
+
 ## Threading model
 
 Two threads, and the boundary is where the bugs are.

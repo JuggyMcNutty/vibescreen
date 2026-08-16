@@ -75,7 +75,7 @@ fix has to change the accessor contract, either returning a copy, or taking a
 callback invoked under the lock, or handing back a lock-owning wrapper. It is
 the largest single piece of work in this audit and should be its own change.
 
-### C2. Empty Moonraker port field terminates the process (open)
+### C2. Empty Moonraker port field terminates the process (fixed, `bdbfa03`)
 
 `src/printer_select_panel.cpp:206-207`
 
@@ -98,7 +98,7 @@ The field is otherwise well guarded: `lv_textarea_set_accepted_chars(...,
 "0123456789")` and `set_max_length(5)` at `src/printer_select_panel.cpp:184-185`
 mean empty is the only bad input that can reach the parse. Cheap to fix.
 
-### C3. Malformed theme colour aborts at startup (open)
+### C3. Malformed theme colour aborts at startup (fixed, `0886341`)
 
 `src/guppyscreen.cpp:70-76`, repeated at `272-276`
 
@@ -112,6 +112,56 @@ The guard tests for absent, not for parseable. A theme file with
 `"primary_color": "blue"` throws out of `std::stoul` before the UI ever comes
 up, and per C2 that aborts. Users are invited to edit `themes/*.json`, so this
 is reachable by ordinary configuration.
+
+### C6. Manual moves leaked gcode modes into a running print (fixed, `ff6dfad` and `8719a33`)
+
+Found during the extruder round, and the worst thing in this file after C1.
+
+`ExtruderPanel` sent `M109 S<t>` then a bare `M83` then the move. `HomingPanel`
+sent a bare `G91` then the move. Neither ever set the mode back, and nothing
+anywhere in the tree emitted `M82` or `G90` or used `SAVE_GCODE_STATE`.
+
+Both change gcode state **globally**, not just for the next command. Pause a
+print, purge or jog from the panel, resume, and the rest of that print runs in
+relative extrusion or relative positioning. Slicers emit `M82`/`M83` and
+`G90`/`G91` once in the start gcode and never again, so nothing corrects it. For
+a job sliced with absolute E, every subsequent `G1 E<absolute>` is then read as a
+relative extrusion, which ruins the remainder of the print.
+
+Both now wrap the move in `SAVE_GCODE_STATE` and `RESTORE_GCODE_STATE`, which
+defaults to `MOVE=0` and so restores the mode without moving the toolhead.
+
+Worth a general note: any future panel that emits a modal gcode needs the same
+treatment. `M104`, `M106`, `SET_VELOCITY_LIMIT` and friends are all sticky.
+
+### C7. `M109` can block the queue until `verify_heater` faults (open)
+
+`ExtruderPanel` waits for temperature with `M109`, which blocks the gcode queue
+until the target is reached. Now that the range reaches 320C this matters more:
+selecting a target the hotend cannot physically achieve means `M109` never
+returns, and `verify_heater` eventually shuts the printer down. On our K1 Max
+that is `max_error: 120`, `heating_gain: 2.0`, `check_gain_time: 20`.
+
+Clamping to `max_temp` does not solve this. `max_temp` is what the config
+permits, not what the hardware can reach, and those are different numbers on a
+stock hotend with a 350C `max_temp`.
+
+`ff6dfad` reduced the exposure by skipping `M109` when already at the selected
+target, so repeat presses no longer re-wait. The real fix is non-blocking
+`M104` plus a heating state in the UI, which is a behaviour change worth doing
+deliberately rather than as a side effect.
+
+### C8. Rejected gcode is invisible to the user (open)
+
+`KWebSocketClient::gcode_script` (`src/websocket_client.cpp:184`) fires and
+forgets. It logs the outgoing payload and never inspects the reply. This is the
+previous developer's own `// XXX: check success` at
+`src/websocket_client.cpp:115,130`.
+
+Consequence for the clamping added in `ff6dfad`: every limit we enforce in the
+UI is advisory. If Klipper rejects a command anyway, for a reason we did not
+model, the panel shows nothing at all. The console panel sees the error, this
+panel does not.
 
 ### C4. `interface_ip` ignores every error it can hit (open)
 
@@ -150,12 +200,13 @@ Four problems in eleven lines:
 Not fixed in `pellcorp/grumpyscreen` either; they moved the identical code to
 `src/net_utils.cpp:37-45`.
 
-### C5. Unguarded numeric parsing elsewhere (open, lower severity)
+### C5. Unguarded numeric parsing elsewhere (partly fixed, lower severity)
 
 22 `std::sto*` call sites, none guarded. Beyond C2 and C3 the reachable ones are:
 
 - `src/spoolman_panel.cpp:419` parses a spool colour from the Spoolman API
   response. A non-hex colour from a third-party service aborts the UI.
+  **Fixed in `0886341`.**
 - `src/wifi_panel.cpp:186` parses the signal level out of a wpa_supplicant
   `SCAN_RESULTS` line. Correctly guarded by `wifi_parts.size() == 5` first, and
   the field is always numeric in practice, so low risk.
@@ -165,9 +216,15 @@ Not fixed in `pellcorp/grumpyscreen` either; they moved the identical code to
   enter 300-plus digits and overflow a double. The `// input validation, e.g.
   range` comment directly above it is still an unkept promise.
 
-The systematic fix is a small `parse_int`/`parse_double` helper in `KUtils` that
-returns a default, plus a `try`/`catch` around the top level so an unexpected
-throw logs instead of vanishing.
+The helpers now exist: `KUtils::parse_int`, `parse_double` and `parse_hex`
+(`src/utils.cpp`), which log and return a fallback, and additionally reject
+trailing garbage that plain `std::stoi` accepts. Converted so far are C2, C3,
+the Spoolman swatch and the extruder speed. The remaining sites are the low risk
+ones listed above plus the input shaper, TMC tune, finetune and print status
+parses, which all read numbers Klipper itself produced.
+
+Still wanted: a `try`/`catch` at the top level so an unexpected throw anywhere
+logs rather than vanishing.
 
 ---
 
@@ -272,11 +329,17 @@ directory, and a Python Klipper simulator for local testing.
 
 ## Suggested order
 
-1. C2 and C3, small and self-contained, remove two ways to abort the UI.
-2. A top-level `try`/`catch` plus `KUtils` parse helpers, which caps the blast
-   radius of C5 generally.
+Done so far: C2, C3, C6, the `KUtils` parse helpers, and the four build fixes.
+
+Remaining, roughly in order:
+
+1. A top-level `try`/`catch`, which caps the blast radius of whatever is left of
+   C5 without having to find every site.
+2. C8, surface rejected gcode in the UI. Small, and it makes every other clamp
+   honest instead of advisory.
 3. C4, contained to one function.
 4. B5, so the next person is not misled by the docs.
-5. M1 and M3, mechanical.
-6. C1 last. It is a real design change and deserves its own branch and careful
+5. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+6. M1 and M3, mechanical.
+7. C1 last. It is a real design change and deserves its own branch and careful
    review.
