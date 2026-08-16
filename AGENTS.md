@@ -202,15 +202,37 @@ read from `/printer_state/configfile/settings/...` in `State`. `LimitsPanel::ini
 and `ExtruderPanel::init` are the two worked examples, both dispatched from
 `MainPanel::init`.
 
+## Never let an exception reach LVGL
+
+Every static callback LVGL calls into must contain its own exceptions, using
+`KGuard::event` from `src/event_guard.h`. If you add a new one, guard it.
+
+This is not defensive habit, it is load bearing. LVGL cannot be recovered once
+an exception has unwound through it: `lv_timer_handler` leaves its re-entrancy
+guard set so every later call returns immediately, and the input state machine
+is interrupted mid gesture and re-dispatches the same event forever. Catching in
+the main loop gives a frozen UI, and patching LVGL to release the guard gives an
+infinite exception loop. Both were built and measured, see `docs/audit.md` C10.
+
+The main loop still has a catch, but it logs and aborts on purpose, because
+anything reaching it means LVGL is already unrecoverable and a restart is the
+better outcome.
+
 ## Testing UI changes without touching the printer
 
 The printer is read-only, and pressing Extrude against a live Moonraker really
-does heat the hotend. To exercise those paths safely, run a fake Moonraker
-locally and point the simulator at `127.0.0.1`. It needs to accept a websocket
-on 7125, answer `server.info` with `klippy_connected` and `klippy_state: ready`,
-answer `printer.objects.subscribe` with a status blob, and push
-`notify_status_update`. About 100 lines with the python `websockets` package.
-Logging the `printer.gcode.script` payloads it receives is what makes it useful.
+does heat the hotend. Use `tools/fake_moonraker.py` for anything that would
+otherwise command real hardware, and point the simulator at `127.0.0.1`:
+
+```sh
+pip install websockets
+python3 tools/fake_moonraker.py 240 240            # reports 240C, accepts gcode
+python3 tools/fake_moonraker.py 240 240 --reject   # rejects every command
+PRINTER_HOST=127.0.0.1 scripts/build.sh sim
+```
+
+It records every `printer.gcode.script` it receives to `$GCODE_LOG`, which is
+how you check what a button actually sends.
 
 For screenshots, SDL picks Wayland when it can and the X root window is not
 capturable under XWayland. Force X11 and grab the window by name:
@@ -232,10 +254,21 @@ Two threads, and the boundary is where the bugs are.
   `src/websocket_client.cpp`, which drives every `NotifyConsumer::consume`, which
   is what updates `State`.
 
-LVGL is not thread safe. Panels take `lv_lock` around widget work. `State` has
-its own separate mutex, and per `docs/audit.md` C1 that mutex does not actually
-protect the reference-returning accessors. Read C1 before touching anything in
-`src/state.cpp` or adding a new `get_data` caller.
+LVGL is not thread safe. Panels take `lv_lock` around widget work.
+
+`KWebSocketClient` has a `cb_lock` covering its handler maps. **Never invoke a
+handler while holding it.** `InputShaperPanel` calls back into `gcode_script`
+from inside a reply handler, which self deadlocks, and every `consume()` takes
+`lv_lock`, which inverts the lock order against the LVGL thread. Copy the
+handler out, unlock, then call. Every dispatch site in `onmessage` does this.
+
+`State` has its own separate mutex, and per `docs/audit.md` C1 that mutex does
+not actually protect the reference-returning accessors. Read C1 before touching
+anything in `src/state.cpp` or adding a new `get_data` caller.
+
+Both C1 and the remaining lifetime hazard in C9 dissolve if dispatch moves onto
+a queue drained by the LVGL loop. That is the intended end state, so do not
+solve C1 in a way that would have to be undone to get there.
 
 ## House style
 

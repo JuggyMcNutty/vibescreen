@@ -151,7 +151,7 @@ target, so repeat presses no longer re-wait. The real fix is non-blocking
 `M104` plus a heating state in the UI, which is a behaviour change worth doing
 deliberately rather than as a side effect.
 
-### C8. Rejected gcode is invisible to the user (open)
+### C8. Rejected gcode is invisible to the user (fixed, `fc12faa`)
 
 `KWebSocketClient::gcode_script` (`src/websocket_client.cpp:184`) fires and
 forgets. It logs the outgoing payload and never inspects the reply. This is the
@@ -163,7 +163,59 @@ UI is advisory. If Klipper rejects a command anyway, for a reason we did not
 model, the panel shows nothing at all. The console panel sees the error, this
 panel does not.
 
-### C4. `interface_ip` ignores every error it can hit (open)
+### C9. Websocket client's shared state was unguarded across threads (fixed, `c042ae6`)
+
+`callbacks` and `consumers` were plain `std::map` and `notify_consumers` a plain
+`std::vector`, all mutated from two threads with nothing between them. Panels
+insert from the LVGL thread on button presses, libhv's `onmessage` erases from
+its own event loop thread, and panel constructors and destructors register and
+unregister while `onmessage` iterates. Concurrent mutation of a red-black tree
+corrupts it, so the symptom was a crash or hang inside `std::map` with a stack
+pointing nowhere useful.
+
+Two related bugs went with it. The request id was read separately from the map
+insert, so a concurrent send could consume the id a handler had just been filed
+under and the reply would go to the wrong caller. And
+`unregister_notify_update` called `erase(remove_if(...))` with no end iterator,
+which is undefined when the consumer is not in the list.
+
+**Still open, and deliberately not fixed here.** Handlers are invoked after the
+lock is released, which is required to avoid deadlock, so a panel destroyed on
+the LVGL thread between the copy and the call is a use-after-free. That was
+already the case before, and the honest fix is architectural, see below.
+
+### C10. Exceptions could not be contained outside LVGL (fixed, `5afb5b8`)
+
+Worth recording in full because two reasonable-looking fixes were built and
+measured before the third one worked.
+
+Catching in the main loop around `lv_timer_handler` does not work.
+`lvgl/src/misc/lv_timer.c` sets a re-entrancy guard on entry and clears it on
+exit, and an exception unwinding past the clear leaves it set. Every later call
+then returns at the guard. The process survives with a **frozen UI**, which is
+worse than crashing, since the init script restarts a dead process but never a
+wedged one.
+
+Patching LVGL to release the guard from the catch does release it, confirmed by
+the handler running again, but recovery still fails. The input state machine is
+also interrupted mid gesture and re-dispatches the same event forever. One
+injected throw produced **215 exceptions** and no further input was accepted.
+
+So the exception must never leave our code. `KGuard::event`
+(`src/event_guard.h`) wraps the body of each of the 61 static trampolines LVGL
+calls into. The same injected throw then produces exactly one log line, nothing
+reaches the main loop, and the next tap works.
+
+Also relevant: `-funwind-tables` is needed on the C sources. mips does not emit
+unwind tables for C by default, so without it an exception cannot unwind through
+LVGL at all and calls `std::terminate`. x86-64 does emit them by default, so
+anything relying on unwinding would test green in the simulator and do nothing
+on the printer. Costs 64KB.
+
+**Residual:** 19 inline lambda callbacks and 4 other static callbacks are still
+unguarded. They are mostly small UI-only bodies, but they are entry points.
+
+### C4. `interface_ip` ignores every error it can hit (fixed, `4027abe`)
 
 `src/utils.cpp:163-174`
 
@@ -249,7 +301,7 @@ Broke the SDL build, since distributions ship no static SDL2.
 Three patches applied by hand with `git apply`, silently reverted by any
 re-clone or submodule update, with no way to tell whether they had run.
 
-### B5. `DEVELOPMENT.md` documents the wrong toolchain (open)
+### B5. `DEVELOPMENT.md` documents the wrong toolchain (fixed, `5658e14`)
 
 It says to use the Ingenic `mips-gcc720-glibc229` toolchain. That produced the
 last tagged release, `0.0.26-beta`, which is dynamically linked against
@@ -283,14 +335,14 @@ with no matching `delete` (`src/config.cpp:18`, `src/guppyscreen.cpp:45`,
 nothing leaks in practice. Only worth touching if we ever want a clean shutdown
 path or to run the UI under a leak checker.
 
-### M3. Logging before the logger exists (open, cosmetic)
+### M3. Logging before the logger exists (fixed, `5cdef7e`)
 
 `src/main.cpp:40` calls `spdlog::debug` before `Config::init` and before
 `GuppyScreen::init` install the sinks and set the level, so that line goes to
 the default logger and is normally dropped. Either move it after init or delete
 it.
 
-### M4. K1 paths hardcoded into non-K1 builds (open)
+### M4. K1 paths hardcoded into non-K1 builds (fixed, `5cdef7e`)
 
 `src/main.cpp:44` passes `/usr/data/printer_data/thumbnails` as the thumbnail
 root unconditionally, and `src/config.cpp:72` defaults `log_path` to
@@ -327,19 +379,32 @@ directory, and a Python Klipper simulator for local testing.
 
 ---
 
+## Where this should end up
+
+C1 and the C9 lifetime hazard are the same problem wearing two hats: dispatch
+happens on the libhv thread, so shared state needs locking that cannot be made
+both correct and deadlock-free while handlers run under it.
+
+If `onmessage` instead pushed messages onto a queue that the LVGL loop drained,
+every handler would run on one thread. `State` could return references safely,
+the websocket client would not need a mutex at all, and a panel could not be
+destroyed mid-dispatch. That is the shape C1 should be solved in. Solving C1
+locally, by copying json out of `State` at every one of its 42 call sites, would
+have to be undone to get there.
+
 ## Suggested order
 
-Done so far: C2, C3, C6, the `KUtils` parse helpers, and the four build fixes.
+Done: C2, C3, C4, C6, C8, C9, C10, B1 to B6, M3, M4, and the `KUtils` parse
+helpers.
 
 Remaining, roughly in order:
 
-1. A top-level `try`/`catch`, which caps the blast radius of whatever is left of
-   C5 without having to find every site.
-2. C8, surface rejected gcode in the UI. Small, and it makes every other clamp
-   honest instead of advisory.
-3. C4, contained to one function.
-4. B5, so the next person is not misled by the docs.
-5. C7, the non-blocking heat change. Behavioural, wants its own discussion.
-6. M1 and M3, mechanical.
-7. C1 last. It is a real design change and deserves its own branch and careful
-   review.
+1. Guard the residual 19 inline lambdas and 4 static callbacks noted in C10, so
+   exception containment is complete rather than nearly complete.
+2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+3. M1, 98 lines of commented-out code. Pure churn, best done as its own quiet
+   pass when nothing else is in flight.
+4. C1 plus the C9 lifetime hazard, as the message-queue change above. The
+   largest piece of work left and the one that retires the most.
+
+M2, the four leaked singletons, is harmless and stays open.
