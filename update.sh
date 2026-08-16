@@ -30,8 +30,6 @@ for arg in "$@"; do
     esac
 done
 
-# The project publishes one rolling release, replaced on every push to main.
-RELEASE_TAG=${GUPPY_UPDATE_TAG:-rolling}
 
 PY=$(command -v python3 || command -v python || true)
 if [ -z "$PY" ]; then
@@ -55,15 +53,18 @@ fi
 echo "Installed version: $CURRENT_VERSION"
 echo "Checking $REPO for a newer build"
 
-# Prints "<name>\t<download url>" for the rolling release, or exits 2 if it has
-# no asset for us. Looked up by tag rather than by scanning the release list,
-# because there is only ever one release to consider.
+# Prints "<tag>\t<download url>" for the newest release, or exits 2 if it has no
+# asset for us.
+#
+# Every push to main publishes its own release tagged <date>-<sha>, so the tag
+# is unique per build and is the identity: no need to look inside the release
+# to work out which build it holds.
 LATEST=$("$PY" -c "
 import json, sys, urllib.error, urllib.request
-repo, tag, asset = sys.argv[1], sys.argv[2], sys.argv[3]
+repo, asset = sys.argv[1], sys.argv[2]
 try:
     with urllib.request.urlopen(
-            'https://api.github.com/repos/%s/releases/tags/%s' % (repo, tag),
+            'https://api.github.com/repos/%s/releases/latest' % repo,
             timeout=30) as r:
         rel = json.load(r)
 except urllib.error.HTTPError as e:
@@ -76,19 +77,14 @@ except Exception as e:
     sys.exit(1)
 for a in rel.get('assets', []):
     if a.get('name') == asset:
-        # Identity, not tag. The tag stays the same forever while its contents
-        # change every push, so only the release name can say which build this
-        # is. CI puts the same rolling-<sha> string in the name as release.sh
-        # writes into .version.
-        print('%s\t%s' % (rel.get('name') or rel.get('tag_name', ''),
-                          a.get('browser_download_url', '')))
+        print('%s\t%s' % (rel.get('tag_name', ''), a.get('browser_download_url', '')))
         sys.exit(0)
 sys.exit(2)
-" "$REPO" "$RELEASE_TAG" "$ASSET_NAME" 2>&1)
+" "$REPO" "$ASSET_NAME" 2>&1)
 RC=$?
 
 if [ $RC -eq 2 ]; then
-    echo "No '$RELEASE_TAG' release in $REPO publishes $ASSET_NAME, nothing to update to."
+    echo "No release in $REPO publishes $ASSET_NAME, nothing to update to."
     exit 0
 elif [ $RC -ne 0 ]; then
     echo "Update check failed: $LATEST"
@@ -110,8 +106,8 @@ fi
 
 # Two version shapes exist and only one of them is protected:
 #
-#   dev-<sha>      built locally by scripts/build.sh and copied to the printer
-#   rolling-<sha>  published by CI from main, a real artifact
+#   dev-<sha>        built locally by scripts/build.sh, published nowhere
+#   <date>-<sha>     published by CI from main, a real artifact
 #
 # Replacing a local build throws away whatever was being tested, which is
 # almost never what someone wants from a button on the printer. Rolling builds

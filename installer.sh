@@ -78,8 +78,8 @@ fi
 # kill pip cache to free up overlayfs
 rm -rf /root/.cache
 
-# One channel. The rolling release is replaced on every push to main.
-ASSET_URL="https://github.com/JuggyMcNutty/vibescreen/releases/download/rolling/$ASSET_NAME.tar.gz"
+# Every push to main publishes its own release, so latest is the newest build.
+ASSET_URL="https://github.com/JuggyMcNutty/vibescreen/releases/latest/download/$ASSET_NAME.tar.gz"
 
 printf "${green} Downloading asset: $ASSET_NAME.tar.gz ${white}\n"
 

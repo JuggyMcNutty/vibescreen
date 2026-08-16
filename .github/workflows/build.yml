@@ -1,7 +1,7 @@
 name: build
 
-# Replaces the workflow inherited from upstream. Three things changed and are
-# worth knowing before editing this file.
+# Replaces the workflow inherited from upstream. Three things are worth knowing
+# before editing this file.
 #
 # It no longer runs inside ballaswag/guppydev:latest. That is an unpinned image
 # on an abandoned account, so it could change or disappear underneath us, and it
@@ -12,21 +12,43 @@ name: build
 # CI and a developer's machine cannot drift apart. Adding a build flag means
 # editing the script, not this file.
 #
-# It publishes one rolling release, replaced on every push to main. That is the
-# only channel this project has, so it is a normal release rather than a
-# prerelease: marking it a prerelease would leave the repo with no "latest"
-# release at all and break the releases/latest URLs the installer uses.
+# Every push to main that builds cleanly publishes its own release, tagged
+# <date>-<sha>, so the release list is a build history rather than a single
+# entry that keeps getting overwritten. There is no separate stable track, so
+# these are normal releases and the newest one is what releases/latest resolves
+# to, which is what update.sh and the installers follow.
 
 on:
   push:
     branches: [ "main" ]
-    tags: [ "*" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
+  # Worked out once and shared, so the string compiled into the binary and
+  # written into .version cannot disagree with the tag the release ends up
+  # under. Computing it in both places races across UTC midnight.
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      release: ${{ steps.pick.outputs.release }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "version=$(date -u +%Y.%m.%d)-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+            echo "release=true" >> $GITHUB_OUTPUT
+          else
+            # Not published anywhere, and update.sh refuses to overwrite a
+            # binary versioned this way.
+            echo "version=dev-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+            echo "release=false" >> $GITHUB_OUTPUT
+          fi
+
   build:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +71,8 @@ jobs:
             asset: guppyscreen-arm
 
     runs-on: ubuntu-24.04
+    env:
+      GUPPYSCREEN_VERSION: ${{ needs.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v5
@@ -75,19 +99,6 @@ jobs:
       - name: fetch mips toolchain
         if: matrix.target == 'mips'
         run: scripts/setup-toolchain.sh
-
-      # Two shapes, and update.sh keys off them. dev-<sha> marks something not
-      # published anywhere, so it refuses to overwrite it. rolling-<sha> is a
-      # published artifact and updates normally.
-      - name: set version
-        run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "GUPPYSCREEN_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "GUPPYSCREEN_VERSION=rolling-${GITHUB_SHA::8}" >> $GITHUB_ENV
-          else
-            echo "GUPPYSCREEN_VERSION=dev-${GITHUB_SHA::8}" >> $GITHUB_ENV
-          fi
 
       - name: build
         run: |
@@ -129,16 +140,9 @@ jobs:
           name: ${{ matrix.asset }}
           path: ./${{ matrix.asset }}.tar.gz
 
-      - name: tagged release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v3
-        with:
-          files: ${{ matrix.asset }}.tar.gz
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-
   simulator:
     # Builds what developers actually run, which the upstream matrix never did.
+    needs: version
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -154,55 +158,58 @@ jobs:
       - name: build
         run: scripts/build.sh sim
 
-  # The rolling release, published once after everything has built. This is
-  # the only channel we publish to, so it is what update.sh takes by default.
-  #
-  # Done as its own job rather than a step in the matrix because four parallel
-  # jobs writing the same tag race each other to create it. It also means a
-  # broken variant, or a broken simulator build, blocks the publish instead of
-  # producing a half populated release.
-  #
-  # The tag stays 'rolling' while its contents change every push, so the tag
-  # cannot identify a build. The release name carries rolling-<sha>, the same
-  # string release.sh writes into .version, and that is what update.sh compares
-  # against to decide whether you already have it.
-  rolling:
-    needs: [ build, simulator ]
-    if: github.event_name == 'push' && github.ref_type == 'branch'
+  # Published once, after the whole matrix and the simulator build have passed.
+  # As a step inside the matrix, four parallel jobs race to create the same tag,
+  # and a broken variant still produces a half populated release.
+  release:
+    needs: [ version, build, simulator ]
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v6
         with:
           path: dist
 
-      - name: name the build
-        run: echo "GUPPYSCREEN_VERSION=rolling-${GITHUB_SHA::8}" >> $GITHUB_ENV
-
       - uses: softprops/action-gh-release@v3
         with:
-          tag_name: rolling
-          name: ${{ env.GUPPYSCREEN_VERSION }}
+          tag_name: ${{ needs.version.outputs.version }}
+          name: ${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           files: dist/**/*.tar.gz
           fail_on_unmatched_files: true
           body: |
-            Rolling build of `main`, replaced on every push. This is the only
-            channel this project publishes; there is no separate stable track.
-            Not tested on a printer before publishing.
+            Built from [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}).
 
-            Built from ${{ github.sha }}.
+            ### Which file
 
-            K1 and K1 Max want `guppyscreen.tar.gz`, or
-            `guppyscreen-zbolt.tar.gz` for the Z-Bolt icon set. Smaller panels
-            such as the Ender 3 V3 KE and Nebula Pad want
-            `guppyscreen-smallscreen.tar.gz`. `guppyscreen-arm.tar.gz` is for
-            aarch64 boards like a Pi or BTT Pad.
+            | Download | For |
+            | --- | --- |
+            | `guppyscreen.tar.gz` | K1 and K1 Max, Material icons |
+            | `guppyscreen-zbolt.tar.gz` | K1 and K1 Max, Z-Bolt icons |
+            | `guppyscreen-smallscreen.tar.gz` | Ender 3 V3 KE, Nebula Pad |
+            | `guppyscreen-arm.tar.gz` | aarch64 boards such as a Pi or BTT Pad |
 
-            To move an existing install onto this:
+            ### Installing
 
-                /usr/data/guppyscreen/update.sh
+            **Already running vibescreen.** Press Update in the settings panel,
+            or over SSH:
 
-            Locally built binaries are versioned `dev-<sha>` and will not be
-            replaced without `--force`.
+            ```
+            /usr/data/guppyscreen/update.sh
+            ```
+
+            **New install, or coming from the original guppyscreen.** Run the
+            installer once over SSH:
+
+            ```
+            sh -c "$(wget --no-check-certificate -qO - https://raw.githubusercontent.com/${{ github.repository }}/main/installer.sh)"
+            ```
+
+            Append `-s zbolt` for the Z-Bolt icon set.
+
+            The original guppyscreen's updater points at the upstream project,
+            so running it will not pick this up. Use the installer to switch
+            across; it keeps your existing `guppyconfig.json`.
 
 permissions:
   contents: write
