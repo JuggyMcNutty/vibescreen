@@ -1,6 +1,7 @@
 #include "printer_select_panel.h"
 #include "guppyscreen.h"
 #include "config.h"
+#include "utils.h"
 #include "hv/json.hpp"
 #include "subprocess.hpp"
 
@@ -203,8 +204,12 @@ PrinterSelectPanel::PrinterSelectPanel()
       auto pname = std::string(lv_textarea_get_text(p->printer_name));
       auto ip = std::string(lv_textarea_get_text(p->moonraker_ip));
 
+      // lv_textarea_get_text never returns NULL for a non-password textarea,
+      // it returns "" for an empty field, so the old NULL check never fired
+      // and std::stoi("") threw instead of falling back to 7125. The field
+      // only accepts digits, so empty is the one bad input that reaches here.
       const char *mp = lv_textarea_get_text(p->moonraker_port);
-      auto port = mp != NULL ? std::stoi(mp) : 7125;
+      auto port = KUtils::parse_int(mp != NULL ? mp : "", 7125);
 
       json new_printer = {
 	      {"moonraker_api_key", false},
