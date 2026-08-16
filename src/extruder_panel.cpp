@@ -1,9 +1,67 @@
 #include "extruder_panel.h"
 #include "state.h"
 #include "config.h"
+#include "utils.h"
 #include "spdlog/spdlog.h"
 
 #include <limits>
+
+namespace {
+  // Don't reheat when we are already there. A couple of degrees of slack keeps
+  // a normal PID wobble from counting as "not at temperature".
+  const int HEAT_HYSTERESIS_C = 3;
+
+  // Above this many options the row is split in two, otherwise buttons get too
+  // narrow to hit on a 480px wide panel.
+  const size_t MAX_OPTIONS_PER_ROW = 7;
+
+  std::string format_option(double v) {
+    if (v == (long long)v) {
+      return fmt::format("{}", (long long)v);
+    }
+    return fmt::format("{:g}", v);
+  }
+
+  // Turn a config array of numbers into selector labels plus the values behind
+  // them. Labels may contain a "\n" row break; values never do, so value
+  // indexes line up with LVGL button indexes.
+  void build_options(const std::string &config_key,
+		     const std::vector<double> &fallback,
+		     std::vector<std::string> &labels,
+		     std::vector<double> &values) {
+    values.clear();
+    labels.clear();
+
+    Config *conf = Config::get_instance();
+    json &configured = conf->get_json(conf->df() + config_key);
+
+    if (configured.is_array()) {
+      for (const auto &el : configured) {
+	if (el.is_number()) {
+	  values.push_back(el.template get<double>());
+	} else {
+	  spdlog::warn("ignoring non-numeric entry in {}: {}", config_key, el.dump());
+	}
+      }
+    }
+
+    if (values.empty()) {
+      spdlog::info("{} missing or unusable, using built in defaults", config_key);
+      values = fallback;
+    }
+
+    size_t split_at = values.size() > MAX_OPTIONS_PER_ROW
+      ? (values.size() + 1) / 2
+      : values.size();
+
+    for (size_t i = 0; i < values.size(); i++) {
+      if (i == split_at) {
+	labels.push_back("\n");
+      }
+      labels.push_back(format_option(values[i]));
+    }
+  }
+}
 
 LV_IMG_DECLARE(back);
 LV_IMG_DECLARE(spoolman_img);
@@ -42,7 +100,24 @@ ExtruderPanel::ExtruderPanel(KWebSocketClient &websocket_client,
   , load_filament_macro("LOAD_FILAMENT")
   , unload_filament_macro("UNLOAD_FILAMENT")
   , cooldown_macro("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0")
+  , current_temp(-1)
+  , current_target(-1)
+  , min_extrude_temp(0.0)
 {
+  // The selectors above are built with the historical option lists so they are
+  // always valid. The real lists come from config and replace them here.
+  {
+    std::vector<std::string> labels;
+    build_options("extrude_temps", {180, 190, 200, 210, 220, 230, 240}, labels, temp_values);
+    temp_selector.set_options(labels, 6);
+
+    build_options("extrude_lengths", {5, 10, 15, 20, 25, 30, 35}, labels, length_values);
+    length_selector.set_options(labels, 1);
+
+    build_options("extrude_speeds", {1, 2, 5, 10, 25, 35, 50}, labels, speed_values);
+    speed_selector.set_options(labels, 3);
+  }
+
   Config *conf = Config::get_instance();
   auto df = conf->get_json("/default_printer");
   if (!df.empty()) {
@@ -140,14 +215,126 @@ void ExtruderPanel::consume(json& j) {
   auto target_value = j["/params/0/extruder/target"_json_pointer];
   if (!target_value.is_null()) {
     int target = target_value.template get<int>();
+    current_target = target;
     extruder_temp.update_target(target);
   }
-  
+
   auto temp_value = j["/params/0/extruder/temperature"_json_pointer];
-  if (!temp_value.is_null()) {   
+  if (!temp_value.is_null()) {
     int value = temp_value.template get<int>();
+    current_temp = value;
     extruder_temp.update_value(value);
   }
+}
+
+// Signature matches the other panel init hooks dispatched from MainPanel::init.
+// The limits come from State rather than the payload, so j is unused here.
+void ExtruderPanel::init(json &) {
+  apply_extrude_limits();
+}
+
+void ExtruderPanel::apply_extrude_limits() {
+  State *s = State::get_instance();
+  auto v = s->get_data("/printer_state/configfile/settings/extruder"_json_pointer);
+  if (v.is_null()) {
+    spdlog::debug("no extruder config reported, leaving all options enabled");
+    return;
+  }
+
+  // A hotend that cannot go above max_temp will refuse the target outright, so
+  // grey those options out rather than letting the command error.
+  if (v.contains("max_temp") && v["max_temp"].is_number()) {
+    double max_temp = v["max_temp"].template get<double>();
+    for (size_t i = 0; i < temp_values.size(); i++) {
+      temp_selector.set_enabled(i, temp_values[i] <= max_temp);
+    }
+    spdlog::debug("extruder max_temp {}", max_temp);
+  }
+
+  // Klipper rejects a single extrude only move longer than this. The default
+  // is 50mm, so the longer purge options are unusable on a stock config.
+  if (v.contains("max_extrude_only_distance") && v["max_extrude_only_distance"].is_number()) {
+    double max_len = v["max_extrude_only_distance"].template get<double>();
+    for (size_t i = 0; i < length_values.size(); i++) {
+      length_selector.set_enabled(i, length_values[i] <= max_len);
+    }
+    spdlog::debug("extruder max_extrude_only_distance {}", max_len);
+  }
+
+  if (v.contains("min_extrude_temp") && v["min_extrude_temp"].is_number()) {
+    min_extrude_temp = v["min_extrude_temp"].template get<double>();
+    spdlog::debug("extruder min_extrude_temp {}", min_extrude_temp);
+  }
+
+  refresh_extrude_buttons();
+}
+
+// Extruding below min_extrude_temp is refused by Klipper, so disable the two
+// buttons that would do it rather than sending a doomed move. Load and unload
+// are left alone, since those run macros that handle their own heating.
+void ExtruderPanel::refresh_extrude_buttons() {
+  uint32_t idx = temp_selector.get_selected_idx();
+  if (idx >= temp_values.size()) {
+    return;
+  }
+
+  if (temp_values[idx] < min_extrude_temp) {
+    extrude_btn.disable();
+    retract_btn.disable();
+  } else {
+    extrude_btn.enable();
+    retract_btn.enable();
+  }
+}
+
+// direction is 1 to extrude, -1 to retract.
+void ExtruderPanel::send_extrude_move(int direction) {
+  const char *temp = temp_selector.selected_text();
+  const char *len = length_selector.selected_text();
+  const char *speed = speed_selector.selected_text();
+
+  if (temp == nullptr || len == nullptr || speed == nullptr) {
+    spdlog::error("extrude aborted, a selector has no valid selection");
+    return;
+  }
+
+  // Guarded parses. These come from config, so a bad entry must not take the
+  // process down. A feedrate of zero is rejected by Klipper, so fall back to a
+  // slow but valid speed rather than sending F0.
+  double speed_mms = KUtils::parse_double(speed, 5.0);
+  if (speed_mms <= 0.0) {
+    spdlog::warn("extrude speed '{}' is not positive, using 5 mm/s", speed);
+    speed_mms = 5.0;
+  }
+  double feedrate = speed_mms * 60.0;
+
+  std::string gcode;
+
+  // Only reheat when we are not already sitting at the selected temperature.
+  // Checking the reading alone is not enough: at 240 with a target of 0 the
+  // hotend is on its way down, and extruding into it would be wrong.
+  int wanted = KUtils::parse_int(temp, -1);
+  bool at_temp = wanted >= 0
+    && current_target == wanted
+    && current_temp >= wanted - HEAT_HYSTERESIS_C;
+
+  if (!at_temp) {
+    gcode += fmt::format("M109 S{}\n", temp);
+  } else {
+    spdlog::debug("already at {}C with target {}, skipping M109", current_temp, current_target);
+  }
+
+  // M83 changes the extrusion mode globally and nothing used to change it
+  // back, so purging during a paused print left the rest of that print running
+  // in relative extrusion. Save and restore around the move instead.
+  // RESTORE_GCODE_STATE defaults to MOVE=0, so it restores the mode without
+  // moving the toolhead.
+  gcode += "SAVE_GCODE_STATE NAME=guppy_extrude\n";
+  gcode += "M83\n";
+  gcode += fmt::format("G1 E{}{} F{:g}\n", direction < 0 ? "-" : "", len, feedrate);
+  gcode += "RESTORE_GCODE_STATE NAME=guppy_extrude";
+
+  ws.gcode_script(gcode);
 }
 
 void ExtruderPanel::handle_callback(lv_event_t *e) {
@@ -159,6 +346,7 @@ void ExtruderPanel::handle_callback(lv_event_t *e) {
 
     if (selector == temp_selector.get_selector()) {
       temp_selector.set_selected_idx(idx);
+      refresh_extrude_buttons();
     }
 
     if (selector == length_selector.get_selector()) {
@@ -182,29 +370,20 @@ void ExtruderPanel::handle_callback(lv_event_t *e) {
     }
 
     if (btn == extrude_btn.get_container()) {
-      const char * temp = lv_btnmatrix_get_btn_text(temp_selector.get_selector(),
-						   temp_selector.get_selected_idx());
-      const char * len = lv_btnmatrix_get_btn_text(length_selector.get_selector(),
-						   length_selector.get_selected_idx());
-      const char *speed = lv_btnmatrix_get_btn_text(speed_selector.get_selector(),
-						    speed_selector.get_selected_idx());
-      ws.gcode_script(fmt::format("M109 S{}\nM83\nG1 E{} F{}", temp, len, std::stoi(speed) * 60));
+      send_extrude_move(1);
     }
 
     if (btn == retract_btn.get_container()) {
-      const char * temp = lv_btnmatrix_get_btn_text(temp_selector.get_selector(),
-						   temp_selector.get_selected_idx());
-      const char * len = lv_btnmatrix_get_btn_text(length_selector.get_selector(),
-						   length_selector.get_selected_idx());
-      const char *speed = lv_btnmatrix_get_btn_text(speed_selector.get_selector(),
-						    speed_selector.get_selected_idx());
-      ws.gcode_script(fmt::format("M109 S{}\nM83\nG1 E-{} F{}", temp, len, std::stoi(speed) * 60));
+      send_extrude_move(-1);
     }
 
     if (btn == unload_btn.get_container()) {
       if (unload_filament_macro == "_GUPPY_QUIT_MATERIAL") {
-        const char *temp = lv_btnmatrix_get_btn_text(temp_selector.get_selector(),
-                                                     temp_selector.get_selected_idx());
+        const char *temp = temp_selector.selected_text();
+        if (temp == nullptr) {
+          spdlog::error("unload aborted, no temperature selected");
+          return;
+        }
         ws.gcode_script(fmt::format("{} EXTRUDER_TEMP={}", unload_filament_macro, temp));
       } else {
         ws.gcode_script(unload_filament_macro);
@@ -213,10 +392,12 @@ void ExtruderPanel::handle_callback(lv_event_t *e) {
 
     if (btn == load_btn.get_container()) {
       if (load_filament_macro == "_GUPPY_LOAD_MATERIAL") {
-        const char *temp = lv_btnmatrix_get_btn_text(temp_selector.get_selector(),
-                                                     temp_selector.get_selected_idx());
-        const char *len = lv_btnmatrix_get_btn_text(length_selector.get_selector(),
-                                                    length_selector.get_selected_idx());
+        const char *temp = temp_selector.selected_text();
+        const char *len = length_selector.selected_text();
+        if (temp == nullptr || len == nullptr) {
+          spdlog::error("load aborted, no temperature or length selected");
+          return;
+        }
         ws.gcode_script(fmt::format("{} EXTRUDER_TEMP={} EXTRUDE_LEN={}", load_filament_macro, temp, len));
       } else {
         ws.gcode_script(load_filament_macro);
