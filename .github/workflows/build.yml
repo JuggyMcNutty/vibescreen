@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -66,7 +66,7 @@ jobs:
       # setup-toolchain.sh caches the archive here, so a hit skips the download.
       - name: cache mips toolchain
         if: matrix.target == 'mips'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/guppyscreen
           key: mips32el-musl-stable-2025.08-1
@@ -106,14 +106,14 @@ jobs:
           chmod +x ./release.sh
           ./release.sh ${{ matrix.asset }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.asset }}
           path: ./${{ matrix.asset }}.tar.gz
 
       - name: release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.asset }}.tar.gz
           generate_release_notes: true
@@ -123,7 +123,7 @@ jobs:
     # Builds what developers actually run, which the upstream matrix never did.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
