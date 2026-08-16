@@ -47,6 +47,12 @@ PRINTER_HOST=192.168.1.202 scripts/build.sh sim   # point the sim at a printer
 Output is `build/bin/guppyscreen` for both. Switching targets rebuilds the
 vendored libraries automatically, tracked via `.vendor-target`.
 
+The simulator ignores `SIGTERM` and only exits on `SIGINT`, because SDL installs
+its own handler and nothing consumes the resulting quit event. So `timeout 20
+./guppyscreen` hangs, and you want `timeout -s INT 20 ./guppyscreen` or
+`pkill -x guppyscreen`. This is SDL-specific: the framebuffer build has no such
+handler and dies on `SIGTERM` normally, so the printer's init script is fine.
+
 Host packages needed: `base-devel`, `cmake`, `sdl2` (or `sdl2-compat`),
 `sshpass` for the printer probe.
 
@@ -132,6 +138,11 @@ grumpyscreen  pellcorp/grumpyscreen     a live fork, reference only
 
 `upstream` and `grumpyscreen` both have their push URL set to a bogus string so
 a stray `git push` to either fails loudly instead of trying.
+
+`grumpyscreen` is configured with `tagOpt = --no-tags`. Do not undo that. One of
+their releases is tagged literally `main`, and fetching it creates a
+`refs/tags/main` that collides with our branch, after which every `git push
+origin main` dies with "src refspec main matches more than one".
 
 Our repo is named **vibescreen**, but nothing inside the tree has been renamed:
 the binary, the install paths, the config file and the init script are all still
