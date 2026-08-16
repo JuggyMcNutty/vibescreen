@@ -1,0 +1,195 @@
+# AGENTS.md
+
+Onboarding for anyone new to this repo, human or AI. Read this before the
+upstream `README.md` or `DEVELOPMENT.md`, both of which are stale in ways that
+will waste your time.
+
+## What this is
+
+Guppyscreen is a touch UI for Klipper printers, talking to Moonraker over a
+websocket, built on LVGL as a standalone binary with no X or Wayland underneath.
+It draws straight to `/dev/fb0` and reads touch from `/dev/input/event0`.
+
+This repo is a **takeover of an abandoned project**. Upstream
+`ballaswag/guppyscreen` stopped at commit `07409cb` on 2024-07-15 with 69 open
+issues. We forked from that commit and are picking it back up.
+
+Our target is a **Creality K1 Max**. Everything measured about it is in
+`docs/k1max-facts.md`. Do not guess at hardware details, that file has the real
+values.
+
+## Read these first
+
+| File | What it is for |
+| --- | --- |
+| `docs/k1max-facts.md` | Real hardware, firmware, framebuffer and input values from the printer |
+| `docs/audit.md` | Known bugs in the inherited code, with severity and suggested order |
+| `DEVELOPMENT.md` | Upstream's. **Wrong about the toolchain.** See below |
+
+## Build
+
+Two targets. Both go through one script.
+
+```sh
+scripts/setup-toolchain.sh          # once, downloads the cross toolchain
+scripts/build.sh mips               # K1 / K1 Max binary
+scripts/build.sh sim                # x86_64 SDL build that runs on your desktop
+```
+
+Useful variants:
+
+```sh
+scripts/build.sh mips zbolt         # Z-Bolt icon set instead of Material
+scripts/build.sh mips --clean       # rebuild the vendored libs too
+PRINTER_HOST=192.168.1.202 scripts/build.sh sim   # point the sim at a printer
+```
+
+Output is `build/bin/guppyscreen` for both. Switching targets rebuilds the
+vendored libraries automatically, tracked via `.vendor-target`.
+
+Host packages needed: `base-devel`, `cmake`, `sdl2` (or `sdl2-compat`),
+`sshpass` for the printer probe.
+
+### The toolchain, and why DEVELOPMENT.md is wrong
+
+`DEVELOPMENT.md` tells you to use the Ingenic `mips-gcc720-glibc229` toolchain.
+That is what built the last tagged release, `0.0.26-beta`, which is dynamically
+linked against `/lib/ld-linux-mipsn8.so.1` and only runs on firmware carrying
+glibc 2.29. That is why upstream's `installer.sh` refuses to install unless it
+finds `/lib/ld-2.29.so`.
+
+Since commit `a42427cb` the real build, and every published nightly, uses a
+Bootlin musl toolchain and links fully static. `.github/workflows/build.yml` is
+the source of truth, not the docs.
+
+We use Bootlin `mips32el--musl--stable-2025.08-1`: gcc 14.3.0, binutils 2.43.1,
+musl 1.2.5. Static, so the K1's glibc version is irrelevant to us.
+
+Known-good fallback if gcc 14 ever becomes more trouble than it is worth:
+`mips32el--musl--stable-2024.02-1` (gcc 12.3.0), which is what upstream CI and
+`pellcorp/grumpyscreen` both use. Change the two constants at the top of
+`scripts/setup-toolchain.sh`.
+
+### Verifying a mips build without a printer
+
+Compare the ELF against upstream's published nightly, which is the binary
+currently installed on our K1 Max:
+
+```sh
+toolchains/mips32el--musl--stable-2025.08-1/bin/mipsel-linux-readelf -h build/bin/guppyscreen
+```
+
+Expect `ELF32`, little endian, `EXEC`, `MIPS`, and flags **`0x50001007`**
+(`noreorder, pic, cpic, o32, mips32`). There must be no `INTERP` or `DYNAMIC`
+program header. Stripped size lands near 6.3 MB against upstream's 6.0 MB.
+
+XBurst2 is MIPS32r2, so never emit MIPS r6 instructions.
+
+## Repo layout
+
+```
+src/                  the application, 92 files, all ours to maintain
+lvgl/                 submodule, v8.3.11
+lv_drivers/           submodule, v8.3.0
+libhv/                submodule, websocket and http client
+spdlog/               submodule, logging
+wpa_supplicant/       vendored hostap copy, built only for libwpa_client.a
+lv_touch_calibration/ in-tree, not a submodule, touch calibration screens
+patches/              three patches applied to submodules, see below
+k1/                   payload installed onto the printer, init scripts and klippy modules
+assets/               generated LVGL C arrays for icons and fonts
+debian/               Raspberry Pi and Debian packaging, plus the config template
+scripts/              ours, see below
+docs/                 ours
+```
+
+`scripts/` is all new in this fork:
+
+| Script | Purpose |
+| --- | --- |
+| `setup-toolchain.sh` | Downloads and unpacks the cross toolchain. Idempotent |
+| `apply-patches.sh` | Applies `patches/` to submodules. Idempotent |
+| `build.sh` | Builds either target |
+| `probe-printer.sh` | Read-only fact gathering from a printer over SSH |
+
+### The patches
+
+Three patches in `patches/` must be applied to submodules before building. They
+are not committed into the submodules, so a fresh clone or a `git submodule
+update` silently reverts them and the build then fails confusingly.
+`scripts/apply-patches.sh` handles this and `scripts/build.sh` calls it every
+time, so you should not need to think about it. Never `git add` a submodule
+pointer change; `git status` showing `m lvgl` and friends is expected and
+correct.
+
+## Git remotes
+
+```
+upstream      ballaswag/guppyscreen     the abandoned original, fetch only
+grumpyscreen  pellcorp/grumpyscreen     a live fork, reference only
+```
+
+Both have their push URL set to a bogus string so a stray `git push` fails
+loudly instead of trying. There is no `origin` yet; add one when we publish.
+
+We work directly on `main`, stacking our commits on upstream history.
+
+**On grumpyscreen:** it is 233 commits ahead and still active, but it is a
+narrowing fork for pellcorp's Simple AF firmware and much of that lead is
+deletion. It dropped bedmesh, input shaper, belt calibration, TMC tuning,
+multi-printer and theming, which is most of what we care about on a K1 Max. Good
+for reference on touch calibration, wifi and lv_drivers. Not something we can
+bulk merge. Detail in `docs/audit.md`.
+
+## The printer
+
+Development printer is a K1 Max. Rules:
+
+- **Read only.** We pull facts off it, we do not install onto it. Ask before
+  anything that writes.
+- Credentials come from the environment, never from a committed file:
+  `PRINTER_HOST=... PRINTER_PASS=... scripts/probe-printer.sh`
+- Never commit the SSID, PSK, MAC addresses, printer serial or the Moonraker API
+  key. `probe-printer.sh` strips the API key on the printer before it crosses
+  the wire; the rest is on you to check.
+- Its `curl` is a cut-down build that rejects `-s` and `--max-time`. Use
+  `wget -q -T <sec> -O -` in anything that runs on the printer.
+- Moonraker was down on it when last probed, so the sim has nothing live to talk
+  to until that is sorted. Klipper itself is running.
+
+## Threading model
+
+Two threads, and the boundary is where the bugs are.
+
+- **LVGL thread**: the main loop, all widget calls.
+- **libhv event loop thread**: `WebSocketClient::onmessage` in
+  `src/websocket_client.cpp`, which drives every `NotifyConsumer::consume`, which
+  is what updates `State`.
+
+LVGL is not thread safe. Panels take `lv_lock` around widget work. `State` has
+its own separate mutex, and per `docs/audit.md` C1 that mutex does not actually
+protect the reference-returning accessors. Read C1 before touching anything in
+`src/state.cpp` or adding a new `get_data` caller.
+
+## House style
+
+The point is that a human or an AI picking this up in a year can read it.
+
+- Small, focused commits. One concern each. Explain **why** in the body, not
+  what the diff already shows.
+- No em dashes. No emoji. No "comprehensive", "robust", "seamlessly", or other
+  filler.
+- Comments explain why, not what. A comment restating the code is worse than no
+  comment.
+- Match the surrounding code. `src/` is LVGL-flavoured C++17, two space indent,
+  `snake_case` methods, `Panel` suffix on panel classes.
+- When you find something broken but out of scope, add it to `docs/audit.md`
+  rather than fixing it inline.
+- Verify claims before writing them down. Several things in this file looked
+  obvious and turned out to be wrong when actually checked.
+
+## Keep this file current
+
+Any change that alters a build command, a script, the repo layout or the remote
+setup updates `AGENTS.md` **in the same commit**. A stale onboarding doc is worse
+than none, which is exactly the problem `DEVELOPMENT.md` has.
