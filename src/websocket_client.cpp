@@ -210,9 +210,30 @@ int KWebSocketClient::send_jsonrpc(const std::string &method) {
   return send_rpc(method, nullptr, id++);
 }
 
+void KWebSocketClient::set_error_handler(std::function<void(const std::string&)> cb) {
+  error_handler = cb;
+}
+
 int KWebSocketClient::gcode_script(const std::string &gcode) {
   json cmd = {{ "script", gcode }};
-  return send_jsonrpc("printer.gcode.script", cmd);
+
+  // Check the reply. This used to be fire and forget, so a command Klipper
+  // refused produced no log line and nothing on screen, which meant every
+  // limit the UI enforces was advisory only. This runs on the libhv thread.
+  return send_jsonrpc("printer.gcode.script", cmd, [this, gcode](json &reply) {
+    if (!reply.contains("error")) {
+      return;
+    }
+
+    std::string message = reply["/error/message"_json_pointer].is_string()
+      ? reply["/error/message"_json_pointer].template get<std::string>()
+      : reply["error"].dump();
+
+    spdlog::error("klipper rejected gcode '{}': {}", gcode, message);
+    if (error_handler) {
+      error_handler(message);
+    }
+  });
 }
 
 void KWebSocketClient::register_method_callback(std::string resp_method,

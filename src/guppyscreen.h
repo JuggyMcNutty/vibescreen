@@ -27,6 +27,8 @@ class GuppyScreen {
 #endif
   static std::mutex lv_lock;
   static KWebSocketClient ws;
+  // At most one error dialog at a time, see show_error.
+  static lv_obj_t *error_box;
 
   SpoolmanPanel spoolman_panel;
   MainPanel main_panel;
@@ -47,6 +49,10 @@ class GuppyScreen {
   static void handle_calibrated(lv_event_t *event);
   static void save_calibration_coeff(lv_tc_coeff_t coeff);
   static void refresh_theme();
+
+  // Show a message the user needs to see, currently a rejected gcode command.
+  // Safe to call from the websocket thread: it takes lv_lock itself.
+  static void show_error(const std::string &message);
 };
 
 #endif  // __GUPPY_SCREEN_H__

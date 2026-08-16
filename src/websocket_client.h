@@ -37,7 +37,11 @@ class KWebSocketClient : public hv::WebSocketClient {
   void register_method_callback(std::string resp_method,
 				std::string handler_name,
 				std::function<void(json&)> cb);
-  
+
+  // Called with the message text whenever Klipper rejects a gcode command.
+  // Install it before connect(), it is read from the libhv thread afterwards.
+  void set_error_handler(std::function<void(const std::string&)> cb);
+
  private:
   // Sends the request and returns, without registering anything. The id is
   // allocated by the caller so that a caller which also registers a handler can
@@ -67,6 +71,9 @@ class KWebSocketClient : public hv::WebSocketClient {
   // method_name : { <unique-name-cb-handler> :handler-cb }
   std::map<std::string, std::map<std::string, std::function<void(json&)>>> method_resp_cbs;
   std::atomic_uint64_t id;
+
+  // Set once before connect(), so it needs no lock of its own.
+  std::function<void(const std::string&)> error_handler;
 };
 
 #endif //__KWEBSOCKET_CLIENT_H__

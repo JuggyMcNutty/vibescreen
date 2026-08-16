@@ -32,6 +32,7 @@ lv_obj_t *GuppyScreen::screen_saver = NULL;
 KWebSocketClient GuppyScreen::ws(NULL);
 
 std::mutex GuppyScreen::lv_lock;
+lv_obj_t *GuppyScreen::error_box = NULL;
 
 GuppyScreen::GuppyScreen()
   : spoolman_panel(ws, lv_lock)
@@ -258,12 +259,58 @@ void GuppyScreen::loop() {
   }
 }
 
+void GuppyScreen::show_error(const std::string &message) {
+  // Called from the libhv thread, so take the UI lock before touching LVGL.
+  // Safe against the websocket client's own lock because handlers are always
+  // invoked after it has been released, see the note on cb_lock.
+  std::lock_guard<std::mutex> guard(lv_lock);
+
+  // Coalesce. A run of rejections must not stack a dialog per failure, which
+  // would bury the screen and need one tap each to clear.
+  if (error_box != NULL) {
+    lv_label_set_text(lv_msgbox_get_text(error_box), message.c_str());
+    return;
+  }
+
+  static const char *btns[] = {"Close", ""};
+  error_box = lv_msgbox_create(NULL, "Printer rejected the command",
+			       message.c_str(), btns, false);
+
+  lv_obj_t *text = lv_msgbox_get_text(error_box);
+  lv_obj_set_width(text, LV_PCT(100));
+  lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *btnm = lv_msgbox_get_btns(error_box);
+  lv_obj_add_flag(btnm, LV_OBJ_FLAG_FLOATING);
+  lv_obj_align(btnm, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+  auto hscale = (double)lv_disp_get_physical_ver_res(NULL) / 480.0;
+  lv_obj_set_size(btnm, LV_PCT(90), 50 * hscale);
+  lv_obj_set_size(error_box, LV_PCT(80), LV_PCT(45));
+  lv_obj_center(error_box);
+
+  lv_obj_add_event_cb(error_box, [](lv_event_t *e) {
+    lv_msgbox_close(lv_obj_get_parent(lv_event_get_target(e)));
+  }, LV_EVENT_VALUE_CHANGED, NULL);
+
+  // Clear the handle however it goes away, so the next error can open a new one.
+  lv_obj_add_event_cb(error_box, [](lv_event_t *) {
+    GuppyScreen::error_box = NULL;
+  }, LV_EVENT_DELETE, NULL);
+}
+
 std::mutex &GuppyScreen::get_lock() {
     return lv_lock;
 }
 
 void GuppyScreen::connect_ws(const std::string &url) {
   init_panel.set_message(LV_SYMBOL_WARNING " Waiting for printer to initialize...");
+
+  // Installed before connect so it is never read while being written.
+  ws.set_error_handler([](const std::string &message) {
+    GuppyScreen::show_error(message);
+  });
+
   ws.connect(url.c_str(),
    [this]() { init_panel.connected(ws); },
    [this]() { init_panel.disconnected(ws); });
