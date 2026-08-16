@@ -23,7 +23,14 @@ TARBALL=/tmp/guppyscreen-update.tar.gz
 REPO=${GUPPY_UPDATE_REPO:-JuggyMcNutty/vibescreen}
 
 FORCE=false
-[ "${1:-}" = "--force" ] && FORCE=true
+NIGHTLY=false
+for arg in "$@"; do
+    case "$arg" in
+        --force)   FORCE=true ;;
+        --nightly) NIGHTLY=true ;;
+        *) echo "usage: $(basename "$0") [--nightly] [--force]"; exit 1 ;;
+    esac
+done
 
 PY=$(command -v python3 || command -v python || true)
 if [ -z "$PY" ]; then
@@ -45,13 +52,20 @@ print(d.get('asset_name','guppyscreen.tar.gz'))" "$VERSION_FILE" 2>/dev/null || 
 fi
 
 echo "Installed version: $CURRENT_VERSION"
-echo "Checking $REPO for a newer release"
+if [ "$NIGHTLY" = true ]; then
+    echo "Checking $REPO for the latest nightly"
+else
+    echo "Checking $REPO for a newer release"
+fi
 
 # Prints "<tag>\t<download url>" for the newest release carrying our asset, or
-# nothing at all if there is no usable release.
+# exits 2 if there is no usable one.
+#
+# Nightlies are prereleases and are skipped unless asked for, so someone on a
+# stable build is never quietly moved onto whatever last landed on main.
 LATEST=$("$PY" -c "
 import json, sys, urllib.request
-repo, asset = sys.argv[1], sys.argv[2]
+repo, asset, nightly = sys.argv[1], sys.argv[2], sys.argv[3] == 'true'
 try:
     with urllib.request.urlopen(
             'https://api.github.com/repos/%s/releases' % repo, timeout=30) as r:
@@ -62,16 +76,32 @@ except Exception as e:
 for rel in releases:
     if rel.get('draft'):
         continue
+    if rel.get('prerelease') and not nightly:
+        continue
+    if nightly and not rel.get('prerelease'):
+        continue
     for a in rel.get('assets', []):
         if a.get('name') == asset:
-            print('%s\t%s' % (rel.get('tag_name', ''), a.get('browser_download_url', '')))
+            # Identity, not tag. The nightly release keeps the tag 'nightly'
+            # forever while its contents change every push, so the tag can
+            # never tell us whether we already have it. CI puts the same
+            # nightly-<sha> string in the release name as it puts in .version,
+            # so that is what we compare. For a stable release GitHub defaults
+            # the name to the tag, so this is the tag.
+            print('%s\t%s' % (rel.get('name') or rel.get('tag_name', ''),
+                              a.get('browser_download_url', '')))
             sys.exit(0)
 sys.exit(2)
-" "$REPO" "$ASSET_NAME" 2>&1)
+" "$REPO" "$ASSET_NAME" "$NIGHTLY" 2>&1)
 RC=$?
 
 if [ $RC -eq 2 ]; then
-    echo "No release in $REPO publishes $ASSET_NAME yet, nothing to update to."
+    if [ "$NIGHTLY" = true ]; then
+        echo "No nightly in $REPO publishes $ASSET_NAME yet, nothing to update to."
+    else
+        echo "No release in $REPO publishes $ASSET_NAME yet, nothing to update to."
+        echo "Nightlies are published from main, try --nightly if you want those."
+    fi
     exit 0
 elif [ $RC -ne 0 ]; then
     echo "Update check failed: $LATEST"
@@ -91,9 +121,15 @@ if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
     exit 0
 fi
 
-# Locally built binaries are versioned dev-<sha>. Replacing one with a release
-# throws away whatever was being tested, which is almost never what is wanted
-# from a button on the printer.
+# Three version shapes exist and only one of them is protected:
+#
+#   dev-<sha>      built locally by scripts/build.sh and copied to the printer
+#   nightly-<sha>  published by CI from main, a real artifact
+#   <tag>          a tagged release
+#
+# Replacing a local build throws away whatever was being tested, which is
+# almost never what someone wants from a button on the printer. Nightlies and
+# releases are published artifacts and update normally.
 case "$CURRENT_VERSION" in
     dev-*)
         if [ "$FORCE" != true ]; then

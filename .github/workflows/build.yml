@@ -75,10 +75,15 @@ jobs:
         if: matrix.target == 'mips'
         run: scripts/setup-toolchain.sh
 
+      # Three shapes, and update.sh keys off them. dev-<sha> marks something not
+      # published anywhere, so it refuses to overwrite it. nightly-<sha> and a
+      # bare tag are published artifacts and update normally.
       - name: set version
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "GUPPYSCREEN_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "GUPPYSCREEN_VERSION=nightly-${GITHUB_SHA::8}" >> $GITHUB_ENV
           else
             echo "GUPPYSCREEN_VERSION=dev-${GITHUB_SHA::8}" >> $GITHUB_ENV
           fi
@@ -111,7 +116,7 @@ jobs:
           name: ${{ matrix.asset }}
           path: ./${{ matrix.asset }}.tar.gz
 
-      - name: release
+      - name: tagged release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
         with:
@@ -135,6 +140,56 @@ jobs:
 
       - name: build
         run: scripts/build.sh sim
+
+  # Rolling prerelease from main, published once after everything has built.
+  #
+  # Done as its own job rather than a step in the matrix because four parallel
+  # jobs writing the same tag race each other to create it. It also means a
+  # broken variant, or a broken simulator build, blocks the publish instead of
+  # producing a half populated release.
+  #
+  # The tag stays 'nightly' while its contents change every push, so the tag
+  # cannot identify a build. The release name carries nightly-<sha>, the same
+  # string release.sh writes into .version, and that is what update.sh compares
+  # against to decide whether you already have it.
+  nightly:
+    needs: [ build, simulator ]
+    if: github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+
+      - name: name the build
+        run: echo "GUPPYSCREEN_VERSION=nightly-${GITHUB_SHA::8}" >> $GITHUB_ENV
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: nightly
+          name: ${{ env.GUPPYSCREEN_VERSION }}
+          prerelease: true
+          files: dist/**/*.tar.gz
+          fail_on_unmatched_files: true
+          body: |
+            Automatic build of `main`, replaced on every push. Not a stable
+            release, and not tested on a printer before publishing.
+
+            Built from ${{ github.sha }}.
+
+            K1 and K1 Max want `guppyscreen.tar.gz`, or
+            `guppyscreen-zbolt.tar.gz` for the Z-Bolt icon set. Smaller panels
+            such as the Ender 3 V3 KE and Nebula Pad want
+            `guppyscreen-smallscreen.tar.gz`. `guppyscreen-arm.tar.gz` is for
+            aarch64 boards like a Pi or BTT Pad.
+
+            To move an existing install onto this:
+
+                /usr/data/guppyscreen/update.sh --nightly
+
+            Plain `update.sh` only offers stable releases. Locally built
+            binaries are versioned `dev-<sha>` and will not be replaced without
+            `--force`.
 
 permissions:
   contents: write
