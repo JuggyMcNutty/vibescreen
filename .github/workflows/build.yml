@@ -1,141 +1,140 @@
-name: guppy build
+name: build
+
+# Replaces the workflow inherited from upstream. Three things changed and are
+# worth knowing before editing this file.
+#
+# It no longer runs inside ballaswag/guppydev:latest. That is an unpinned image
+# on an abandoned account, so it could change or disappear underneath us, and it
+# carried a different toolchain from the one this repo develops against, which
+# meant a green build here proved nothing about a local one.
+#
+# It calls scripts/build.sh rather than repeating the patch and make steps, so
+# CI and a developer's machine cannot drift apart. Adding a build flag means
+# editing the script, not this file.
+#
+# It only publishes on a tag. The old workflow overwrote a nightly release on
+# every push to main, which advertised installable binaries from whatever was
+# last committed.
 
 on:
   push:
-    branches: [ "develop", "main" ]
-    tags:
-      - "*"
-
-permissions:
-  contents: write
+    branches: [ "main" ]
+    tags: [ "*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - arch: mipsel-buildroot-linux-musl-
+          - target: mips
+            theme: material
+            small: false
+            asset: guppyscreen
+          - target: mips
             theme: zbolt
             small: false
-            rotate: true
-            calibrate: false
             asset: guppyscreen-zbolt
-
-          - arch: mipsel-buildroot-linux-musl-
-            theme: material
-            small: false
-            rotate: true
-            calibrate: false
-            asset: guppyscreen
-
-          - arch: mipsel-buildroot-linux-musl-
+          - target: mips
             theme: material
             small: true
-            rotate: false
-            calibrate: true
             asset: guppyscreen-smallscreen
-
-          - arch: aarch64-none-linux-gnu-
+          - target: arm
             theme: material
             small: false
-            rotate: false
-            calibrate: true
             asset: guppyscreen-arm
 
-    runs-on: ubuntu-22.04
-    container:
-      image: ballaswag/guppydev:latest
-      options: --user 1001
-  
-    env:
-      CROSS_COMPILE: ${{ matrix.arch }}
-      CC: ${{ matrix.arch }}
-      CXX: ${{ matrix.arch }}
-      GUPPY_THEME: ${{ matrix.theme }}
-  
+    runs-on: ubuntu-24.04
+
     steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
-      name: set guppyscreen nightly version
-      run: |
-        echo "GUPPYSCREEN_VERSION=nightly-${{ github.sha }}" >> $GITHUB_ENV
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake
+          if [ "${{ matrix.target }}" = "arm" ]; then
+            sudo apt-get install -y --no-install-recommends \
+              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
 
-    - if: startsWith(github.ref, 'refs/tags/')
-      name: set guppyscreen nightly version
-      run: |
-        echo "GUPPYSCREEN_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+      # setup-toolchain.sh caches the archive here, so a hit skips the download.
+      - name: cache mips toolchain
+        if: matrix.target == 'mips'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/guppyscreen
+          key: mips32el-musl-stable-2025.08-1
 
-    - if: matrix.small
-      name: export screen size
-      run: |
-        echo "GUPPY_SMALL_SCREEN=${{ matrix.small }}" >> $GITHUB_ENV
+      - name: fetch mips toolchain
+        if: matrix.target == 'mips'
+        run: scripts/setup-toolchain.sh
 
-    - if: matrix.rotate
-      name: export screen rotate
-      run: |
-        echo "GUPPY_ROTATE=${{ matrix.rotate }}" >> $GITHUB_ENV
+      - name: set version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "GUPPYSCREEN_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+          else
+            echo "GUPPYSCREEN_VERSION=dev-${GITHUB_SHA::8}" >> $GITHUB_ENV
+          fi
 
-    - if: matrix.calibrate
-      name: export touch calibrate
-      run: |
-        echo "EVDEV_CALIBRATE=${{ matrix.calibrate }}" >> $GITHUB_ENV
+      - name: build
+        run: |
+          scripts/build.sh ${{ matrix.target }} ${{ matrix.theme }} \
+            ${{ matrix.small && '--small' || '' }}
 
-    - name: patch lv_drivers
-      run: |
-        git apply ../patches/0001-lv_driver_fb_ioctls.patch
-      working-directory: ./lv_drivers
+      # Guards the property that actually matters on the printer: the binary has
+      # to be static, because the glibc version moves between Creality firmware
+      # releases. A dynamically linked build would install and then fail to run.
+      - name: check the mips binary is static
+        if: matrix.target == 'mips'
+        run: |
+          readelf=toolchains/mips32el--musl--stable-2025.08-1/bin/mipsel-linux-readelf
+          $readelf -h build/bin/guppyscreen | grep -E 'Class:|Machine:|Flags:'
+          if $readelf -lW build/bin/guppyscreen | grep -qE '^\s+(INTERP|DYNAMIC)'; then
+            echo "::error::mips binary is dynamically linked, it will not run on the printer"
+            exit 1
+          fi
 
-    - name: patch fmt in spdlog
-      run: |
-        git apply ../patches/0002-spdlog_fmt_initializer_list.patch
-      working-directory: ./spdlog
+      - name: package
+        run: |
+          chmod +x ./release.sh
+          ./release.sh ${{ matrix.asset }}
 
-    - name: patch dpi text scale in lvgl
-      run: |
-        git apply ../patches/0003-lvgl-dpi-text-scale.patch
-      working-directory: ./lvgl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ./${{ matrix.asset }}.tar.gz
 
-    - name: make wpaclient
-      run: make wpaclient
+      - name: release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}.tar.gz
+          generate_release_notes: true
+          fail_on_unmatched_files: true
 
-    - name: make libhv
-      run: make libhv.a
-    
-    - name: make libspdlog
-      run: make libspdlog.a
+  simulator:
+    # Builds what developers actually run, which the upstream matrix never did.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: make guppyscreen
-      run: make -j
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libsdl2-dev
 
-    - name: make kd_graphic_mode
-      run: make kd_graphic_mode
+      - name: build
+        run: scripts/build.sh sim
 
-    - name: package release
-      run: |
-        chmod +x ./release.sh
-        ./release.sh ${{ matrix.asset }}
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.asset }}
-        path: ./${{ matrix.asset }}.tar.gz
-
-    - name: nightly release
-      uses: softprops/action-gh-release@v2
-      with:
-        prerelease: true
-        name: nightly
-        tag_name: nightly
-        files: ${{ matrix.asset }}.tar.gz
-        fail_on_unmatched_files: true
-
-    - name: stable release
-      uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: ${{ matrix.asset }}.tar.gz
-        generate_release_notes: true
-        fail_on_unmatched_files: true
+permissions:
+  contents: write

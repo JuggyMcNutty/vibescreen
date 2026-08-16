@@ -26,3 +26,6 @@ build/
 
 # Records which target the vendored libs were last built for
 /.vendor-target
+
+# Records which flags the objects were last built with
+/.build-flags

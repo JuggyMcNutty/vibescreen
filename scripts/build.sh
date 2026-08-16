@@ -4,13 +4,17 @@
 #
 #   scripts/build.sh mips            K1 / K1 Max, material theme (default)
 #   scripts/build.sh mips zbolt      K1 / K1 Max, Z-Bolt icon set
+#   scripts/build.sh mips --small    Ender 3 V3 KE / Nebula Pad sized panel
+#   scripts/build.sh arm             aarch64, Raspberry Pi and BTT Pad
 #   scripts/build.sh sim             x86_64 SDL simulator for this machine
 #
 #   scripts/build.sh mips --clean    wipe build/ and the vendored libs first
 #
-# The mips flags match the K1/Max row of upstream's .github/workflows/build.yml
-# and the panel we measured in docs/k1max-facts.md: 480x800 portrait, 32 bpp,
-# goodix touch on event0, so rotate on and no touch calibration.
+# The mips flags match the panel we measured in docs/k1max-facts.md: 480x800
+# portrait, 32 bpp, goodix touch on event0, so rotate on and no touch
+# calibration. The other targets match the rows upstream's CI used to build.
+#
+# CI calls this script rather than repeating the flags, so the two cannot drift.
 
 set -euo pipefail
 
@@ -24,16 +28,31 @@ shift || true
 
 theme="material"
 do_clean=false
+small=false
 for arg in "$@"; do
     case "$arg" in
         zbolt|material) theme="$arg" ;;
         --clean)        do_clean=true ;;
+        --small)        small=true ;;
         *) echo "unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
 
 export GUPPY_THEME="$theme"
 export GUPPYSCREEN_VERSION="${GUPPYSCREEN_VERSION:-dev-$(git rev-parse --short HEAD)}"
+
+# Smaller panels use the reduced icon set and need touch calibration, and they
+# are landscape already so they must not be rotated.
+if [ "$small" = true ]; then
+    export GUPPY_SMALL_SCREEN=true
+    export EVDEV_CALIBRATE=true
+fi
+
+# Key for the build stamp below. It has to cover everything that changes the
+# compiler flags, not just the architecture: the theme adds -D ZBOLT and
+# --small adds -D GUPPY_SMALL_SCREEN, and both affect every object, so
+# switching either without a clean would link a mix of the two.
+stamp_target="$target-$theme"
 
 case "$target" in
     mips)
@@ -43,35 +62,56 @@ case "$target" in
         fi
         export PATH="$TOOLCHAIN/bin:$PATH"
         export CROSS_COMPILE=mipsel-linux-
-        export GUPPY_ROTATE=true
+        [ "$small" = true ] || export GUPPY_ROTATE=true
+        ;;
+    arm)
+        # Expected on PATH rather than downloaded, since distributions package
+        # this one. Debian and Ubuntu: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+        if ! command -v aarch64-linux-gnu-gcc >/dev/null; then
+            echo "aarch64-linux-gnu-gcc not on PATH." >&2
+            echo "Debian/Ubuntu: apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu" >&2
+            echo "Arch:          pacman -S aarch64-linux-gnu-gcc" >&2
+            exit 1
+        fi
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export EVDEV_CALIBRATE=true
         ;;
     sim)
         # The Makefile switches on CROSS_COMPILE being unset to enable SDL.
         unset CROSS_COMPILE || true
         ;;
     *)
-        echo "usage: $0 {mips|sim} [material|zbolt] [--clean]" >&2
+        echo "usage: $0 {mips|arm|sim} [material|zbolt] [--small] [--clean]" >&2
         exit 1
         ;;
 esac
+
+if [ "$small" = true ]; then
+    stamp_target="$stamp_target-small"
+fi
 
 # The patches are not committed into the submodules, so re-assert them on every
 # build. Cheap, and skips anything already applied.
 ./scripts/apply-patches.sh
 
-# libhv, spdlog and libwpa_client are built in place inside their source trees,
-# with no notion of which architecture they hold. Switching between mips and
-# sim therefore silently links yesterday's objects for the wrong target, so
-# remember what the vendored libs were last built for and redo them on a
-# switch.
-STAMP="$REPO_ROOT/.vendor-target"
-previous="$(cat "$STAMP" 2>/dev/null || echo none)"
+# Two separate stamps, because the two halves of the build go stale for
+# different reasons.
+#
+# libhv, spdlog and libwpa_client are built in place inside their own source
+# trees with no notion of which architecture they hold, so they are stale when
+# the architecture changes. They do not care about the theme.
+#
+# Our objects additionally carry -D ZBOLT and -D GUPPY_SMALL_SCREEN, so they are
+# stale when any of those change, which is much more often.
+ARCH_STAMP="$REPO_ROOT/.vendor-target"
+FLAG_STAMP="$REPO_ROOT/.build-flags"
+prev_arch="$(cat "$ARCH_STAMP" 2>/dev/null || echo none)"
+prev_flags="$(cat "$FLAG_STAMP" 2>/dev/null || echo none)"
 
-if [ "$previous" != "$target" ] || [ "$do_clean" = true ]; then
-    if [ "$previous" != "$target" ] && [ "$previous" != none ]; then
-        echo "Vendored libs were built for '$previous', rebuilding for '$target'"
+if [ "$prev_arch" != "$target" ] || [ "$do_clean" = true ]; then
+    if [ "$prev_arch" != "$target" ] && [ "$prev_arch" != none ]; then
+        echo "Vendored libs were built for '$prev_arch', rebuilding for '$target'"
     fi
-    make clean
     make wpaclean
     make spdlogclean
     # libhv's own clean drops include/hv but leaves lib/, which would fool the
@@ -80,13 +120,21 @@ if [ "$previous" != "$target" ] || [ "$do_clean" = true ]; then
     rm -rf libhv/lib
 fi
 
+if [ "$prev_flags" != "$stamp_target" ] || [ "$do_clean" = true ]; then
+    if [ "$prev_flags" != "$stamp_target" ] && [ "$prev_flags" != none ]; then
+        echo "Objects were built as '$prev_flags', rebuilding as '$stamp_target'"
+    fi
+    make clean
+fi
+
 # libhv only populates include/hv as part of building the library, so treat a
 # missing header dir as "not built" too.
 [ -f wpa_supplicant/wpa_supplicant/libwpa_client.a ]              || make wpaclient
 { [ -f libhv/lib/libhv.a ] && [ -d libhv/include/hv ]; }          || make libhv.a
 [ -f spdlog/build/libspdlog.a ]                                   || make libspdlog.a
 
-echo "$target" > "$STAMP"
+echo "$target" > "$ARCH_STAMP"
+echo "$stamp_target" > "$FLAG_STAMP"
 
 make -j"$(nproc)"
 
