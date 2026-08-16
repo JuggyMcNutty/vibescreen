@@ -92,7 +92,10 @@ LDLIBS += -lSDL2
 endif
 
 COMPILE_CC				= $(CC) $(CFLAGS) $(INC) $(DEFINES)
-COMPILE_CXX				= $(CC) $(CFLAGS) $(INC) $(DEFINES)
+# Use the C++ driver for C++ sources. This used to be $(CC), which only worked
+# because gcc dispatches on the file extension, and would break with any CC
+# that is a C-only compiler.
+COMPILE_CXX				= $(CXX) $(CFLAGS) $(INC) $(DEFINES)
 
 # Job count for the sub-makes below. This has to be a real shell call
 # rather than -j$(nproc): make expands $(nproc) itself, finds no variable
