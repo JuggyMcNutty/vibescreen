@@ -151,6 +151,42 @@ target, so repeat presses no longer re-wait. The real fix is non-blocking
 `M104` plus a heating state in the UI, which is a behaviour change worth doing
 deliberately rather than as a side effect.
 
+### C12. Bed mesh Calibrate homed the wrong way round (fixed)
+
+`BedMeshPanel::handle_callback` skipped `G28` only when `homed_axes` was
+exactly the string `"xy"`, which got it wrong in both directions.
+
+Klipper reports `"xyz"` on a fully homed machine, the normal state after any
+print, so the common case fell through to `G28 X Y Z\nBED_MESH_CALIBRATE` and
+re-homed all three axes for nothing. And in the one state the test did match,
+X and Y homed but not Z, it skipped homing and went straight to a probe that
+cannot run: the probe lifts to `horizontal_move_z` first, and Klipper refuses a
+Z move on an unhomed Z.
+
+Now homes unless all three of x, y and z are present, and sends a bare `G28`
+rather than `G28 X Y Z` when it does. Both branches were driven against
+`tools/fake_moonraker.py` with `homed_axes` set each way.
+
+### C11. Panel destructors double-delete their own widgets (open, latent)
+
+Every panel destructor calls `lv_obj_del` on its root container, and its widget
+members' destructors then call `lv_obj_del` on objects that root already
+deleted as children. `~BedMeshPanel` deletes `cont`, which takes
+`controls_cont` and every `ButtonContainer` under it with it, and then
+`~ButtonContainer` deletes `btn_cont` again. `Selector` and the panel-owned
+`lv_obj_t*` members have the same shape.
+
+Nothing hits it today because the panels are members of `MainPanel` and
+`PrinterTunePanel` and live for the whole process, so no panel is ever
+destroyed. It becomes real the moment anything is torn down, which is exactly
+what the multi-printer switch in `PrinterSelectPanel` would want to do.
+
+`MeshView` avoids it by nulling its handle from an `LV_EVENT_DELETE` callback
+(`src/mesh_view.h`), which is the cheap fix and works whichever order the two
+deletes happen in. The same pattern applied to `ButtonContainer`, `Selector`
+and `ImageLabel` would close it off, but that is a sweep of its own rather than
+something to fold into an unrelated change.
+
 ### C8. Rejected gcode is invisible to the user (fixed, `fc12faa`)
 
 `KWebSocketClient::gcode_script` (`src/websocket_client.cpp:184`) fires and
@@ -394,17 +430,20 @@ have to be undone to get there.
 
 ## Suggested order
 
-Done: C2, C3, C4, C6, C8, C9, C10, B1 to B6, M3, M4, and the `KUtils` parse
-helpers.
+Done: C2, C3, C4, C6, C8, C9, C10, C12, B1 to B6, M3, M4, and the `KUtils`
+parse helpers.
 
 Remaining, roughly in order:
 
 1. Guard the residual 19 inline lambdas and 4 static callbacks noted in C10, so
    exception containment is complete rather than nearly complete.
 2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
-3. M1, 98 lines of commented-out code. Pure churn, best done as its own quiet
+3. C11, the panel destructor double-delete. Latent until something tears a
+   panel down, and a mechanical sweep once someone wants multi-printer
+   switching to actually work.
+4. M1, 98 lines of commented-out code. Pure churn, best done as its own quiet
    pass when nothing else is in flight.
-4. C1 plus the C9 lifetime hazard, as the message-queue change above. The
+5. C1 plus the C9 lifetime hazard, as the message-queue change above. The
    largest piece of work left and the one that retires the most.
 
 M2, the four leaked singletons, is harmless and stays open.

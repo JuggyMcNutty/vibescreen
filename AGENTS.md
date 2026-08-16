@@ -191,6 +191,23 @@ tools/                ours, fake_moonraker.py for local testing
 docs/                 ours
 ```
 
+### `lv_conf.h` is two configs, not one
+
+`lv_conf.h:14` opens `#ifndef SIMULATOR`, `:715` is the `#else`, `:1353` the
+`#endif`. The device build compiles lines 15 to 713 and the simulator 717 to
+1351, and the two are not kept in step.
+
+The difference that bites is fonts. The printer has Montserrat 8, 10, 12, 14,
+16, 20 and 40 only; the simulator half enables every size from 8 to 48. So
+`&lv_font_montserrat_18` builds and looks right in the simulator and fails to
+link for mips. Check which half you are reading before believing anything in
+that file.
+
+Both halves do agree on the things that matter for drawing: `LV_COLOR_DEPTH 32`,
+`LV_DRAW_COMPLEX 1`, `LV_USE_CANVAS 1`, and `LV_MEM_CUSTOM 1`, which means
+`lv_mem_alloc` is plain `malloc` and the `LV_MEM_SIZE` in there is dead config
+sitting inside an `#if LV_MEM_CUSTOM == 0`.
+
 `scripts/` is all new in this fork:
 
 | Script | Purpose |
@@ -330,6 +347,25 @@ The main loop still has a catch, but it logs and aborts on purpose, because
 anything reaching it means LVGL is already unrecoverable and a restart is the
 better outcome.
 
+## Never hand LVGL a non-convex polygon
+
+`lv_canvas_draw_polygon` documents "only convex polygons are supported", and
+the failure mode is not a bad drawing. `lv_draw_sw_polygon` walks a left and a
+right chain from the lowest vertex; on a non-convex polygon neither chain
+advances, `mask_cnt` never reaches `point_cnt`, and it spins forever inside the
+UI lock. The process stays alive, so `supervise-daemon` does not restart it.
+A wedged screen that nothing recovers is the worst outcome available here.
+
+This is not theoretical. `MeshView` hit it drawing a bed mesh that was flat to
+within probe noise: normalising the height blew 8 microns up to full relief,
+the quads folded, and the simulator hung on startup with the mesh panel's
+render still on the stack. It splits a failing quad into triangles, which are
+convex by construction, after testing the rounded integer points rather than
+the floats, since rounding alone can tip a marginal quad over.
+
+If you add anything that fills a computed polygon, prove it is convex or
+triangulate it. `lv_canvas_draw_line` has no such problem.
+
 ## Testing UI changes without touching the printer
 
 The printer is read-only, and pressing Extrude against a live Moonraker really
@@ -340,22 +376,40 @@ otherwise command real hardware, and point the simulator at `127.0.0.1`:
 pip install websockets
 python3 tools/fake_moonraker.py 240 240            # reports 240C, accepts gcode
 python3 tools/fake_moonraker.py 240 240 --reject   # rejects every command
+python3 tools/fake_moonraker.py --mesh bowl        # pick a bed mesh shape
 PRINTER_HOST=127.0.0.1 scripts/build.sh sim
 ```
 
 It records every `printer.gcode.script` it receives to `$GCODE_LOG`, which is
 how you check what a button actually sends.
 
+It serves a `bed_mesh` object too. `--mesh` picks the shape: `adaptive` is the
+real 3x3 read off the development printer, `full` a 6x6 saddle, then `bowl`,
+`tilt` and `flat`. `BED_MESH_CLEAR` and `BED_MESH_CALIBRATE` are acted on
+rather than logged, and calibrate deliberately replies with a matrices-only
+delta carrying no `profile_name`, which is the shape Moonraker really sends and
+the one panels get wrong.
+
 For screenshots, SDL picks Wayland when it can and the X root window is not
-capturable under XWayland. Force X11 and grab the window by name:
+capturable under XWayland. Force X11:
 
 ```sh
 SDL_VIDEODRIVER=x11 ./build/bin/guppyscreen &
 xwd -silent -name "TFT Simulator" | xwdtopnm | pnmtopng > shot.png
 ```
 
+**Check the colours in anything that pipeline produces.** On a 32 bpp TrueColor
+visual `xwdtopnm` emits maxval 65535 and maps the channels wrongly, pinning
+blue to `0xff`, which turns the whole UI a flat blue. It is not obviously
+broken, it just quietly lies, so a colour bug and a capture bug look the same.
+Decoding the XWD header's `red_mask`, `green_mask` and `blue_mask` yourself is
+exact and needs nothing installed.
+
 `xdotool` can drive it, but LVGL polls its input device, so an instantaneous
-click gets missed. Move, then `mousedown`, wait ~0.4s, then `mouseup`.
+click gets missed. Move, then `mousedown`, wait ~0.4s, then `mouseup`. The X
+backing store also lags a click by a frame or so, so a screenshot taken
+straight after one shows the state before it. Wait, or throw the first grab
+away.
 
 ## Threading model
 
