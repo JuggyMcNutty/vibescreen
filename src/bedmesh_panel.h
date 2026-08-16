@@ -5,9 +5,12 @@
 #include "event_guard.h"
 #include "notify_consumer.h"
 #include "button_container.h"
+#include "mesh_view.h"
+#include "selector.h"
 #include "lvgl/lvgl.h"
 
 #include <mutex>
+#include <string>
 #include <vector>
 
 class BedMeshPanel : public NotifyConsumer {
@@ -25,7 +28,7 @@ class BedMeshPanel : public NotifyConsumer {
   void handle_prompt_save(lv_event_t *event);
   void handle_prompt_cancel(lv_event_t *event);
   void handle_kb_input(lv_event_t *e);
-  void mesh_draw_cb(lv_event_t *e);
+  void handle_selector(lv_event_t *e);
 
   static void _handle_callback(lv_event_t *event) {
     KGuard::event("BedMeshPanel::_handle_callback", [&] {
@@ -40,14 +43,14 @@ class BedMeshPanel : public NotifyConsumer {
       panel->handle_profile_action(event);
     });
   };
-  
+
   static void _handle_prompt_save(lv_event_t *event) {
     KGuard::event("BedMeshPanel::_handle_prompt_save", [&] {
       BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
       panel->handle_prompt_save(event);
     });
   };
-  
+
   static void _handle_prompt_cancel(lv_event_t *event) {
     KGuard::event("BedMeshPanel::_handle_prompt_cancel", [&] {
       BedMeshPanel *panel = (BedMeshPanel*)event->user_data;
@@ -62,19 +65,28 @@ class BedMeshPanel : public NotifyConsumer {
     });
   };
 
-  static void _mesh_draw_cb(lv_event_t *e) {
-    KGuard::event("BedMeshPanel::_mesh_draw_cb", [&] {
+  static void _handle_selector(lv_event_t *e) {
+    KGuard::event("BedMeshPanel::_handle_selector", [&] {
       BedMeshPanel *panel = (BedMeshPanel*)e->user_data;
-      panel->mesh_draw_cb(e);
+      panel->handle_selector(e);
     });
   };
 
  private:
+  // Pushes whichever matrix the matrix selector is on into the view, and
+  // rewrites the stats line to match.
+  void show_selected_matrix();
+
   KWebSocketClient &ws;
   lv_obj_t *cont;
   lv_obj_t *prompt;
   lv_obj_t *top_cont;
-  lv_obj_t *mesh_table;
+  lv_obj_t *mesh_cont;
+  MeshView mesh_view;
+  lv_obj_t *stats_label;
+  lv_obj_t *selector_cont;
+  Selector view_selector;
+  Selector matrix_selector;
   lv_obj_t *profile_cont;
   lv_obj_t *profile_table;
   lv_obj_t *profile_info;
@@ -87,7 +99,11 @@ class BedMeshPanel : public NotifyConsumer {
   lv_obj_t *input;
   lv_obj_t *kb;
   std::string active_profile;
-  std::vector<std::vector<double>> mesh;
+  // Klipper reports both, and they answer different questions: probed is what
+  // the probe measured, interpolated is what the mesh actually applies.
+  std::vector<std::vector<double>> probed;
+  std::vector<std::vector<double>> interpolated;
+  std::string mesh_summary;
 };
 
 #endif // __BEDMESH_PANEL_H__
