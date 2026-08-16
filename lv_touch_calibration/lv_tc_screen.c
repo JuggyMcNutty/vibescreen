@@ -297,15 +297,19 @@ static void lv_tc_screen_recalibrate_timer(lv_timer_t *timer) {
 
     if(timer->repeat_count == 0) {
         //Restart when timed out
-        lv_tc_screen_start(tCScreenObj);
+        //The screen object is the first member, so take its address rather than
+        //passing the containing struct and relying on the layout matching
+        lv_tc_screen_start(&tCScreenObj->screenObj);
         return;
     }
     lv_label_set_text_fmt(lv_obj_get_child(tCScreenObj->recalibrateBtnObj, 0), LV_TC_RECALIBRATE_TXT LV_TC_RECALIBRATE_TIMEOUT_FORMAT, (int)timer->repeat_count);
 }
 
 static void lv_tc_screen_start_delay_timer(lv_timer_t *timer) {
-    lv_tc_screen_t *tCScreenObj = (lv_tc_screen_t*)timer->user_data;
+    //The timer was created with the screen object as user data, and that is all
+    //this callback needs, so no cast to the containing struct
+    lv_obj_t *screenObj = (lv_obj_t*)timer->user_data;
 
     lv_point_t point = {0, 0};
-    lv_tc_screen_step(tCScreenObj, STEP_FIRST, point);
+    lv_tc_screen_step(screenObj, STEP_FIRST, point);
 }
