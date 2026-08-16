@@ -26,7 +26,7 @@ Re-run the probe if you need fresh values.
 
 ## Build flags this implies
 
-Matches the K1/Max row of upstream's `.github/workflows/build.yml`:
+What `scripts/build.sh mips` sets, and the K1/Max row of our CI matrix:
 
 ```
 CROSS_COMPILE=mipsel-linux-
@@ -146,10 +146,18 @@ The overlay is completely full. Anything we install has to live in `/usr/data`.
 
 ## Gotchas found while probing
 
-- The K1's `curl` is a cut down build that rejects both `-s` and `--max-time`.
-  Use `wget -q -T <sec> -O -` for HTTP checks in any script that runs on the
-  printer. Upstream's `installer.sh` hits this too, which is why it downloads a
-  working `curl` from `k1-discovery` before fetching the release.
+- Networking from the printer is awkward and cost real time to work out. The
+  stock `/usr/bin/curl` is not curl, it is a Creality utility with an unrelated
+  command line that rejects `-s` and `-o`. busybox `wget` handles plain HTTP
+  fine, so use `wget -q -T <sec> -O -` for Moonraker checks, but it cannot
+  negotiate TLS with `github.com` or `api.github.com` and fails with alert 80,
+  reaching only `raw.githubusercontent.com`. That is why upstream downloaded a
+  curl binary from a third party repo and ran it as root. Python 3 is already
+  installed for Klipper and reaches everything, which is what our `update.sh`
+  and `installer.sh` use instead. See the networking section of `AGENTS.md`.
+- busybox `tar` unlinks before it overwrites, so unpacking a release over a
+  running binary or over the executing `update.sh` is safe: open readers keep
+  the old inode.
 - `/etc/os-release` reports Buildroot, not the Creality firmware version. The
   firmware version lives in `/etc/ota_info` and
   `/usr/data/creality/userdata/config/system_version.json`.
