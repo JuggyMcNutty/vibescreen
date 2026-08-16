@@ -12,9 +12,10 @@ name: build
 # CI and a developer's machine cannot drift apart. Adding a build flag means
 # editing the script, not this file.
 #
-# It only publishes on a tag. The old workflow overwrote a nightly release on
-# every push to main, which advertised installable binaries from whatever was
-# last committed.
+# It publishes one rolling release, replaced on every push to main. That is the
+# only channel this project has, so it is a normal release rather than a
+# prerelease: marking it a prerelease would leave the repo with no "latest"
+# release at all and break the releases/latest URLs the installer uses.
 
 on:
   push:
@@ -75,15 +76,15 @@ jobs:
         if: matrix.target == 'mips'
         run: scripts/setup-toolchain.sh
 
-      # Three shapes, and update.sh keys off them. dev-<sha> marks something not
-      # published anywhere, so it refuses to overwrite it. nightly-<sha> and a
-      # bare tag are published artifacts and update normally.
+      # Two shapes, and update.sh keys off them. dev-<sha> marks something not
+      # published anywhere, so it refuses to overwrite it. rolling-<sha> is a
+      # published artifact and updates normally.
       - name: set version
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "GUPPYSCREEN_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
           elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "GUPPYSCREEN_VERSION=nightly-${GITHUB_SHA::8}" >> $GITHUB_ENV
+            echo "GUPPYSCREEN_VERSION=rolling-${GITHUB_SHA::8}" >> $GITHUB_ENV
           else
             echo "GUPPYSCREEN_VERSION=dev-${GITHUB_SHA::8}" >> $GITHUB_ENV
           fi
@@ -146,18 +147,19 @@ jobs:
       - name: build
         run: scripts/build.sh sim
 
-  # Rolling prerelease from main, published once after everything has built.
+  # The rolling release, published once after everything has built. This is
+  # the only channel we publish to, so it is what update.sh takes by default.
   #
   # Done as its own job rather than a step in the matrix because four parallel
   # jobs writing the same tag race each other to create it. It also means a
   # broken variant, or a broken simulator build, blocks the publish instead of
   # producing a half populated release.
   #
-  # The tag stays 'nightly' while its contents change every push, so the tag
-  # cannot identify a build. The release name carries nightly-<sha>, the same
+  # The tag stays 'rolling' while its contents change every push, so the tag
+  # cannot identify a build. The release name carries rolling-<sha>, the same
   # string release.sh writes into .version, and that is what update.sh compares
   # against to decide whether you already have it.
-  nightly:
+  rolling:
     needs: [ build, simulator ]
     if: github.event_name == 'push' && github.ref_type == 'branch'
     runs-on: ubuntu-24.04
@@ -167,18 +169,18 @@ jobs:
           path: dist
 
       - name: name the build
-        run: echo "GUPPYSCREEN_VERSION=nightly-${GITHUB_SHA::8}" >> $GITHUB_ENV
+        run: echo "GUPPYSCREEN_VERSION=rolling-${GITHUB_SHA::8}" >> $GITHUB_ENV
 
       - uses: softprops/action-gh-release@v3
         with:
-          tag_name: nightly
+          tag_name: rolling
           name: ${{ env.GUPPYSCREEN_VERSION }}
-          prerelease: true
           files: dist/**/*.tar.gz
           fail_on_unmatched_files: true
           body: |
-            Automatic build of `main`, replaced on every push. Not a stable
-            release, and not tested on a printer before publishing.
+            Rolling build of `main`, replaced on every push. This is the only
+            channel this project publishes; there is no separate stable track.
+            Not tested on a printer before publishing.
 
             Built from ${{ github.sha }}.
 
@@ -190,11 +192,10 @@ jobs:
 
             To move an existing install onto this:
 
-                /usr/data/guppyscreen/update.sh --nightly
+                /usr/data/guppyscreen/update.sh
 
-            Plain `update.sh` only offers stable releases. Locally built
-            binaries are versioned `dev-<sha>` and will not be replaced without
-            `--force`.
+            Locally built binaries are versioned `dev-<sha>` and will not be
+            replaced without `--force`.
 
 permissions:
   contents: write

@@ -105,11 +105,7 @@ echo "Found arch $ARCH"
 if [ "$ARCH" = "aarch64" ]; then
     printf "${green}Installing Guppy Screen ${white}\n"
 
-    ASSET_URL="https://github.com/JuggyMcNutty/vibescreen/releases/latest/download/guppyscreen-arm.tar.gz"
-    if [ "$1" = "nightly" ]; then
-        printf "${yellow}Installing nightly build ${white}\n"
-        ASSET_URL="https://github.com/JuggyMcNutty/vibescreen/releases/download/nightly/guppyscreen-arm.tar.gz"
-    fi
+    ASSET_URL="https://github.com/JuggyMcNutty/vibescreen/releases/download/rolling/guppyscreen-arm.tar.gz"
     
     curl -s -L $ASSET_URL -o /tmp/guppyscreen.tar.gz
     tar xf /tmp/guppyscreen.tar.gz -C ${HOME}

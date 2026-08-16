@@ -23,14 +23,15 @@ TARBALL=/tmp/guppyscreen-update.tar.gz
 REPO=${GUPPY_UPDATE_REPO:-JuggyMcNutty/vibescreen}
 
 FORCE=false
-NIGHTLY=false
 for arg in "$@"; do
     case "$arg" in
-        --force)   FORCE=true ;;
-        --nightly) NIGHTLY=true ;;
-        *) echo "usage: $(basename "$0") [--nightly] [--force]"; exit 1 ;;
+        --force) FORCE=true ;;
+        *) echo "usage: $(basename "$0") [--force]"; exit 1 ;;
     esac
 done
+
+# The project publishes one rolling release, replaced on every push to main.
+RELEASE_TAG=${GUPPY_UPDATE_TAG:-rolling}
 
 PY=$(command -v python3 || command -v python || true)
 if [ -z "$PY" ]; then
@@ -52,56 +53,42 @@ print(d.get('asset_name','guppyscreen.tar.gz'))" "$VERSION_FILE" 2>/dev/null || 
 fi
 
 echo "Installed version: $CURRENT_VERSION"
-if [ "$NIGHTLY" = true ]; then
-    echo "Checking $REPO for the latest nightly"
-else
-    echo "Checking $REPO for a newer release"
-fi
+echo "Checking $REPO for a newer build"
 
-# Prints "<tag>\t<download url>" for the newest release carrying our asset, or
-# exits 2 if there is no usable one.
-#
-# Nightlies are prereleases and are skipped unless asked for, so someone on a
-# stable build is never quietly moved onto whatever last landed on main.
+# Prints "<name>\t<download url>" for the rolling release, or exits 2 if it has
+# no asset for us. Looked up by tag rather than by scanning the release list,
+# because there is only ever one release to consider.
 LATEST=$("$PY" -c "
-import json, sys, urllib.request
-repo, asset, nightly = sys.argv[1], sys.argv[2], sys.argv[3] == 'true'
+import json, sys, urllib.error, urllib.request
+repo, tag, asset = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
     with urllib.request.urlopen(
-            'https://api.github.com/repos/%s/releases' % repo, timeout=30) as r:
-        releases = json.load(r)
+            'https://api.github.com/repos/%s/releases/tags/%s' % (repo, tag),
+            timeout=30) as r:
+        rel = json.load(r)
+except urllib.error.HTTPError as e:
+    if e.code == 404:
+        sys.exit(2)
+    sys.stderr.write('could not reach github: %s\n' % e)
+    sys.exit(1)
 except Exception as e:
     sys.stderr.write('could not reach github: %s\n' % e)
     sys.exit(1)
-for rel in releases:
-    if rel.get('draft'):
-        continue
-    if rel.get('prerelease') and not nightly:
-        continue
-    if nightly and not rel.get('prerelease'):
-        continue
-    for a in rel.get('assets', []):
-        if a.get('name') == asset:
-            # Identity, not tag. The nightly release keeps the tag 'nightly'
-            # forever while its contents change every push, so the tag can
-            # never tell us whether we already have it. CI puts the same
-            # nightly-<sha> string in the release name as it puts in .version,
-            # so that is what we compare. For a stable release GitHub defaults
-            # the name to the tag, so this is the tag.
-            print('%s\t%s' % (rel.get('name') or rel.get('tag_name', ''),
-                              a.get('browser_download_url', '')))
-            sys.exit(0)
+for a in rel.get('assets', []):
+    if a.get('name') == asset:
+        # Identity, not tag. The tag stays the same forever while its contents
+        # change every push, so only the release name can say which build this
+        # is. CI puts the same rolling-<sha> string in the name as release.sh
+        # writes into .version.
+        print('%s\t%s' % (rel.get('name') or rel.get('tag_name', ''),
+                          a.get('browser_download_url', '')))
+        sys.exit(0)
 sys.exit(2)
-" "$REPO" "$ASSET_NAME" "$NIGHTLY" 2>&1)
+" "$REPO" "$RELEASE_TAG" "$ASSET_NAME" 2>&1)
 RC=$?
 
 if [ $RC -eq 2 ]; then
-    if [ "$NIGHTLY" = true ]; then
-        echo "No nightly in $REPO publishes $ASSET_NAME yet, nothing to update to."
-    else
-        echo "No release in $REPO publishes $ASSET_NAME yet, nothing to update to."
-        echo "Nightlies are published from main, try --nightly if you want those."
-    fi
+    echo "No '$RELEASE_TAG' release in $REPO publishes $ASSET_NAME, nothing to update to."
     exit 0
 elif [ $RC -ne 0 ]; then
     echo "Update check failed: $LATEST"
@@ -121,15 +108,14 @@ if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
     exit 0
 fi
 
-# Three version shapes exist and only one of them is protected:
+# Two version shapes exist and only one of them is protected:
 #
 #   dev-<sha>      built locally by scripts/build.sh and copied to the printer
-#   nightly-<sha>  published by CI from main, a real artifact
-#   <tag>          a tagged release
+#   rolling-<sha>  published by CI from main, a real artifact
 #
 # Replacing a local build throws away whatever was being tested, which is
-# almost never what someone wants from a button on the printer. Nightlies and
-# releases are published artifacts and update normally.
+# almost never what someone wants from a button on the printer. Rolling builds
+# are published artifacts and update normally.
 case "$CURRENT_VERSION" in
     dev-*)
         if [ "$FORCE" != true ]; then
