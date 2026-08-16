@@ -59,42 +59,48 @@ CI has always built, plus the simulator, and it **calls `scripts/build.sh`**
 rather than repeating the flags. If you add a build option, put it in the script
 and reference it from the matrix, so the two cannot drift.
 
-It runs on push to `main`, on pull requests, and on tags.
+It runs on push to `main` and on pull requests. There is no tag trigger:
+publishing happens per push, so tagging is not how releases are made here.
 
-Publishing has three shapes, and `update.sh` keys off the version string:
+Two version shapes, and `update.sh` keys off them:
 
 | Trigger | Version | Published as |
 | --- | --- | --- |
 | local `scripts/build.sh` | `dev-<sha>` | nothing, never published |
-| push to `main` | `rolling-<sha>` | `rolling` release, replaced each push |
-| tag | the tag | a normal release |
+| pull request | `dev-<sha>` | nothing, never published |
+| push to `main` | `<date>-<sha>` | its own release, tagged the same |
 
-The rolling release is published from its own job, after the whole matrix **and** the
+Every push that builds cleanly gets its own release, so the release list is a
+build history. Do not go back to a single fixed tag that overwrites itself:
+that was the old arrangement and it left nothing to roll back to.
+
+The version is worked out once in the `version` job and passed to the build and
+release jobs. Computing it in both races across UTC midnight and would tag a
+release differently from the string compiled into the binary. The tag, the
+release name and `.version` are all the same string.
+
+Releases are normal releases, not prereleases, so `releases/latest` resolves to
+the newest build. `update.sh` and both installers follow that rather than any
+fixed tag.
+
+The release is published from its own job, after the whole matrix **and** the
 simulator build pass. Do not move it back into the matrix: four parallel jobs
 race to create the same tag, and a broken variant would produce a half
 populated release.
 
-The `rolling` tag never changes while its contents change every push, so the
-tag cannot identify a build. The release *name* carries `rolling-<sha>`, the
-same string `release.sh` writes into `.version`, and that pairing is what lets
-`update.sh` tell whether you already have it. If you change one, change the
-other.
+Release notes are generated in the workflow. Keep them practical: which asset
+suits which printer, and how to install. Anyone arriving from the original
+guppyscreen needs the installer rather than `update.sh`, because that project's
+updater points at upstream and will not see our builds.
 
-It is a normal release, not a prerelease. With no stable track, marking it a
-prerelease would leave the repo with no latest release at all and break the
-`releases/latest` URLs.
-
-Tagging still produces a separate release, but nothing chases it: `update.sh`
-looks up the `rolling` tag directly. There is one channel.
+CI asserts the mips binary is statically linked, which is the property that
+decides whether it runs at all, since the glibc version moves between Creality
+firmware releases.
 
 **Android is gone.** Upstream built an APK from a separate `android` branch.
 The workflow went with the CI rework and the `OS_ANDROID` guards and
 `platform.h` went with it. Do not add conditional code for a platform that
 cannot be built or tested here.
-
-It also asserts the mips binary is statically linked, which is the property that
-decides whether it runs at all, since the glibc version moves between Creality
-firmware releases.
 
 Two workflows were deleted with the fork's cleanup: `guppydroid.yml`, the
 Android build described above, and `pull_request.yml`, which duplicated the
@@ -151,7 +157,7 @@ XBurst2 is MIPS32r2, so never emit MIPS r6 instructions.
 ## Repo layout
 
 ```
-src/                  the application, 92 files, all ours to maintain
+src/                  the application, all ours to maintain
 lvgl/                 submodule, v8.3.11
 lv_drivers/           submodule, v8.3.0
 libhv/                submodule, websocket and http client
