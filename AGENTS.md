@@ -231,6 +231,25 @@ read from `/printer_state/configfile/settings/...` in `State`. `LimitsPanel::ini
 and `ExtruderPanel::init` are the two worked examples, both dispatched from
 `MainPanel::init`.
 
+## Networking from the printer
+
+Only `raw.githubusercontent.com` is reachable with stock tooling. busybox
+`wget` fails TLS against `api.github.com` and `github.com` with alert 80, and
+`/usr/bin/curl` is not curl, it is a Creality utility with an unrelated command
+line that does not understand `-s` or `-o`.
+
+Upstream worked around this by downloading a curl binary from a third party
+repo over `--no-check-certificate` and running it as root. Do not reintroduce
+that. **Python 3 is already installed for Klipper and reaches everything**, so
+`update.sh` and `installer.sh` use it for all fetching.
+
+For plain HTTP to Moonraker on the printer, `wget -q -T <sec> -O -` is fine.
+
+`update.sh` pulls releases from `JuggyMcNutty/vibescreen`, overridable with
+`GUPPY_UPDATE_REPO`. It refuses to replace a locally built `dev-<sha>` binary
+unless given `--force`, so the Settings panel's "Update Guppy" button cannot
+silently discard a build you are testing on the printer.
+
 ## Never let an exception reach LVGL
 
 Every static callback LVGL calls into must contain its own exceptions, using
