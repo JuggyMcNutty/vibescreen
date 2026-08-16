@@ -70,9 +70,20 @@ Two version shapes, and `update.sh` keys off them:
 | pull request | `dev-<sha>` | nothing, never published |
 | push to `main` | `<date>-<sha>` | its own release, tagged the same |
 
-Every push that builds cleanly gets its own release, so the release list is a
-build history. Do not go back to a single fixed tag that overwrites itself:
-that was the old arrangement and it left nothing to roll back to.
+Every push that changes source and builds cleanly gets its own release, so the
+release list is a build history. Do not go back to a single fixed tag that
+overwrites itself: that was the old arrangement and it left nothing to roll
+back to.
+
+**Documentation-only pushes still build but do not publish.** The `version` job
+diffs against `github.event.before` and skips the release when every changed
+path matches `*.md`, `docs/`, `screenshots/` or `LICENSE`. The filter lists what
+to ignore rather than what to build, so an unrecognised path errs towards
+publishing. Remember that `installer.sh`, `update.sh`, `k1/` and `themes/` ship
+inside the tarball and count as source even though nothing compiles them.
+
+If it ever skips a release you wanted, run the workflow manually: a
+`workflow_dispatch` always publishes.
 
 The version is worked out once in the `version` job and passed to the build and
 release jobs. Computing it in both races across UTC midnight and would tag a
