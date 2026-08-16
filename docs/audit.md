@@ -1,9 +1,9 @@
 # Inherited codebase audit
 
-First pass over the code we adopted at upstream `07409cb` (2024-07-15). Scope is
-`src/` (92 files, 457 KB) plus the build system. Vendored trees (`lvgl`,
-`libhv`, `spdlog`, `wpa_supplicant`, `src/subprocess.hpp`) are excluded except
-where our build touches them.
+First pass over the code we adopted at upstream `07409cb` (2024-07-15), kept up
+to date as findings are fixed. Scope is `src/` plus the build system. Vendored
+trees (`lvgl`, `libhv`, `spdlog`, `wpa_supplicant`, `src/subprocess.hpp`) are
+excluded except where our build touches them.
 
 Nothing here is speculative. Every finding was read in the source and the
 claims about reachability were checked rather than assumed.

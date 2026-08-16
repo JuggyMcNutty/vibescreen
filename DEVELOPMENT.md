@@ -80,35 +80,3 @@ To test against something other than a real printer, `tools/fake_moonraker.py`
 speaks enough of the Moonraker protocol for the UI to start, and can be told to
 reject gcode so error handling can be exercised. Use it for anything that would
 otherwise command real hardware.
-
-### Virtual Klipper
-
-It is possible to use https://github.com/mainsail-crew/virtual-klipper-printer to start a virtual printer locally
-to make local testing and development easier.   You will need to install docker-ce and docker-compose locally.   
-
-### Install Docker and Docker Compose
-
-#### Ubuntu and Debian
-
-You can follow the instructions to get docker and docker-compose setup on Ubuntu:
-https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
-
-1. `sudo apt-get update && sudo apt-get install ca-certificates curl gnupg`
-2. `sudo install -m 0755 -d /etc/apt/keyrings`
-3. `curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg`
-4. `sudo chmod a+r /etc/apt/keyrings/docker.gpg`
-3. `echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null`
-4. `sudo apt-get update`
-5. `sudo apt-get install docker-ce docker-compose docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`
-
-#### For Arch and Derivatives
-
-1. `sudo pacman -S docker docker-compose`
-2. `sudo systemctl start docker`
-
-#### Build and Start
-
-1. `git clone https://github.com/mainsail-crew/virtual-klipper-printer.git && cd virtual-klipper-printer`
-2. `sudo docker-compose up -d`
-
-You can now configure the guppyconfig.json `moonraker_host` to be `127.0.0.1` and `moonraker_port` to be 7125
