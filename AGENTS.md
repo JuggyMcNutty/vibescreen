@@ -66,30 +66,39 @@ Publishing has three shapes, and `update.sh` keys off the version string:
 | Trigger | Version | Published as |
 | --- | --- | --- |
 | local `scripts/build.sh` | `dev-<sha>` | nothing, never published |
-| push to `main` | `nightly-<sha>` | `nightly` prerelease, replaced each push |
+| push to `main` | `rolling-<sha>` | `rolling` release, replaced each push |
 | tag | the tag | a normal release |
 
-The nightly is published from its own job, after the whole matrix **and** the
+The rolling release is published from its own job, after the whole matrix **and** the
 simulator build pass. Do not move it back into the matrix: four parallel jobs
 race to create the same tag, and a broken variant would produce a half
 populated release.
 
-The `nightly` tag never changes while its contents change every push, so the
-tag cannot identify a build. The release *name* carries `nightly-<sha>`, the
+The `rolling` tag never changes while its contents change every push, so the
+tag cannot identify a build. The release *name* carries `rolling-<sha>`, the
 same string `release.sh` writes into `.version`, and that pairing is what lets
 `update.sh` tell whether you already have it. If you change one, change the
 other.
 
-`update.sh` skips prereleases unless given `--nightly`, so a stable install is
-never quietly moved onto whatever last landed on main.
+It is a normal release, not a prerelease. With no stable track, marking it a
+prerelease would leave the repo with no latest release at all and break the
+`releases/latest` URLs.
+
+Tagging still produces a separate release, but nothing chases it: `update.sh`
+looks up the `rolling` tag directly. There is one channel.
+
+**Android is gone.** Upstream built an APK from a separate `android` branch.
+The workflow went with the CI rework and the `OS_ANDROID` guards and
+`platform.h` went with it. Do not add conditional code for a platform that
+cannot be built or tested here.
 
 It also asserts the mips binary is statically linked, which is the property that
 decides whether it runs at all, since the glibc version moves between Creality
 firmware releases.
 
-Two workflows were deleted with the fork's cleanup: `guppydroid.yml`, which
-built an Android APK from an `android` branch this repo does not have and so
-failed on every push, and `pull_request.yml`, which duplicated the build matrix.
+Two workflows were deleted with the fork's cleanup: `guppydroid.yml`, the
+Android build described above, and `pull_request.yml`, which duplicated the
+build matrix.
 
 Do not reintroduce the `ballaswag/guppydev` container. It is unpinned, sits on
 the abandoned upstream's account, and carries a different toolchain from the one
