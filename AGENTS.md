@@ -125,12 +125,19 @@ correct.
 ## Git remotes
 
 ```
+origin        JuggyMcNutty/vibescreen   ours, this is the one you push to
 upstream      ballaswag/guppyscreen     the abandoned original, fetch only
 grumpyscreen  pellcorp/grumpyscreen     a live fork, reference only
 ```
 
-Both have their push URL set to a bogus string so a stray `git push` fails
-loudly instead of trying. There is no `origin` yet; add one when we publish.
+`upstream` and `grumpyscreen` both have their push URL set to a bogus string so
+a stray `git push` to either fails loudly instead of trying.
+
+Our repo is named **vibescreen**, but nothing inside the tree has been renamed:
+the binary, the install paths, the config file and the init script are all still
+`guppyscreen`. That keeps us drop-in compatible with an existing install and
+with upstream's `installer.sh`. Renaming is a separate decision, not an
+oversight.
 
 We work directly on `main`, stacking our commits on upstream history.
 
@@ -154,8 +161,8 @@ Development printer is a K1 Max. Rules:
   the wire; the rest is on you to check.
 - Its `curl` is a cut-down build that rejects `-s` and `--max-time`. Use
   `wget -q -T <sec> -O -` in anything that runs on the printer.
-- Moonraker was down on it when last probed, so the sim has nothing live to talk
-  to until that is sorted. Klipper itself is running.
+- Moonraker is at `192.168.1.202:7125` and healthy. Point the sim at it with
+  `PRINTER_HOST=192.168.1.202 scripts/build.sh sim`.
 
 ## Threading model
 

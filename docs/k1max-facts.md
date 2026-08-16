@@ -58,26 +58,27 @@ installed guppyscreen answered yes to the "disable all Creality services"
 prompt. Some Creality services do still run: `cx_ai_middleware`, `webrtc`,
 `cam_app`, `mjpg_streamer`.
 
-## Known issue on this printer: Moonraker is down
+## Moonraker
 
-Moonraker is configured (`host: 0.0.0.0`, `port: 7125`) and `S56moonraker_service`
-exists, but no moonraker process is running and nothing is listening on 7125:
+Configured as `host: 0.0.0.0`, `port: 7125`, started by `S56moonraker_service`.
+
+During the initial probe nothing was listening on 7125 and no moonraker process
+was running, because Moonraker was mid-update at the time. Re-checked the same
+day and it is up and healthy:
 
 ```
-tcp  0.0.0.0:80    LISTEN   # nginx
-tcp  0.0.0.0:8080  LISTEN   # mjpg_streamer
-tcp  0.0.0.0:22    LISTEN   # dropbear
-tcp  0.0.0.0:4408  LISTEN
-tcp  0.0.0.0:4409  LISTEN
+{"result":{"klippy_connected":true,"klippy_state":"ready", ...}}
 ```
 
-Klipper itself is up (`klippy.py`, `klipper_mcu`). Guppyscreen is up but has
-nothing to talk to, so the UI will be sitting on "waiting for printer to
-initialize", and fluidd will be broken too.
+Components enabled include `authorization`, `webcam`, `update_manager`,
+`timelapse` and `octoprint_compat`, so this is a helper-script style install
+rather than stock.
 
-This was not touched, since the printer is scoped to fact gathering. It does
-block the simulator plan in one way: the SDL build has no live Moonraker to
-point at until this is sorted.
+This is the address to point the simulator at:
+
+```sh
+PRINTER_HOST=192.168.1.202 scripts/build.sh sim
+```
 
 ## Raw excerpts
 
