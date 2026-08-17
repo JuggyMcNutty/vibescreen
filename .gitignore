@@ -18,6 +18,7 @@ build/
 /compile_commands.json
 /.cache/
 /.vscode/
+/.claude/settings.local.json
 
 # Local build config that should never be shared. The simulator writes its
 # runtime config next to the binary, but keep a stray copy at the root ignored
