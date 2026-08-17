@@ -68,6 +68,14 @@ class InputShaperPanel {
   void start_run(bool is_x);
   void finish_run(bool is_x);
 
+  // Send the next queued axis, or tidy up when there is none left. Klipper
+  // runs one command at a time, so queueing both tests up front only meant the
+  // first axis could not be analysed until the second had finished shaking.
+  void start_next_axis();
+
+  // Drop a stale result and put the spinner up for an axis about to run.
+  void clear_axis(bool is_x);
+
   // Give up on runs in flight and say why. Not per axis: while both axes are
   // queued at once there is no telling which of them a failure belongs to, and
   // a spinner nothing ever clears is the worse outcome. analysing_only spares
@@ -149,6 +157,9 @@ class InputShaperPanel {
 
   RunState xrun;
   RunState yrun;
+  // Axes the user asked for that have not been sent yet.
+  bool xpending;
+  bool ypending;
   // Whether the analysis currently bracketed by gcode_shell_command's own
   // "Running Command" and "finished" lines has printed a result yet.
   bool analysis_produced_result;

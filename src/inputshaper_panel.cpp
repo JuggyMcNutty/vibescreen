@@ -91,6 +91,8 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   , yshaper_known(true)
   , xrun(RunState::idle)
   , yrun(RunState::idle)
+  , xpending(false)
+  , ypending(false)
   , analysis_produced_result(false)
   , xrun_since(0)
   , yrun_since(0)
@@ -260,8 +262,15 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   lv_obj_set_width(status, lv_disp_get_physical_hor_res(NULL) - 180 * scale);
   lv_label_set_long_mode(status, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
+  // Opaque, because it floats over the results area and a run in progress
+  // while an earlier result is still on screen would otherwise print one on
+  // top of the other.
+  lv_obj_set_style_bg_opa(status, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(status, lv_obj_get_style_bg_color(cont, LV_PART_MAIN), 0);
+  lv_obj_set_style_pad_all(status, 6, 0);
+  lv_obj_set_style_radius(status, 4, 0);
   lv_obj_align(status, LV_ALIGN_TOP_RIGHT, -10, 5);
-  lv_label_set_text(status, "");
+  set_status("");
 
   lv_obj_add_flag(back_btn.get_container(), LV_OBJ_FLAG_FLOATING);
   lv_obj_align(back_btn.get_container(), LV_ALIGN_BOTTOM_RIGHT, 0, -20);
@@ -372,6 +381,53 @@ void InputShaperPanel::foreground() {
 
 void InputShaperPanel::set_status(const std::string &text) {
   lv_label_set_text(status, text.c_str());
+
+  // Hidden rather than empty, so its background is not a bare box sitting over
+  // the results whenever there is nothing to say.
+  if (text.empty()) {
+    lv_obj_add_flag(status, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_clear_flag(status, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(status);
+  }
+}
+
+void InputShaperPanel::clear_axis(bool is_x) {
+  lv_obj_t *graph = is_x ? xgraph : ygraph;
+  lv_img_set_src(graph, NULL);
+  // hack to color in empty space.
+  ((lv_img_t*)graph)->src_type = LV_IMG_SRC_SYMBOL;
+
+  lv_label_set_text(is_x ? xoutput : youtput, "");
+  lv_obj_add_flag(is_x ? xgraph_cont : ygraph_cont, LV_OBJ_FLAG_HIDDEN);
+}
+
+void InputShaperPanel::start_next_axis() {
+  if (!xpending && !ypending) {
+    if (xrun == RunState::idle && yrun == RunState::idle) {
+      set_status("");
+    }
+    return;
+  }
+
+  bool is_x = xpending;
+  (is_x ? xpending : ypending) = false;
+
+  // Home inside the same script as the test rather than as its own. Klipper
+  // abandons the rest of a script at the first command it will not run, so a
+  // failed G28 stops the test instead of shaking an unhomed toolhead.
+  std::string script = KUtils::is_homed() ? "" : "G28\n";
+  script += fmt::format("TEST_RESONANCES AXIS={} NAME={}\nM400",
+			is_x ? "X" : "Y", is_x ? "x" : "y");
+  ws.gcode_script(script);
+
+  lv_obj_t *spinner = is_x ? xspinner : yspinner;
+  lv_obj_clear_flag(spinner, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(spinner);
+
+  set_status(fmt::format("Testing {} resonances. This takes a few minutes.",
+			 is_x ? "X" : "Y"));
+  start_run(is_x);
 }
 
 void InputShaperPanel::start_run(bool is_x) {
@@ -402,6 +458,12 @@ void InputShaperPanel::abandon_runs(const std::string &why, bool analysing_only)
   }
 
   spdlog::warn("abandoning input shaper runs, {}", why);
+
+  // Whatever stopped this axis, an accelerometer or a missing script, stops
+  // the next one too. Sending it anyway would shake the machine for another
+  // two minutes to reach the same failure.
+  xpending = false;
+  ypending = false;
 
   if (drop_x) {
     lv_obj_add_flag(xspinner, LV_OBJ_FLAG_HIDDEN);
@@ -491,48 +553,26 @@ void InputShaperPanel::handle_callback(lv_event_t *event) {
     bool x_requested = lv_obj_has_state(x_switch, LV_STATE_CHECKED);
     bool y_requested = lv_obj_has_state(y_switch, LV_STATE_CHECKED);
 
-    if ((x_requested || y_requested) && !KUtils::is_homed()) {
-      ws.gcode_script("G28");
+    if (!x_requested && !y_requested) {
+      set_status("Pick at least one axis to calibrate.");
+      return;
     }
 
-    if (x_requested || y_requested) {
-      set_status("Testing resonances. This takes a few minutes per axis.");
+    if (xrun != RunState::idle || yrun != RunState::idle) {
+      return;
     }
+
+    xpending = x_requested;
+    ypending = y_requested;
 
     if (x_requested) {
-      // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x FREQ_START={} FREQ_END={}\nM400", 5, 10));
-      ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x\nM400"));
-
-      // free src      
-      lv_img_set_src(xgraph, NULL);
-      // hack to color in empty space.
-      ((lv_img_t*)xgraph)->src_type = LV_IMG_SRC_SYMBOL;
-      
-      lv_label_set_text(xoutput, "");
-      lv_obj_add_flag(xgraph_cont, LV_OBJ_FLAG_HIDDEN);
-      lv_obj_clear_flag(xspinner, LV_OBJ_FLAG_HIDDEN);
-      lv_obj_move_foreground(xspinner);
-      start_run(true);
+      clear_axis(true);
     }
-
     if (y_requested) {
-      // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=Y NAME=y FREQ_START={} FREQ_END={}\nM400", 5, 10));
-      ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=Y NAME=y\nM400"));
-
-      // free src
-      lv_img_set_src(ygraph, NULL);
-      // hack to color in empty space.
-      ((lv_img_t*)ygraph)->src_type = LV_IMG_SRC_SYMBOL;
-      
-      lv_label_set_text(youtput, "");
-      lv_obj_add_flag(ygraph_cont, LV_OBJ_FLAG_HIDDEN);
-      lv_obj_clear_flag(yspinner, LV_OBJ_FLAG_HIDDEN);
-      lv_obj_move_foreground(yspinner);
-      start_run(false);
+      clear_axis(false);
     }
-    // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x FREQ_START={} FREQ_END={}\nM400\nTEST_RESONANCES AXIS=Y NAME=y FREQ_START={} FREQ_END={}\nM400", 5, 10, 5, 10));
-    // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x FREQ_START={} FREQ_END={}\nM400", 5, 10));
-    // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x\nM400\nTEST_RESONANCES AXIS=Y NAME=y\nM400"));
+
+    start_next_axis();
 
   } else if (btn == save_btn.get_container()) {
     double xhz = (double)lv_slider_get_value(xslider) / 10.0;
@@ -668,9 +708,7 @@ void InputShaperPanel::handle_macro_response(json &j) {
 	}
       }
 
-      if (xrun == RunState::idle && yrun == RunState::idle) {
-	set_status("");
-      }
+      start_next_axis();
 
     } else if ("// Resonances data written to " Y_DATA " file" == resp) {
       // Only when this panel is still waiting on it. The printer carries on
