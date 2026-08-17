@@ -25,9 +25,9 @@ and recalibrate paths can be driven from here.
 emitting the notify_gcode_response sequence Klipper and gcode_shell_command.py
 really produce, so the input shaper panel's whole reply path is reachable
 without shaking a printer for five minutes per attempt. Modes: normal, slow,
-fail, timeout. --shaper-zvd reports a configured shaper type the panel's own
-list does not contain, and --no-shaper-config withholds the config sections the
-panel checks before offering to calibrate.
+fail, timeout. --shaper-type sets the configured X shaper, which is how a type
+the panel does not list gets in front of it, and --no-shaper-config withholds
+the config sections the panel checks before offering to calibrate.
 
 Received gcode is appended to $GCODE_LOG, default /tmp/guppy_gcode_received.txt.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
@@ -190,11 +190,13 @@ def build_bed_mesh(shape):
 SHAPER_MODES = ("normal", "slow", "fail", "timeout")
 SHAPER = _mode_value("--shaper", "normal", SHAPER_MODES)
 SHAPER_LOCK = None
-# A shaper type Klipper accepts in [input_shaper] but the analysis script never
-# proposes, because k1/scripts/shaper_calibrate.py leaves zvd out of
-# AUTOTUNE_SHAPERS. It reaches a config through Klipper's own SHAPER_CALIBRATE
-# or by hand, which is the only way the panel ever sees one.
-SHAPER_ZVD = "--shaper-zvd" in sys.argv
+# The configured shaper type to report for X. Worth being able to set, because
+# the panel has to show back whatever the printer is really configured for, and
+# that is not limited to what a calibration proposes: zvd is legal in
+# [input_shaper] but k1/scripts/shaper_calibrate.py leaves it out of
+# AUTOTUNE_SHAPERS, so it only arrives via Klipper's own SHAPER_CALIBRATE or by
+# hand. Any other value stands in for a type the panel has never heard of.
+SHAPER_TYPE_X = _arg_value("--shaper-type", "ei")
 SHAPER_CONFIG = "--no-shaper-config" not in sys.argv
 
 # Values measured off the development K1 Max on 2026-08-17. The panel clamps its
@@ -207,7 +209,7 @@ RESONANCE_TESTER = {
 }
 
 INPUT_SHAPER = {
-    "shaper_type": "mzv", "shaper_type_x": "zvd" if SHAPER_ZVD else "ei",
+    "shaper_type": "mzv", "shaper_type_x": SHAPER_TYPE_X,
     "damping_ratio_x": 0.1, "shaper_freq_x": 40.3,
     "shaper_type_y": "zv", "damping_ratio_y": 0.1, "shaper_freq_y": 46.9,
 }
