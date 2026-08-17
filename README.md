@@ -7,7 +7,50 @@ nothing else to install alongside it.
 This is a maintained fork of [guppyscreen](https://github.com/ballaswag/guppyscreen),
 which stopped receiving commits in July 2024 with 69 issues open.
 
-![Material theme](screenshots/material/material_screenshot.png)
+![Bed mesh drawn as a shaded surface](screenshots/bedmesh.png)
+
+That is a real K1 Max bed, 6x6 probed, 1.988mm from its lowest point to its
+highest.
+
+## What this fork changes
+
+**The bed mesh panel was rewritten.** Upstream drew the mesh as a table of
+cells tinted by a ramp that saturated at 0.25mm, and only wrote the numbers in
+when the mesh was smaller than 6x6. A K1 Max probes 6x6 by default, so the one
+panel you look at to judge the bed gave you a block of undifferentiated red
+squares with no numbers on it. It now draws onto a canvas, either as a surface
+you drag to rotate or as a flat heatmap, on a diverging scale normalised about
+zero, with a floor so a trammed bed reads as trammed instead of turning eight
+microns of probe noise into a mountain range.
+
+| Flat heatmap | The probed points |
+| --- | --- |
+| ![Bed mesh as a flat heatmap](screenshots/bedmesh_flat.png) | ![The 36 probed points](screenshots/bedmesh_probed.png) |
+
+The same mesh interpolated, and as the 36 points the probe actually visited.
+
+**Calibrating is less rude about it.** It homes only when an axis needs homing,
+rather than re-homing a machine that was already homed, and on printers that
+have the macro it wipes the nozzle first, since a blob of filament on the tip
+gets measured as bed.
+
+**A refused command is no longer silent.** Every gcode reply is checked, and a
+rejection is raised where you pressed the button instead of only in the
+console.
+
+| Extruder options | A rejected command |
+| --- | --- |
+| ![Extruder panel with configurable option lists](screenshots/extrude_retract.png) | ![Dialog reading printer rejected the command](screenshots/gcode_rejected.png) |
+
+**The extruder panel's option lists are configurable** and clamped to the
+printer's own limits read from Klipper, so the temperatures stop where your
+hotend's configuration stops rather than at a hardcoded 240.
+
+Underneath: exceptions are contained at the LVGL event callbacks, where one
+escaping used to freeze the UI outright, the websocket client's shared state is
+locked across the two threads that touch it, and parses that could abort the
+process on bad configuration no longer can. [docs/audit.md](docs/audit.md)
+lists all of it, fixed and still open.
 
 ## Scope
 
@@ -88,6 +131,19 @@ viewer, input shaper with PSD graphs, belt calibration, TMC metrics and tuning,
 temperature control, fan, LED and movement control, extrude and retract,
 fine tuning for speed, flow, z-offset and pressure advance, velocity and
 acceleration limits, Spoolman integration, and multi-printer support.
+
+| Move | Tuning |
+| --- | --- |
+| ![Move panel](screenshots/move.png) | ![Tuning menu](screenshots/printer_tune.png) |
+
+| Macros | Console |
+| --- | --- |
+| ![Macro list with parameters](screenshots/macros.png) | ![Console with the command palette](screenshots/console.png) |
+
+The screenshots are the simulator build. The bed mesh, the macros and the
+command list came from the development K1 Max, so they are that machine's own
+data. The rejected command is `tools/fake_moonraker.py` refusing on purpose,
+which is not a thing worth doing to a real printer.
 
 ## Building
 

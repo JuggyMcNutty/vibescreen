@@ -193,7 +193,7 @@ themes/               primary and secondary colour json, installed to the printe
 scripts/              ours, see below
 tools/                ours, fake_moonraker.py for local testing
 docs/                 ours
-screenshots/          ours, one per panel, referenced from README.md
+screenshots/          referenced from README.md, ours plus some still upstream's
 ```
 
 Not in git: `build/` and `toolchains/`, both generated.
