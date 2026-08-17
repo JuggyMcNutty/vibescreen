@@ -88,6 +88,12 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   // foreground() decides. A panel that has never been opened saves nothing.
   , xshaper_known(true)
   , yshaper_known(true)
+  , xrun(RunState::idle)
+  , yrun(RunState::idle)
+  , analysis_produced_result(false)
+  , xrun_since(0)
+  , yrun_since(0)
+  , watchdog(NULL)
 {
   lv_obj_move_background(cont);
 
@@ -259,14 +265,38 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   lv_obj_add_flag(back_btn.get_container(), LV_OBJ_FLAG_FLOATING);
   lv_obj_align(back_btn.get_container(), LV_ALIGN_BOTTOM_RIGHT, 0, -20);
   
+  // Paused until a run starts, so an idle panel costs nothing.
+  watchdog = lv_timer_create(&InputShaperPanel::_handle_watchdog, 1000, this);
+  lv_timer_pause(watchdog);
+
   // TODO: show only register when issuing macros inputshaper cares about, then unregister after.
   // ws.register_gcode_resp([this](json& d) { this->handle_macro_response(d); });
   ws.register_method_callback("notify_gcode_response",
 			      "InputShaperPanel",
 			      [this](json& d) { this->handle_macro_response(d); });
+
+  // Klipper going away mid run is the one failure that produces no gcode
+  // response at all, so the watchdog would be the only thing left to catch it
+  // and that takes fifteen minutes.
+  ws.register_method_callback("notify_klippy_disconnected",
+			      "InputShaperPanel",
+			      [this](json&) { this->handle_klippy_gone(); });
+  ws.register_method_callback("notify_klippy_shutdown",
+			      "InputShaperPanel",
+			      [this](json&) { this->handle_klippy_gone(); });
+}
+
+void InputShaperPanel::handle_klippy_gone() {
+  std::lock_guard<std::mutex> lock(lv_lock);
+  abandon_runs("Klipper disconnected while the resonance test was running.");
 }
 
 InputShaperPanel::~InputShaperPanel() {
+  if (watchdog != NULL) {
+    lv_timer_del(watchdog);
+    watchdog = NULL;
+  }
+
   if (cont != NULL) {
     lv_obj_del(cont);
     cont = NULL;
@@ -310,6 +340,72 @@ void InputShaperPanel::foreground() {
 
 void InputShaperPanel::set_status(const std::string &text) {
   lv_label_set_text(status, text.c_str());
+}
+
+void InputShaperPanel::start_run(bool is_x) {
+  (is_x ? xrun : yrun) = RunState::testing;
+  (is_x ? xrun_since : yrun_since) = lv_tick_get();
+  lv_timer_resume(watchdog);
+}
+
+void InputShaperPanel::finish_run(bool is_x) {
+  (is_x ? xrun : yrun) = RunState::idle;
+  if (xrun == RunState::idle && yrun == RunState::idle) {
+    lv_timer_pause(watchdog);
+  }
+}
+
+void InputShaperPanel::abandon_runs(const std::string &why, bool analysing_only) {
+  // A shell command failing says nothing about an axis whose test has not run
+  // yet, so those callers ask for the analysing axes only. An accelerometer
+  // error or Klipper going away takes the whole queue with it, so those do not.
+  auto doomed = [analysing_only](RunState s) {
+    return s != RunState::idle && (!analysing_only || s == RunState::analysing);
+  };
+
+  bool drop_x = doomed(xrun);
+  bool drop_y = doomed(yrun);
+  if (!drop_x && !drop_y) {
+    return;
+  }
+
+  spdlog::warn("abandoning input shaper runs, {}", why);
+
+  if (drop_x) {
+    lv_obj_add_flag(xspinner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_background(xspinner);
+    lv_obj_clear_flag(xgraph_cont, LV_OBJ_FLAG_HIDDEN);
+    xrun = RunState::idle;
+  }
+
+  if (drop_y) {
+    lv_obj_add_flag(yspinner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_background(yspinner);
+    lv_obj_clear_flag(ygraph_cont, LV_OBJ_FLAG_HIDDEN);
+    yrun = RunState::idle;
+  }
+
+  if (xrun == RunState::idle && yrun == RunState::idle) {
+    lv_timer_pause(watchdog);
+  }
+
+  set_status(why);
+}
+
+void InputShaperPanel::check_timeouts() {
+  // Only fires when nothing at all is coming back. A run on the development
+  // printer takes about 128 s per axis at its configured hz_per_sec of 1.0,
+  // and gcode_shell_command's own timeout is 600 s, so anything past this has
+  // stopped rather than slowed down.
+  const uint32_t limit = 15 * 60 * 1000;
+
+  bool stalled = (xrun != RunState::idle && lv_tick_elaps(xrun_since) > limit)
+    || (yrun != RunState::idle && lv_tick_elaps(yrun_since) > limit);
+
+  if (stalled) {
+    abandon_runs("The printer stopped reporting on the resonance test. "
+		 "Check the Klipper log.");
+  }
 }
 
 void InputShaperPanel::update_available() {
@@ -367,6 +463,10 @@ void InputShaperPanel::handle_callback(lv_event_t *event) {
       ws.gcode_script("G28");
     }
 
+    if (x_requested || y_requested) {
+      set_status("Testing resonances. This takes a few minutes per axis.");
+    }
+
     if (x_requested) {
       // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x FREQ_START={} FREQ_END={}\nM400", 5, 10));
       ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x\nM400"));
@@ -377,9 +477,10 @@ void InputShaperPanel::handle_callback(lv_event_t *event) {
       ((lv_img_t*)xgraph)->src_type = LV_IMG_SRC_SYMBOL;
       
       lv_label_set_text(xoutput, "");
-      lv_obj_add_flag(xgraph_cont, LV_OBJ_FLAG_HIDDEN);      
+      lv_obj_add_flag(xgraph_cont, LV_OBJ_FLAG_HIDDEN);
       lv_obj_clear_flag(xspinner, LV_OBJ_FLAG_HIDDEN);
       lv_obj_move_foreground(xspinner);
+      start_run(true);
     }
 
     if (y_requested) {
@@ -391,10 +492,11 @@ void InputShaperPanel::handle_callback(lv_event_t *event) {
       // hack to color in empty space.
       ((lv_img_t*)ygraph)->src_type = LV_IMG_SRC_SYMBOL;
       
-      lv_label_set_text(youtput, ""); 
+      lv_label_set_text(youtput, "");
       lv_obj_add_flag(ygraph_cont, LV_OBJ_FLAG_HIDDEN);
       lv_obj_clear_flag(yspinner, LV_OBJ_FLAG_HIDDEN);
       lv_obj_move_foreground(yspinner);
+      start_run(false);
     }
     // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x FREQ_START={} FREQ_END={}\nM400\nTEST_RESONANCES AXIS=Y NAME=y FREQ_START={} FREQ_END={}\nM400", 5, 10, 5, 10));
     // ws.gcode_script(fmt::format("TEST_RESONANCES AXIS=X NAME=x FREQ_START={} FREQ_END={}\nM400", 5, 10));
@@ -427,13 +529,57 @@ void InputShaperPanel::handle_macro_response(json &j) {
     std::string resp = v.template get<std::string>();
     std::lock_guard<std::mutex> lock(lv_lock);
     bool graph_requested = lv_obj_has_state(graph_switch, LV_STATE_CHECKED);
+
+    // Nothing used to clear a spinner except success, so an accelerometer that
+    // stopped answering, or an analysis that never printed its payload, left
+    // the panel waiting on something that was never coming. These are the ways
+    // a run really ends badly, taken from k1/k1_mods/gcode_shell_command.py
+    // and from Klipper broadcasting its errors with a !! prefix.
+    if (resp.rfind("!! ", 0) == 0) {
+      abandon_runs(resp.substr(3));
+      return;
+    }
+
+    // Klipper runs shell commands one at a time, so these two lines bracket
+    // exactly one analysis even when both axes are queued. Judging "finished"
+    // by whether a payload arrived inside the bracket is what keeps one axis
+    // finishing from cancelling the other's pending analysis.
+    if (resp.rfind("// Running Command {guppy_input_shaper}", 0) == 0) {
+      analysis_produced_result = false;
+      return;
+    }
+
+    if (resp.rfind("// Command {guppy_input_shaper} timed out", 0) == 0) {
+      abandon_runs("Analysing the resonance data timed out. The K1 is short on "
+		   "memory, so this can be the plot rather than the maths.", true);
+      return;
+    }
+
+    if (resp.rfind("// Command {guppy_input_shaper} finished", 0) == 0) {
+      // The payload is printed before this line, so reaching here without one
+      // means the script died on its way to producing it.
+      if (!analysis_produced_result) {
+	abandon_runs("Analysing the resonance data produced no result. "
+		     "Check the Klipper log.", true);
+      }
+      return;
+    }
+
     if (resp.rfind("// {\"shapers\":", 0) == 0) {
+      analysis_produced_result = true;
       auto res = json::parse(resp.substr(3));
       auto &axis_log = res["/logfile"_json_pointer];
       auto &axis_png = res["/png"_json_pointer];
       
       if (!axis_log.is_null()) {
 	std::string fn = axis_log.template get<std::string>();
+	// Same as the message above: a result arriving for an axis the panel
+	// has stopped waiting on belongs to a run that was already abandoned.
+	if ((X_DATA == fn && xrun != RunState::analysing)
+	    || (Y_DATA == fn && yrun != RunState::analysing)) {
+	  return;
+	}
+
 	if (X_DATA == fn) {
 	  if (graph_requested && !axis_png.is_null()) {
 	    spdlog::trace("found generated x freq png");
@@ -459,6 +605,7 @@ void InputShaperPanel::handle_macro_response(json &j) {
 	  
 	  lv_obj_add_flag(xspinner, LV_OBJ_FLAG_HIDDEN);
 	  lv_obj_move_background(xspinner);
+	  finish_run(true);
 
 	} else if (Y_DATA == fn) {
 	  if (graph_requested && !axis_png.is_null()) {
@@ -485,10 +632,23 @@ void InputShaperPanel::handle_macro_response(json &j) {
 
 	  lv_obj_add_flag(yspinner, LV_OBJ_FLAG_HIDDEN);
 	  lv_obj_move_background(yspinner);
+	  finish_run(false);
 	}
       }
 
+      if (xrun == RunState::idle && yrun == RunState::idle) {
+	set_status("");
+      }
+
     } else if ("// Resonances data written to " Y_DATA " file" == resp) {
+      // Only when this panel is still waiting on it. The printer carries on
+      // through a run the panel has already given up on, and acting on those
+      // late messages would send another analysis for a result the user has
+      // been told failed.
+      if (yrun != RunState::testing) {
+	return;
+      }
+
       auto config_root = KUtils::get_root_path("config");
       auto screen_width = (double)lv_disp_get_physical_hor_res(NULL) / 100.0;
       auto screen_height = (double)lv_disp_get_physical_ver_res(NULL) / 100.0;
@@ -497,9 +657,15 @@ void InputShaperPanel::handle_macro_response(json &j) {
 	? fmt::format("{} -o {} -w {} -l {}", Y_DATA, png_path, screen_width, screen_height)
 	: Y_DATA;
 
+      yrun = RunState::analysing;
+      yrun_since = lv_tick_get();
       ws.gcode_script(fmt::format("RUN_SHELL_COMMAND CMD=guppy_input_shaper PARAMS={:?}", arg));
 
     } else if ("// Resonances data written to " X_DATA " file" == resp) {
+      if (xrun != RunState::testing) {
+	return;
+      }
+
       auto config_root = KUtils::get_root_path("config");
       auto screen_width = (double)lv_disp_get_physical_hor_res(NULL) / 100.0;
       auto screen_height = (double)lv_disp_get_physical_ver_res(NULL) / 100.0;
@@ -508,6 +674,8 @@ void InputShaperPanel::handle_macro_response(json &j) {
 	? fmt::format("{} -o {} -w {} -l {}", X_DATA, png_path, screen_width, screen_height)
 	: X_DATA;
 
+      xrun = RunState::analysing;
+      xrun_since = lv_tick_get();
       ws.gcode_script(fmt::format("RUN_SHELL_COMMAND CMD=guppy_input_shaper PARAMS={:?}", arg));
     }
   }

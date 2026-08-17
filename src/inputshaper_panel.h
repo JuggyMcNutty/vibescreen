@@ -19,6 +19,7 @@ class InputShaperPanel {
   void handle_image_clicked(lv_event_t *event);
   void handle_macro_response(json &j);
   void handle_update_slider(lv_event_t *event);
+  void handle_klippy_gone();
   
   static void _handle_callback(lv_event_t *event) {
     KGuard::event("InputShaperPanel::_handle_callback", [&] {
@@ -55,6 +56,28 @@ class InputShaperPanel {
   void update_available();
 
   void set_status(const std::string &text);
+
+  // Where an axis has got to. Anything but idle means a spinner is up and the
+  // panel is waiting on the printer for something.
+  enum class RunState { idle, testing, analysing };
+
+  void start_run(bool is_x);
+  void finish_run(bool is_x);
+
+  // Give up on runs in flight and say why. Not per axis: while both axes are
+  // queued at once there is no telling which of them a failure belongs to, and
+  // a spinner nothing ever clears is the worse outcome. analysing_only spares
+  // an axis whose test has not run yet, for the failures that can only have
+  // come from the analysis step.
+  void abandon_runs(const std::string &why, bool analysing_only = false);
+  void check_timeouts();
+
+  static void _handle_watchdog(lv_timer_t *timer) {
+    KGuard::event("InputShaperPanel::_handle_watchdog", [&] {
+      InputShaperPanel *panel = (InputShaperPanel*)timer->user_data;
+      panel->check_timeouts();
+    });
+  };
 
   void set_shaper_detail(json &res,
 			 lv_obj_t *label,
@@ -119,6 +142,16 @@ class InputShaperPanel {
   // anything the printer told us.
   bool xshaper_known;
   bool yshaper_known;
+
+  RunState xrun;
+  RunState yrun;
+  // Whether the analysis currently bracketed by gcode_shell_command's own
+  // "Running Command" and "finished" lines has printed a result yet.
+  bool analysis_produced_result;
+  // lv_tick when each axis last changed state, for the watchdog.
+  uint32_t xrun_since;
+  uint32_t yrun_since;
+  lv_timer_t *watchdog;
 
   static std::vector<std::string> shapers;
   
