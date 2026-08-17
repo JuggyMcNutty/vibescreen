@@ -68,6 +68,7 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   , ylabel(lv_label_create(yslider_cont))
   , yshaper_dd(lv_dropdown_create(ycontrol))
     
+  , status(lv_label_create(cont))
   , button_cont(lv_obj_create(cont))
   , switch_cont(lv_obj_create(button_cont))
   , graph_switch_label(lv_label_create(switch_cont))
@@ -244,7 +245,18 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   // row 1, col 1
   lv_obj_set_grid_cell(button_cont, LV_GRID_ALIGN_CENTER, 0, 1, LV_GRID_ALIGN_CENTER, 0, 3);
 
-  lv_obj_add_flag(back_btn.get_container(), LV_OBJ_FLAG_FLOATING);  
+  // Floating, so it is not a grid cell. Width in pixels rather than a percent
+  // because a percentage on a floating child resolves against a grid cell it
+  // was never assigned, and the label then lays out wider than the screen and
+  // loses both ends of every line.
+  lv_obj_add_flag(status, LV_OBJ_FLAG_FLOATING);
+  lv_obj_set_width(status, lv_disp_get_physical_hor_res(NULL) - 180 * scale);
+  lv_label_set_long_mode(status, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(status, LV_ALIGN_TOP_RIGHT, -10, 5);
+  lv_label_set_text(status, "");
+
+  lv_obj_add_flag(back_btn.get_container(), LV_OBJ_FLAG_FLOATING);
   lv_obj_align(back_btn.get_container(), LV_ALIGN_BOTTOM_RIGHT, 0, -20);
   
   // TODO: show only register when issuing macros inputshaper cares about, then unregister after.
@@ -292,15 +304,55 @@ void InputShaperPanel::foreground() {
     }
   }
 
-  update_save_enabled();
+  update_available();
   lv_obj_move_foreground(cont);
 }
 
-void InputShaperPanel::update_save_enabled() {
-  if (xshaper_known && yshaper_known) {
+void InputShaperPanel::set_status(const std::string &text) {
+  lv_label_set_text(status, text.c_str());
+}
+
+void InputShaperPanel::update_available() {
+  // Klipper abandons the rest of a script at the first command it does not
+  // like, so a button that sends something this printer lacks does worse than
+  // nothing. Every one of these lives in configfile rather than in
+  // printer.objects.list, see KUtils::has_config_section.
+  bool can_test = KUtils::has_config_section("resonance_tester");
+  bool can_analyse = KUtils::has_config_section("gcode_shell_command guppy_input_shaper");
+  bool can_save = KUtils::has_config_section("calibrate_shaper_config");
+
+  std::vector<std::string> missing;
+  if (!can_test) {
+    missing.push_back("[resonance_tester]");
+  }
+  if (!can_analyse) {
+    missing.push_back("[gcode_shell_command guppy_input_shaper]");
+  }
+  if (!can_save) {
+    missing.push_back("[calibrate_shaper_config]");
+  }
+
+  if (can_test && can_analyse) {
+    calibrate_btn.enable();
+  } else {
+    calibrate_btn.disable();
+  }
+
+  if (can_save && xshaper_known && yshaper_known) {
     save_btn.enable();
   } else {
     save_btn.disable();
+  }
+
+  if (!missing.empty()) {
+    set_status(fmt::format("Printer config is missing {}. Install GuppyScreen's "
+			   "guppy_cmd.cfg and k1_mods to get the last two.",
+			   fmt::join(missing, ", ")));
+  } else if (!xshaper_known || !yshaper_known) {
+    set_status("Printer is set to a shaper this panel does not know, so saving "
+	       "would change it. Calibrate to replace it.");
+  } else {
+    set_status("");
   }
 }
 
@@ -584,7 +636,7 @@ void InputShaperPanel::set_shaper_detail(json &res,
       } else {
 	yshaper_known = known;
       }
-      update_save_enabled();
+      update_available();
 
       lv_slider_set_value(slider, f * 10, LV_ANIM_OFF);
       lv_label_set_text(slider_label, fmt::format("{:.1f} Hz", f).c_str());

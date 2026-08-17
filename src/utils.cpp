@@ -59,6 +59,22 @@ namespace KUtils {
     return false;
   }
 
+  bool has_config_section(const std::string &name) {
+    auto &settings = State::get_instance()
+      ->get_data("/printer_state/configfile/settings"_json_pointer);
+    if (!settings.is_object()) {
+      return false;
+    }
+
+    // Klipper lowercases section names in configfile.settings, so a caller can
+    // pass the name with whatever case printer.cfg used and still match.
+    std::string want = name;
+    std::transform(want.begin(), want.end(), want.begin(),
+		   [](unsigned char c) { return std::tolower(c); });
+
+    return settings.contains(want);
+  }
+
   bool is_running_local() {
     Config *conf = Config::get_instance();
     std::string df_host = conf->get<std::string>(conf->df() + "moonraker_host");

@@ -18,6 +18,17 @@ namespace KUtils {
   // printer has must be tested for before it goes out rather than after.
   bool has_gcode_macro(const std::string &name);
 
+  // Whether the printer's config carries this section, named as it is in
+  // printer.cfg. Section names with an argument are spelled the same way
+  // Klipper does, "gcode_shell_command guppy_input_shaper".
+  //
+  // Not answerable from the same place as has_gcode_macro.
+  // printer.objects.list only reports objects that implement get_status, so
+  // resonance_tester, adxl345 and calibrate_shaper_config are all absent from
+  // it on a printer that plainly has them, measured on the K1 Max. configfile
+  // is where a section shows up whether or not it reports status.
+  bool has_config_section(const std::string &name);
+
   bool is_running_local();
   std::string get_root_path(const std::string root_name);
 

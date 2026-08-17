@@ -50,8 +50,11 @@ class InputShaperPanel {
   // decides what to do rather than having a wrong value picked for it.
   bool select_shaper(lv_obj_t *dd, const std::string &shaper);
 
-  // Save is only offered while both axes show a shaper we recognise.
-  void update_save_enabled();
+  // Enable or disable Calibrate and Save from what the printer's config says it
+  // can do, and say why on the status line when either is off.
+  void update_available();
+
+  void set_status(const std::string &text);
 
   void set_shaper_detail(json &res,
 			 lv_obj_t *label,
@@ -93,6 +96,10 @@ class InputShaperPanel {
   lv_obj_t *yslider;
   lv_obj_t *ylabel;
   lv_obj_t *yshaper_dd;
+
+  // Why a button is off, or what a run is doing. Floats over the top of the
+  // graph area, which is empty whenever there is anything to say here.
+  lv_obj_t *status;
 
   lv_obj_t *button_cont;
   lv_obj_t *switch_cont;
