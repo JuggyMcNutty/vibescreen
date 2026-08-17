@@ -33,7 +33,7 @@ class Selector {
   lv_obj_t *get_container();
   lv_obj_t *get_selector();
   lv_obj_t *get_label();
-  uint32_t get_selected_idx();
+  uint32_t get_selected_idx() const;
   void set_selected_idx(uint32_t idx);
 
   // Replace the options after construction. Used to rebuild from config and to

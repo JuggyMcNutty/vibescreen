@@ -163,7 +163,7 @@ lv_obj_t *Selector::get_label() {
   return label;
 }
 
-uint32_t Selector::get_selected_idx() {
+uint32_t Selector::get_selected_idx() const {
   return selector_idx;
 }
 

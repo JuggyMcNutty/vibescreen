@@ -254,7 +254,7 @@ InputShaperPanel::Axis &InputShaperPanel::shown_axis() {
 }
 
 bool InputShaperPanel::wants(size_t idx) const {
-  uint32_t target = const_cast<Selector&>(axis_sel).get_selected_idx();
+  uint32_t target = axis_sel.get_selected_idx();
   return target == TARGET_BOTH || target == idx;
 }
 
