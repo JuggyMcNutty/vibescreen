@@ -407,6 +407,25 @@ root unconditionally, and `src/config.cpp` defaulted `log_path` to
 and for the Debian target. Worked around today by generating a config in
 `scripts/build.sh`, but the defaults should be platform-conditional.
 
+### M5. Home panel sensor rows overlap and clip (open)
+
+Visible in `screenshots/home.png`, captured against the development K1 Max on
+2026-08-16. That machine reports two extra temperature sensors beyond the
+extruder and bed, and the third row draws as `Temperature Fan 20Chamber Fan`:
+one sensor's value sits on top of the next sensor's name. A fourth row is
+started below it and clipped by the temperature chart, so only its colour bar
+shows.
+
+Two things combine. `SensorContainer` gives the name label no width bound and
+aligns it out-right of the icon (`src/sensor_container.cpp:51`), while the
+value is aligned to a fixed offset from the right edge (`:55`), so a long
+display name runs straight under the value. And nothing bounds how many
+sensors `MainPanel::create_sensors` will lay out, so a printer with more of
+them than fit overruns the space the chart occupies.
+
+Cosmetic rather than dangerous, but it is on the first screen you see, and it
+is why the home panel is not in the README's gallery.
+
 ---
 
 ## On mining `pellcorp/grumpyscreen`
@@ -458,13 +477,15 @@ Remaining, roughly in order:
 
 1. Guard the residual 17 inline lambdas and 4 named callbacks noted in C10, so
    exception containment is complete rather than nearly complete.
-2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
-3. C11, the panel destructor double-delete. Latent until something tears a
+2. M5, the overlapping sensor rows. Small, and it is the first screen anyone
+   sees on a printer with more than two temperature sensors.
+3. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+4. C11, the panel destructor double-delete. Latent until something tears a
    panel down, and a mechanical sweep once someone wants multi-printer
    switching to actually work.
-4. M1, the commented-out code. Pure churn, best done as its own quiet
+5. M1, the commented-out code. Pure churn, best done as its own quiet
    pass when nothing else is in flight.
-5. C1 plus the C9 lifetime hazard, as the message-queue change above. The
+6. C1 plus the C9 lifetime hazard, as the message-queue change above. The
    largest piece of work left and the one that retires the most.
 
 M2, the four leaked singletons, is harmless and stays open.
