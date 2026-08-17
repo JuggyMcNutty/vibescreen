@@ -148,13 +148,17 @@ The overlay is completely full. Anything we install has to live in `/usr/data`.
 
 - Networking from the printer is awkward and cost real time to work out. The
   stock `/usr/bin/curl` is not curl, it is a Creality utility with an unrelated
-  command line that rejects `-s` and `-o`. busybox `wget` handles plain HTTP
-  fine, so use `wget -q -T <sec> -O -` for Moonraker checks, but it cannot
-  negotiate TLS with `github.com` or `api.github.com` and fails with alert 80,
-  reaching only `raw.githubusercontent.com`. That is why upstream downloaded a
-  curl binary from a third party repo and ran it as root. Python 3 is already
-  installed for Klipper and reaches everything, which is what our `update.sh`
-  and `installer.sh` use instead. See the networking section of `AGENTS.md`.
+  command line (`curl [hVvX:H:r:d:F:n:] [METHOD] url ...`, and no `--version`).
+  Re-checked 2026-08-17: `-s` warns `invalid option` and then fetches anyway
+  with exit 0, so testing the exit code will tell you curl is fine. It is
+  `--max-time` that actually breaks it, exiting 234. busybox `wget` handles
+  plain HTTP fine, so use `wget -q -T <sec> -O -` for Moonraker checks, but
+  it cannot negotiate TLS with `github.com` or `api.github.com`, failing with
+  alert 80, and reaches only `raw.githubusercontent.com`. That is why upstream
+  downloaded a curl binary from a third party repo and ran it as root. Python 3
+  is already installed for Klipper (3.8.2) and reaches everything, which is what
+  our `update.sh` and `installer.sh` use instead. All re-verified 2026-08-17.
+  See the networking section of `AGENTS.md`.
 - busybox `tar` unlinks before it overwrites, so unpacking a release over a
   running binary or over the executing `update.sh` is safe: open readers keep
   the old inode.

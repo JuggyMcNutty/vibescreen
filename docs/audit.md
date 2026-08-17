@@ -14,23 +14,29 @@ Status key: **open** means we have not fixed it yet. Fixed items name the commit
 
 ## What the previous developer knew
 
-There are 15 TODO/XXX markers in `src/`, and they are worth reading as a
-handover note rather than as noise. They cluster in three places:
+There are 14 TODO/XXX markers in `src/`, and they are worth reading as a
+handover note rather than as noise. They cluster in three places. No line
+numbers here on purpose: the marker text is exact, so `grep` finds them, and a
+line number is one commit away from pointing at something else.
 
-| Location | Marker |
+| File | Marker |
 | --- | --- |
-| `src/console_panel.cpp:190` | `// TODO: this is a race condition` |
-| `src/macros_panel.cpp:53` | `// TODO: this is a race condition` |
-| `src/websocket_client.cpp:48` | `// XXX: get rid of consumers and use function ptrs for callback` |
-| `src/websocket_client.cpp:115,130` | `// XXX: check success, remove consumer if send is unsuccessfull` |
-| `src/wpa_event.cpp:44,49` | `// XXX: replace callback?`, `// TODO: retries` |
-| `src/print_status_panel.cpp:68,458` | `// XXX: check config`, `// XXX: better estimate` |
-| `src/print_panel.cpp:295` | `// XXX: maybe use the directory instead of file endpoint in moonraker` |
-| `src/inputshaper_panel.cpp:239` | subscribe only to the macros the panel cares about, then unregister |
-| `src/printertune_panel.cpp:101` | `// TODO: handle remote guppy instance` |
-| `src/setting_panel.cpp:117` | `// TODO: throw this inside the global threadpool to make it async` |
-| `src/spoolman_panel.cpp:317` | `// TODO: calculate color distance` |
-| `src/tree.h:123` | `// XXX: fix my index` |
+| `src/console_panel.cpp` | `// TODO: this is a race condition` |
+| `src/macros_panel.cpp` | `// TODO: this is a race condition` |
+| `src/websocket_client.cpp` | `// XXX: get rid of consumers and use function ptrs for callback` |
+| `src/websocket_client.cpp` | `// XXX: check success, remove callback if send is unsuccessfull` |
+| `src/wpa_event.cpp` | `// XXX: replace callback?`, `// TODO: retries` |
+| `src/print_status_panel.cpp` | `// XXX: check config`, `// XXX: better estimate` |
+| `src/print_panel.cpp` | `// XXX: maybe use the directory instead of file endpoint in moonraker` |
+| `src/inputshaper_panel.cpp` | subscribe only to the macros the panel cares about, then unregister |
+| `src/printertune_panel.cpp` | `// TODO: handle remote guppy instance` |
+| `src/setting_panel.cpp` | `// TODO: throw this inside the global threadpool to make it async` |
+| `src/spoolman_panel.cpp` | `// TODO: calculate color distance` |
+| `src/tree.h` | `// XXX: fix my index` |
+
+It was 15 when this was written. `fc12faa` retired one of the two "check
+success" markers by actually checking the reply, and the survivor now says
+"callback" where it used to say "consumer".
 
 The two "this is a race condition" notes are the interesting ones. They are not
 two local bugs, they are two sightings of one structural problem. See C1.
@@ -41,7 +47,7 @@ two local bugs, they are two sightings of one structural problem. See C1.
 
 ### C1. `State` returns references out from under its own mutex (open)
 
-`src/state.cpp:50-53`
+`src/state.cpp:61-70`
 
 ```cpp
 json &State::get_data(const json::json_pointer& ptr) {
@@ -66,7 +72,7 @@ Two further wrinkles:
 - `data[ptr]` on a `json` object **default-inserts a null** when the pointer is
   absent, so a nominal read mutates the map. Two concurrent reads of missing
   keys both write.
-- There are 42 `get_data(...)` call sites. The mutex is doing nothing useful for
+- There are 44 `get_data(...)` call sites. The mutex is doing nothing useful for
   any of the reference-returning ones. The value-returning accessors
   (`get_extruders`, `get_heaters`, and friends) are genuinely safe.
 
@@ -77,7 +83,7 @@ the largest single piece of work in this audit and should be its own change.
 
 ### C2. Empty Moonraker port field terminates the process (fixed, `bdbfa03`)
 
-`src/printer_select_panel.cpp:206-207`
+`src/printer_select_panel.cpp`, as it was before the fix:
 
 ```cpp
 const char *mp = lv_textarea_get_text(p->moonraker_port);
@@ -95,12 +101,12 @@ process aborts. On the printer `supervise-daemon` restarts it, so the symptom is
 the UI vanishing and coming back, with nothing obvious in the log.
 
 The field is otherwise well guarded: `lv_textarea_set_accepted_chars(...,
-"0123456789")` and `set_max_length(5)` at `src/printer_select_panel.cpp:184-185`
+"0123456789")` and `set_max_length(5)` at `src/printer_select_panel.cpp:185-186`
 mean empty is the only bad input that can reach the parse. Cheap to fix.
 
 ### C3. Malformed theme colour aborts at startup (fixed, `0886341`)
 
-`src/guppyscreen.cpp:70-76`, repeated at `272-276`
+`src/guppyscreen.cpp`, in two places, as it was before the fix:
 
 ```cpp
 auto primary_color = theme_conf->get_json("/primary_color").empty()
@@ -189,15 +195,21 @@ something to fold into an unrelated change.
 
 ### C8. Rejected gcode is invisible to the user (fixed, `fc12faa`)
 
-`KWebSocketClient::gcode_script` (`src/websocket_client.cpp:184`) fires and
-forgets. It logs the outgoing payload and never inspects the reply. This is the
-previous developer's own `// XXX: check success` at
-`src/websocket_client.cpp:115,130`.
+`KWebSocketClient::gcode_script` used to fire and forget: it logged the
+outgoing payload and never inspected the reply. This was the previous
+developer's own `// XXX: check success` in `src/websocket_client.cpp`, one of
+the two markers that carried it.
 
-Consequence for the clamping added in `ff6dfad`: every limit we enforce in the
-UI is advisory. If Klipper rejects a command anyway, for a reason we did not
-model, the panel shows nothing at all. The console panel sees the error, this
-panel does not.
+The consequence was that every limit the UI enforced, including the clamping
+added in `ff6dfad`, was advisory. If Klipper rejected a command for a reason we
+had not modelled, the panel showed nothing at all. The console panel saw the
+error, the panel that sent it did not.
+
+It now checks the reply and routes a rejection to the error handler
+(`src/websocket_client.cpp:217`). **That is a backstop, not a licence to send
+speculatively.** Klipper abandons the rest of a script at the first command it
+refuses, so anything after the bad line silently never runs. Validate first;
+see the gcode section of `AGENTS.md`.
 
 ### C9. Websocket client's shared state was unguarded across threads (fixed, `c042ae6`)
 
@@ -248,12 +260,19 @@ LVGL at all and calls `std::terminate`. x86-64 does emit them by default, so
 anything relying on unwinding would test green in the simulator and do nothing
 on the printer. Costs 64KB.
 
-**Residual:** 19 inline lambda callbacks and 4 other static callbacks are still
-unguarded. They are mostly small UI-only bodies, but they are entry points.
+**Residual**, recounted 2026-08-17: of 78 `add_event_cb` sites, 52 go through a
+guarded `&Class::_handler` static. 17 are inline lambdas and 4 are named
+callbacks (`GuppyScreen::handle_calibrated`, `scroll_begin_event`, `slider_cb`,
+`draw_part_event_cb`), none of them guarded. The remaining 5 pass a `cb` handed
+in by the caller, so they inherit whatever the caller did.
+
+The unguarded ones are mostly small UI-only bodies, but they are entry points.
+To recount: every `add_event_cb` whose callback argument is neither a lambda
+nor `&Class::_name`.
 
 ### C4. `interface_ip` ignores every error it can hit (fixed, `4027abe`)
 
-`src/utils.cpp:163-174`
+`src/utils.cpp`, as it was before the fix:
 
 ```cpp
 std::string interface_ip(const std::string &interface) {
@@ -292,7 +311,7 @@ Not fixed in `pellcorp/grumpyscreen` either; they moved the identical code to
 
 22 `std::sto*` call sites, none guarded. Beyond C2 and C3 the reachable ones are:
 
-- `src/spoolman_panel.cpp:419` parses a spool colour from the Spoolman API
+- `src/spoolman_panel.cpp:422` parses a spool colour from the Spoolman API
   response. A non-hex colour from a third-party service aborts the UI.
   **Fixed in `0886341`.**
 - `src/wifi_panel.cpp:186` parses the signal level out of a wpa_supplicant
@@ -356,32 +375,34 @@ only source change needed to build the tree with it.
 
 ## Maintainability
 
-### M1. 98 lines of commented-out code across 28 files (open)
+### M1. Commented-out code left behind (open)
 
-Worst: `src/numpad.cpp` and `src/extruder_panel.cpp` (13 each),
-`src/websocket_client.cpp`, `src/macro_item.cpp`, `src/image_label.cpp` (7 each).
-Git remembers; these should go. Low risk, do it in one sweep per file so the
-diffs stay reviewable.
+Of the order of 90 lines across a couple of dozen files, concentrated in
+`src/numpad.cpp`, `src/extruder_panel.cpp`, `src/websocket_client.cpp`,
+`src/macro_item.cpp` and `src/image_label.cpp`. The exact count moves with
+every commit and depends on how you decide what counts, so it is not worth
+pinning here. Git remembers; these should go. Low risk, do it in one sweep per
+file so the diffs stay reviewable.
 
 ### M2. Four leaked singletons (open, cosmetic)
 
 `Config`, `GuppyScreen`, `ThemeConfig` and `State` are each `instance = new ...`
-with no matching `delete` (`src/config.cpp:18`, `src/guppyscreen.cpp:45`,
-`src/theme.cpp:18`, `src/state.cpp:40`). They live for the whole process, so
+with no matching `delete` (`src/config.cpp:17`, `src/guppyscreen.cpp:39`,
+`src/theme.cpp:17`, `src/state.cpp:40`). They live for the whole process, so
 nothing leaks in practice. Only worth touching if we ever want a clean shutdown
 path or to run the UI under a leak checker.
 
 ### M3. Logging before the logger exists (fixed, `5cdef7e`)
 
-`src/main.cpp:40` calls `spdlog::debug` before `Config::init` and before
+`src/main.cpp` called `spdlog::debug` before `Config::init` and before
 `GuppyScreen::init` install the sinks and set the level, so that line goes to
 the default logger and is normally dropped. Either move it after init or delete
 it.
 
 ### M4. K1 paths hardcoded into non-K1 builds (fixed, `5cdef7e`)
 
-`src/main.cpp:44` passes `/usr/data/printer_data/thumbnails` as the thumbnail
-root unconditionally, and `src/config.cpp:72` defaults `log_path` to
+`src/main.cpp` passed `/usr/data/printer_data/thumbnails` as the thumbnail
+root unconditionally, and `src/config.cpp` defaulted `log_path` to
 `/usr/data/printer_data/logs/guppyscreen.log`. Both are wrong for the simulator
 and for the Debian target. Worked around today by generating a config in
 `scripts/build.sh`, but the defaults should be platform-conditional.
@@ -392,8 +413,8 @@ and for the Debian target. Worked around today by generating a config in
 
 Worth recalibrating the expectation here. The fork is 233 commits ahead and 0
 behind, which sounds like a large pool of fixes to cherry-pick. A good part of
-that lead is deletion. It carries 72 files in `src/` against our 92, having
-dropped:
+that lead is deletion. It carries roughly 70 files in `src/` against our 90
+odd, having dropped:
 
 `bedmesh_panel`, `belts_calibration_panel`, `inputshaper_panel`, `limits_panel`,
 `macros_panel`, `macro_item`, `power_panel`, `printer_select_panel`,
@@ -425,7 +446,7 @@ If `onmessage` instead pushed messages onto a queue that the LVGL loop drained,
 every handler would run on one thread. `State` could return references safely,
 the websocket client would not need a mutex at all, and a panel could not be
 destroyed mid-dispatch. That is the shape C1 should be solved in. Solving C1
-locally, by copying json out of `State` at every one of its 42 call sites, would
+locally, by copying json out of `State` at every one of its 44 call sites, would
 have to be undone to get there.
 
 ## Suggested order
@@ -435,13 +456,13 @@ parse helpers.
 
 Remaining, roughly in order:
 
-1. Guard the residual 19 inline lambdas and 4 static callbacks noted in C10, so
+1. Guard the residual 17 inline lambdas and 4 named callbacks noted in C10, so
    exception containment is complete rather than nearly complete.
 2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
 3. C11, the panel destructor double-delete. Latent until something tears a
    panel down, and a mechanical sweep once someone wants multi-printer
    switching to actually work.
-4. M1, 98 lines of commented-out code. Pure churn, best done as its own quiet
+4. M1, the commented-out code. Pure churn, best done as its own quiet
    pass when nothing else is in flight.
 5. C1 plus the C9 lifetime hazard, as the message-queue change above. The
    largest piece of work left and the one that retires the most.

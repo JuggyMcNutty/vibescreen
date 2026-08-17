@@ -77,6 +77,14 @@ Log and thumbnail paths default to directories beside the binary in simulator
 builds, so nothing needs `/usr/data` to exist.
 
 To test against something other than a real printer, `tools/fake_moonraker.py`
-speaks enough of the Moonraker protocol for the UI to start, and can be told to
-reject gcode so error handling can be exercised. Use it for anything that would
-otherwise command real hardware.
+speaks enough of the Moonraker protocol for the UI to start. It records every
+gcode it is sent, and can be told to reject them so error handling can be
+exercised. It also serves a bed mesh, in a choice of shapes, and acts on
+`BED_MESH_CLEAR` and `BED_MESH_CALIBRATE` rather than only logging them.
+
+    python3 tools/fake_moonraker.py 240 240 --reject   # reject every command
+    python3 tools/fake_moonraker.py --mesh bowl        # adaptive|full|bowl|tilt|flat
+    python3 tools/fake_moonraker.py --wiper            # pretend WIPE_NOZZLE exists
+
+Use it for anything that would otherwise command real hardware. `AGENTS.md` has
+the detail, including why the calibrate reply is deliberately incomplete.

@@ -122,11 +122,14 @@ Do not reintroduce the `ballaswag/guppydev` container. It is unpinned, sits on
 the abandoned upstream's account, and carries a different toolchain from the one
 we develop against, so a green run in it says nothing about a local build.
 
-The simulator ignores `SIGTERM` and only exits on `SIGINT`, because SDL installs
-its own handler and nothing consumes the resulting quit event. So `timeout 20
-./guppyscreen` hangs, and you want `timeout -s INT 20 ./guppyscreen` or
-`pkill -x guppyscreen`. This is SDL-specific: the framebuffer build has no such
-handler and dies on `SIGTERM` normally, so the printer's init script is fine.
+This file used to say the simulator ignores `SIGTERM` and that `timeout 20
+./guppyscreen` hangs. **It does not, measured 2026-08-17.** Plain `timeout`,
+`timeout -s INT` and `pkill -x guppyscreen` all end it promptly, under the
+`x11` and `wayland` SDL drivers and with the driver left to autoselect. Use
+whichever you like; there is no workaround to remember.
+
+If you do see it outlive a `SIGTERM`, that is new behaviour and worth writing
+down rather than assuming this note is right.
 
 Host packages needed: `base-devel`, `cmake`, `sdl2` (or `sdl2-compat`),
 `sshpass` for the printer probe.
@@ -186,10 +189,14 @@ patches/              three patches applied to submodules, see below
 k1/                   payload installed onto the printer, init scripts and klippy modules
 assets/               generated LVGL C arrays for icons and fonts
 debian/               Raspberry Pi and Debian packaging, plus the config template
+themes/               primary and secondary colour json, installed to the printer
 scripts/              ours, see below
 tools/                ours, fake_moonraker.py for local testing
 docs/                 ours
+screenshots/          ours, one per panel, referenced from README.md
 ```
+
+Not in git: `build/` and `toolchains/`, both generated.
 
 ### `lv_conf.h` is two configs, not one
 
@@ -272,16 +279,29 @@ builds.
   up, stop the service, smoke test the new binary from the install directory,
   then install. A locally built binary is versioned `dev-<sha>` and `update.sh`
   will refuse to replace it without `--force`.
-- Rollbacks live in `/usr/data/guppyscreen/`: `guppyscreen.orig-07409cb` is the
-  upstream build that was there before we touched it, and
-  `guppyscreen-backup-dev4f563d8.tar.gz` is a full directory snapshot.
+- Rollbacks live in two places. Inside `/usr/data/guppyscreen/`,
+  `guppyscreen.orig-07409cb` is the upstream build that was there before we
+  touched it, alongside `guppyconfig.json.orig` and `update.sh.orig`. One level
+  up in `/usr/data/` are the full directory snapshots,
+  `guppyscreen-backup-*.tar.gz`, one per deploy. Take a fresh one before
+  installing anything:
+
+  ```sh
+  cd /usr/data && tar czf guppyscreen-backup-<installed-version>.tar.gz guppyscreen/
+  ```
+
+  Outside the directory being archived, or tar recurses into its own output.
 - Credentials come from the environment, never from a committed file:
   `PRINTER_HOST=... PRINTER_PASS=... scripts/probe-printer.sh`
 - Never commit the SSID, PSK, MAC addresses, printer serial or the Moonraker API
   key. `probe-printer.sh` strips the API key on the printer before it crosses
   the wire; the rest is on you to check.
-- Its `curl` is a cut-down build that rejects `-s` and `--max-time`. Use
-  `wget -q -T <sec> -O -` in anything that runs on the printer.
+- Its `curl` is not curl, and the two flags fail differently. `-s` prints
+  `invalid option -- 's'` and then **fetches anyway, exiting 0**, so a script
+  that only checks the exit code will conclude curl works. `--max-time` is
+  fatal: it is unrecognised, the parse then slides and it tries to connect to
+  the timeout value as a host, exiting 234. Use `wget -q -T <sec> -O -` in
+  anything that runs on the printer.
 - Moonraker is at `192.168.1.202:7125` and healthy. Point the sim at it with
   `PRINTER_HOST=192.168.1.202 scripts/build.sh sim`.
 
