@@ -42,10 +42,12 @@ ButtonContainer::ButtonContainer(lv_obj_t *parent,
   else if (cb != NULL && pcb) {
     if (prompt_estop) {
       lv_obj_add_event_cb(btn_cont, [](lv_event_t *e) {
-	lv_event_code_t code = lv_event_get_code(e);
-	if (code == LV_EVENT_CLICKED) {
-	  ((ButtonContainer*)e->user_data)->handle_prompt();
-	}
+	KGuard::event("ButtonContainer prompt open", [&] {
+	  lv_event_code_t code = lv_event_get_code(e);
+	  if (code == LV_EVENT_CLICKED) {
+	    ((ButtonContainer*)e->user_data)->handle_prompt();
+	  }
+	});
       }, LV_EVENT_CLICKED, this);
     } else {
       lv_obj_add_event_cb(btn_cont, &ButtonContainer::_handle_callback, LV_EVENT_PRESSED, this);
@@ -128,11 +130,17 @@ void ButtonContainer::handle_prompt() {
 
   lv_obj_add_event_cb(mbox1, [](lv_event_t *e) {
     lv_obj_t *obj = lv_obj_get_parent(lv_event_get_target(e));
-    uint32_t clicked_btn = lv_msgbox_get_active_btn(obj);
-    if(clicked_btn == 0) {
-      ((ButtonContainer*)e->user_data)->run_callback();
-    }
-    
+
+    // The confirm callback is arbitrary panel code, so it is guarded like any
+    // other callback LVGL calls into. Closing the box is outside the guard on
+    // purpose: a throw must not leave the dialog on screen with nothing behind
+    // it able to take input.
+    KGuard::event("ButtonContainer prompt confirm", [&] {
+      if (lv_msgbox_get_active_btn(obj) == 0) {
+	((ButtonContainer*)e->user_data)->run_callback();
+      }
+    });
+
     lv_msgbox_close(obj);
 
   }, LV_EVENT_VALUE_CHANGED, this);
