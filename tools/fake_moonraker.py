@@ -25,8 +25,18 @@ Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 import asyncio, json, math, os, sys, time
 import websockets
 
-TEMP = float(sys.argv[1]) if len(sys.argv) > 1 else 240.0
-TARGET = float(sys.argv[2]) if len(sys.argv) > 2 else 240.0
+# The two temperatures are positional and optional, so they have to be read from
+# the leading bare arguments rather than from argv by index. Taking argv[1]
+# meant every flag-only invocation this file documents, --mesh and --wiper
+# included, died on float("--mesh") before it could serve anything.
+_temps = []
+for _arg in sys.argv[1:]:
+    if _arg.startswith("-"):
+        break
+    _temps.append(float(_arg))
+
+TEMP = _temps[0] if _temps else 240.0
+TARGET = _temps[1] if len(_temps) > 1 else 240.0
 # Reject every gcode command, optionally several times per request so the
 # coalescing in the UI can be exercised.
 REJECT_GCODE = "--reject" in sys.argv
