@@ -12,7 +12,20 @@ which stopped receiving commits in July 2024 with 69 issues open.
 That is a real K1 Max bed, 6x6 probed, 1.988mm from its lowest point to its
 highest.
 
-## What this fork changes
+## What it does
+
+Print status with thumbnails, a file browser, a console and macro shell, a bed
+mesh viewer, input shaper with frequency response plots, belt calibration, TMC
+metrics and tuning, temperature control, fan, LED and movement control, extrude
+and retract, fine tuning for speed, flow, z-offset and pressure advance,
+velocity and acceleration limits, wifi setup, Spoolman integration, and
+multi-printer support.
+
+| Move | Tuning |
+| --- | --- |
+| ![Move panel](screenshots/move.png) | ![Tuning menu](screenshots/printer_tune.png) |
+
+Most of that is upstream's. What this fork changed:
 
 **The bed mesh panel was rewritten.** Upstream drew the mesh as a table of
 cells tinted by a ramp that saturated at 0.25mm, and only wrote the numbers in
@@ -29,20 +42,37 @@ microns of probe noise into a mountain range.
 
 The same mesh interpolated, and as the 36 points the probe actually visited.
 
-**Calibrate wipes the nozzle first.** A blob of filament on the tip gets
-measured as bed and lands in the mesh as a bump that is not on the plate. When
-the printer has a `WIPE_NOZZLE` macro, Calibrate runs it before probing,
+**Bed mesh Calibrate wipes the nozzle first.** A blob of filament on the tip
+gets measured as bed and lands in the mesh as a bump that is not on the plate.
+When the printer has a `WIPE_NOZZLE` macro, Calibrate runs it before probing,
 wrapped in a gcode state save so it cannot leave a modal mode set behind it. On
 a K1, K1C, K1SE or K1 Max that macro comes from
 [ProWiper](https://www.printables.com/model/1023575-prowiper-for-creality-k1-series),
 formerly Advanced Nozzle Wiper, and that mod's own toggle still governs: switch
 wiping off there and the macro is a no-op, so calibration simply proceeds. The
 macro is tested for rather than sent hopefully, because Klipper abandons the
-rest of a script at the first command it does not recognise, which would leave
-anyone without the mod with an error and no mesh at all.
+rest of a script at the first command it does not recognise.
 
-**Calibrate homes only when something is unhomed**, rather than re-homing a
-machine that already is, which is the normal state after a print.
+**Bed mesh Calibrate homes only when something is unhomed**, rather than
+re-homing a machine that already is, which is the normal state after a print.
+
+**The input shaper panel was rebuilt.** Upstream put both axes on screen at
+once as two quarter-size plots, with a switch that swapped each plot for its
+numbers so you could never see both. A shaper type it did not have in its own
+list was silently rewritten, so a printer set to `zvd` displayed `3hump_ei` and
+saving wrote that back at the original frequency. It now shows one axis at a
+time across the full width, asks the analysis for a plot the size it will be
+drawn at rather than shrinking a screen-sized one into a corner, and refuses to
+write back a type it does not recognise. Apply sets the shaper live so it can
+be heard before Save commits it, and Save is behind a confirmation because it
+restarts Klipper. A run that fails says what failed instead of leaving a spinner
+going forever, and on a printer without `[resonance_tester]` and an
+accelerometer the button is disabled with the missing section named, rather than
+moving nothing and explaining nothing.
+
+| Input shaper | The same run, as numbers |
+| --- | --- |
+| ![Frequency response for one axis](screenshots/inputshaper.png) | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
 
 **A refused command is no longer silent.** Every gcode reply is checked, and a
 rejection is raised where you pressed the button instead of only in the
@@ -61,6 +91,38 @@ escaping used to freeze the UI outright, the websocket client's shared state is
 locked across the two threads that touch it, and parses that could abort the
 process on bad configuration no longer can. [docs/audit.md](docs/audit.md)
 lists all of it, fixed and still open.
+
+The rest of the interface:
+
+| Files | WiFi |
+| --- | --- |
+| ![File browser with a sliced thumbnail](screenshots/files.png) | ![Picking a network and entering its password](screenshots/wifi.png) |
+
+| Fine tune | Limits |
+| --- | --- |
+| ![Live z-offset, pressure advance, speed and flow](screenshots/finetune.png) | ![Velocity and acceleration limits](screenshots/limits.png) |
+
+| Macros | Console |
+| --- | --- |
+| ![Macro list with parameters](screenshots/macros.png) | ![Console with the command palette](screenshots/console.png) |
+
+| Temperature | Fans |
+| --- | --- |
+| ![Entering a target on the numpad](screenshots/temp.png) | ![Fan speed control](screenshots/fan.png) |
+
+| LED | Settings |
+| --- | --- |
+| ![LED brightness control](screenshots/led.png) | ![Settings menu](screenshots/settings.png) |
+
+The screenshots are the simulator build. Everything showing printer state came
+from the development K1 Max, so the bed mesh, the gcode files, the macros, the
+command list, the limits and the single fan that machine exposes are its own,
+and the network names are blurred for the obvious reason. The numpad, the
+rejected command and both input shaper shots come from
+`tools/fake_moonraker.py`: provoking a refusal on a real printer means sending
+it something bad on purpose, and a resonance run means shaking one for minutes
+per axis. The shaper curve and figures there are synthetic, so read them as the
+layout rather than as a measurement.
 
 ## Scope
 
@@ -134,47 +196,6 @@ project's updater points at its own releases and will not see these.
 That restores the Creality services and display server from the backup the
 installer made.
 
-## What it does
-
-Print status with thumbnails, file browser, console and macro shell, bed mesh
-viewer, input shaper with PSD graphs, belt calibration, TMC metrics and tuning,
-temperature control, fan, LED and movement control, extrude and retract,
-fine tuning for speed, flow, z-offset and pressure advance, velocity and
-acceleration limits, Spoolman integration, and multi-printer support.
-
-| Move | Tuning |
-| --- | --- |
-| ![Move panel](screenshots/move.png) | ![Tuning menu](screenshots/printer_tune.png) |
-
-| Fine tune | Limits |
-| --- | --- |
-| ![Live z-offset, pressure advance, speed and flow](screenshots/finetune.png) | ![Velocity and acceleration limits](screenshots/limits.png) |
-
-| Input shaper | The same run, as numbers |
-| --- | --- |
-| ![Frequency response for one axis](screenshots/inputshaper.png) | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
-
-| Macros | Console |
-| --- | --- |
-| ![Macro list with parameters](screenshots/macros.png) | ![Console with the command palette](screenshots/console.png) |
-
-| Temperature | Fans |
-| --- | --- |
-| ![Entering a target on the numpad](screenshots/temp.png) | ![Fan speed control](screenshots/fan.png) |
-
-| LED | Settings |
-| --- | --- |
-| ![LED brightness control](screenshots/led.png) | ![Settings menu](screenshots/settings.png) |
-
-The screenshots are the simulator build. Everything showing printer state came
-from the development K1 Max, so the bed mesh, the macros, the command list, the
-limits and the single fan that machine exposes are its own. The numpad, the
-rejected command and both input shaper shots come from
-`tools/fake_moonraker.py`: provoking a refusal on a real printer means sending
-it something bad on purpose, and a resonance run means shaking one for minutes
-per axis. The shaper curve and figures there are synthetic, so read them as the
-layout rather than as a measurement.
-
 ## Building
 
 `scripts/setup-toolchain.sh` once, then `scripts/build.sh mips` for the printer
@@ -189,19 +210,20 @@ and the known defects in [docs/audit.md](docs/audit.md).
 ## Credits
 
 guppyscreen was written by [ballaswag](https://github.com/ballaswag). This fork
-exists because that work was worth keeping, and all original code belongs to them.
+exists because that work was worth keeping, and all original code belongs to
+them.
 
 Everything it talks to and borrows from:
 
 - [Klipper](https://github.com/Klipper3d/klipper), the firmware this is a front
-  end for
+  end for, and whose own `calibrate_shaper.py` does the input shaper analysis
 - [Moonraker](https://github.com/Arksine/moonraker), the API it speaks to
 - [KlipperScreen](https://github.com/KlipperScreen/KlipperScreen), prior art
   that shaped what a Klipper touch UI should do
 - [Fluidd](https://github.com/fluidd-core/fluidd), for interface ideas and the
   print status calculations
 - [Klippain-shaketune](https://github.com/Frix-x/klippain-shaketune), behind the
-  input shaper graphs and belt calibration
+  belt calibration graphs
 - [Material Design Icons](https://pictogrammers.com/library/mdi/) and
   [Z-Bolt](https://github.com/Z-Bolt/OctoScreen) for the two icon sets
 
