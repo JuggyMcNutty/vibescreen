@@ -433,10 +433,27 @@ Decoding the XWD header's `red_mask`, `green_mask` and `blue_mask` yourself is
 exact and needs nothing installed.
 
 `xdotool` can drive it, but LVGL polls its input device, so an instantaneous
-click gets missed. Move, then `mousedown`, wait ~0.4s, then `mouseup`. The X
-backing store also lags a click by a frame or so, so a screenshot taken
-straight after one shows the state before it. Wait, or throw the first grab
-away.
+click gets missed. Move, then `mousedown`, wait ~0.4s, then `mouseup`.
+
+**The window's backing store lags an interaction by much more than a frame.**
+Under XWayland a grab taken a second after a click can still show the state
+before it, which reads exactly like the click having been dropped. Retrying
+then double-presses the button: measured 2026-08-16, that is how an extra tap
+landed on the panel underneath a dialog that had already closed. Do not sleep
+and hope. Grab until two consecutive grabs are identical, then keep that one:
+
+```sh
+prev=""; while :; do
+  cur=$(xwd -silent -name "TFT Simulator" | md5sum)
+  [ "$cur" = "$prev" ] && break
+  prev=$cur; sleep 0.4
+done
+```
+
+If input really does stop, the usual cause is a `mouseup` that never arrived,
+leaving the button stuck down so no later press is a new press. `xdotool
+mouseup 1` clears it, and issuing one before every click makes the whole thing
+idempotent.
 
 ## Threading model
 
