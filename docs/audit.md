@@ -173,6 +173,71 @@ Now homes unless all three of x, y and z are present, and sends a bare `G28`
 rather than `G28 X Y Z` when it does. Both branches were driven against
 `tools/fake_moonraker.py` with `homed_axes` set each way.
 
+### C13. Input shaper wrote a shaper type nobody chose (fixed)
+
+`find_shaper_index` returned `std::distance` to `cend()` for a name not in its
+list, which is one past the end, and `lv_dropdown_set_selected` clamps an out of
+range index to the last option rather than rejecting it
+(`lvgl/src/widgets/lv_dropdown.c:285`). An unrecognised shaper therefore
+displayed as `3hump_ei`, and Save wrote `3hump_ei` into `printer.cfg` at the
+original shaper's frequency, silently.
+
+`zvd` was hitting that on every machine set to it. It is legal in
+`[input_shaper]` and it is in `shaper_defs.py`, but the panel's list left it out
+because `k1/scripts/shaper_calibrate.py:16` leaves it out of `AUTOTUNE_SHAPERS`,
+so a guppy calibration never proposes it. Klipper's own `SHAPER_CALIBRATE` does,
+and the K1's stock `INPUT_SHAPER_CALIBRATION` macro runs exactly that.
+
+The lookup now fails rather than clamps, and an unknown name disables Save.
+
+### C14. A failed resonance run span forever (fixed)
+
+The spinner was only ever cleared by success. A rejected `TEST_RESONANCES`, an
+accelerometer that stopped answering, an analysis that died before printing its
+result, a shell command that hit its timeout, Klipper disconnecting: every one
+of them left the panel waiting on something that was never coming, with no way
+out but Back, and it came back in that state.
+
+Every ending is handled now, from the `!!` prefix Klipper broadcasts errors with
+and the terminal lines in `k1/k1_mods/gcode_shell_command.py`, plus a watchdog
+for when nothing arrives at all. `BeltsCalibrationPanel` has the same shape and
+has not been done.
+
+### C15. Input shaper queued both axes at once (fixed)
+
+Both `TEST_RESONANCES` went out together. Klipper runs one command at a time, so
+the analysis sent when X's data landed queued behind the Y test that was already
+waiting, and X's result could not appear until Y had finished shaking: about
+five minutes on the development printer at its configured `hz_per_sec` of 1.0.
+Each axis is now sent when the one before it has produced a result.
+
+### C16. Nothing checked the printer could run a resonance test (fixed)
+
+Calibrate and Save went out unconditionally, against the rule in AGENTS.md that
+Klipper abandons the rest of a script at the first command it will not run.
+
+Finding the preconditions is the part worth remembering.
+`printer.objects.list` only reports objects implementing `get_status`, and
+measured on the development K1 Max none of `resonance_tester`, `adxl345` or
+`calibrate_shaper_config` appear in it despite all three being configured, so
+`KUtils::has_gcode_macro`'s source cannot answer this. `configfile` carries a
+section either way, which is what `KUtils::has_config_section` reads.
+
+### C17. `SAVE_INPUT_SHAPER` silently disabled the axis it was not given (fixed)
+
+`k1/k1_mods/calibrate_shaper_config.py` defaulted a missing parameter to its own
+`[calibrate_shaper_config]` section, which nobody fills in. Measured, it reports
+`mzv` at 0.0 Hz while the machine runs `ei` at 40.3 and `zv` at 46.9, and a
+shaper frequency of zero turns that axis's shaping off. So a single axis save
+disabled the other one, and a bare `SAVE_INPUT_SHAPER` disabled both.
+
+The panel always sent all four parameters, so it never triggered this. It is a
+trap for anything else calling the command, and this is a module we ship.
+
+Defaults now come from `[input_shaper]` read through `configfile`. The
+`input_shaper` object cannot answer for itself: it reports an empty status on
+the Klipper the K1 ships.
+
 ### C11. Panel destructors double-delete their own widgets (open, latent)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget
@@ -326,9 +391,9 @@ Not fixed in `pellcorp/grumpyscreen` either; they moved the identical code to
 The helpers now exist: `KUtils::parse_int`, `parse_double` and `parse_hex`
 (`src/utils.cpp`), which log and return a fallback, and additionally reject
 trailing garbage that plain `std::stoi` accepts. Converted so far are C2, C3,
-the Spoolman swatch and the extruder speed. The remaining sites are the low risk
-ones listed above plus the input shaper, TMC tune, finetune and print status
-parses, which all read numbers Klipper itself produced.
+the Spoolman swatch, the extruder speed and the input shaper. The remaining
+sites are the low risk ones listed above plus the TMC tune, finetune and print
+status parses, which all read numbers Klipper itself produced.
 
 Still wanted: a `try`/`catch` at the top level so an unexpected throw anywhere
 logs rather than vanishing.
@@ -470,13 +535,15 @@ have to be undone to get there.
 
 ## Suggested order
 
-Done: C2, C3, C4, C6, C8, C9, C10, C12, B1 to B6, M3, M4, and the `KUtils`
-parse helpers.
+Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, B1 to B6, M3, M4, and the
+`KUtils` parse helpers.
 
 Remaining, roughly in order:
 
-1. Guard the residual 17 inline lambdas and 4 named callbacks noted in C10, so
-   exception containment is complete rather than nearly complete.
+1. Guard the residual inline lambdas and named callbacks noted in C10, so
+   exception containment is complete rather than nearly complete. Two of them
+   went with C13 to C17, the pair behind `ButtonContainer`'s prompt, because
+   that prompt gained a second caller.
 2. M5, the overlapping sensor rows. Small, and it is the first screen anyone
    sees on a printer with more than two temperature sensors.
 3. C7, the non-blocking heat change. Behavioural, wants its own discussion.

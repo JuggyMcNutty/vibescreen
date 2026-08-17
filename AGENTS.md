@@ -334,6 +334,19 @@ So test for what you are about to use. `KUtils::has_gcode_macro` covers macros
 that only exist on modded machines, and `KUtils::is_homed` covers the other
 common precondition. `BedMeshPanel`'s Calibrate is the worked example of both.
 
+For anything that is not a macro, use `KUtils::has_config_section` and not the
+object list. **`printer.objects.list` only reports objects that implement
+`get_status`**, so `resonance_tester`, `adxl345` and `calibrate_shaper_config`
+are all missing from it on a K1 Max that plainly has them, measured. Only
+`configfile` shows a section either way. `InputShaperPanel::update_available` is
+the worked example, and it disables the button and names the missing section
+rather than hiding the control.
+
+While you are there: `SAVE_CONFIG` restarts Klipper and ends any print. Put it
+behind `ButtonContainer`'s prompt with `prompt_optional` false, so the
+confirmation is not governed by the emergency stop setting, which is about
+something else.
+
 Where a panel offers preset values, clamp them against the printer's own limits
 read from `/printer_state/configfile/settings/...` in `State`. `LimitsPanel::init`
 and `ExtruderPanel::init` are the two worked examples, both dispatched from

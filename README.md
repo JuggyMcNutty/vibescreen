@@ -150,6 +150,10 @@ acceleration limits, Spoolman integration, and multi-printer support.
 | --- | --- |
 | ![Live z-offset, pressure advance, speed and flow](screenshots/finetune.png) | ![Velocity and acceleration limits](screenshots/limits.png) |
 
+| Input shaper | The same run, as numbers |
+| --- | --- |
+| ![Frequency response for one axis](screenshots/inputshaper.png) | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
+
 | Macros | Console |
 | --- | --- |
 | ![Macro list with parameters](screenshots/macros.png) | ![Console with the command palette](screenshots/console.png) |
@@ -164,10 +168,12 @@ acceleration limits, Spoolman integration, and multi-printer support.
 
 The screenshots are the simulator build. Everything showing printer state came
 from the development K1 Max, so the bed mesh, the macros, the command list, the
-limits and the single fan that machine exposes are its own. The numpad and the
-rejected command come from `tools/fake_moonraker.py`, the second because
-provoking a refusal on a real printer means sending it something bad on
-purpose.
+limits and the single fan that machine exposes are its own. The numpad, the
+rejected command and both input shaper shots come from
+`tools/fake_moonraker.py`: provoking a refusal on a real printer means sending
+it something bad on purpose, and a resonance run means shaking one for minutes
+per axis. The shaper curve and figures there are synthetic, so read them as the
+layout rather than as a measurement.
 
 ## Building
 
