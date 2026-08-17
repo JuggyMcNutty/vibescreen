@@ -5,6 +5,7 @@
 #include "spdlog/spdlog.h"
 
 #include <algorithm>
+#include <cmath>
 
 LV_IMG_DECLARE(resume);
 LV_IMG_DECLARE(sd_img);
@@ -196,7 +197,7 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   
 
   lv_obj_align_to(xlabel, xslider, LV_ALIGN_OUT_BOTTOM_MID, 0, 35 * scale);
-  lv_label_set_text(xlabel, "0 Hz");
+  lv_label_set_text(xlabel, "0.0 Hz");
   
   lv_dropdown_set_options(xshaper_dd, fmt::format("{}", fmt::join(shapers, "\n")).c_str());
 
@@ -223,7 +224,7 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
 		      LV_EVENT_VALUE_CHANGED, this);
   
   lv_obj_align_to(ylabel, yslider, LV_ALIGN_OUT_BOTTOM_MID, 0, 35 * scale);
-  lv_label_set_text(ylabel, "0 Hz");
+  lv_label_set_text(ylabel, "0.0 Hz");
 
   lv_dropdown_set_options(yshaper_dd, fmt::format("{}", fmt::join(shapers, "\n")).c_str());
 
@@ -303,34 +304,65 @@ InputShaperPanel::~InputShaperPanel() {
   }
 }
 
+// configfile.config holds the raw text of printer.cfg, so every value in it is
+// a string whatever it looks like. Reading one must not throw: foreground()
+// runs inside the KGuard on PrinterTunePanel's button, so an exception here
+// means tapping Input Shaper does nothing at all and only says so in the log.
+static double config_number(const json &section, const char *key, double fallback) {
+  auto v = section.find(key);
+  if (v == section.end()) {
+    return fallback;
+  }
+  if (v->is_string()) {
+    return KUtils::parse_double(v->template get<std::string>(), fallback);
+  }
+  return v->is_number() ? v->template get<double>() : fallback;
+}
+
+static std::string config_string(const json &section, const char *key) {
+  auto v = section.find(key);
+  return (v != section.end() && v->is_string())
+    ? v->template get<std::string>()
+    : std::string();
+}
+
+void InputShaperPanel::set_frequency(lv_obj_t *slider, lv_obj_t *label, double hz) {
+  // lround rather than a plain conversion, which truncated. The slider holds
+  // tenths of a Hz as an integer and the label rounds to one decimal, so a
+  // calibration returning 40.27 displayed 40.3 Hz and saved 40.2. Config
+  // values never showed it because they arrive with one decimal already, but
+  // roughly half of all fit results land between two tenths.
+  lv_slider_set_value(slider, lround(hz * 10.0), LV_ANIM_OFF);
+  lv_label_set_text(label, fmt::format("{:.1f} Hz", hz).c_str());
+}
+
 void InputShaperPanel::foreground() {
   auto inputshaper = State::get_instance()
     ->get_data("/printer_state/configfile/config/input_shaper"_json_pointer);
-  spdlog::trace("input shapper {}", inputshaper.dump());
+  spdlog::trace("input shaper {}", inputshaper.dump());
 
-  if (!inputshaper.is_null()) {
-    auto v = inputshaper["/shaper_freq_x"_json_pointer];
-    if (!v.is_null()) {
-      double hz = std::stod(v.template get<std::string>());
-      lv_slider_set_value(xslider, hz * 10, LV_ANIM_OFF);
-      lv_label_set_text(xlabel, fmt::format("{} Hz", hz).c_str());
+  if (inputshaper.is_object()) {
+    set_frequency(xslider, xlabel, config_number(inputshaper, "shaper_freq_x", 0.0));
+    set_frequency(yslider, ylabel, config_number(inputshaper, "shaper_freq_y", 0.0));
+
+    // shaper_type is the fallback Klipper uses for an axis with no type of its
+    // own, so it stands in when shaper_type_x or _y is absent.
+    std::string fallback = config_string(inputshaper, "shaper_type");
+    std::string xtype = config_string(inputshaper, "shaper_type_x");
+    std::string ytype = config_string(inputshaper, "shaper_type_y");
+
+    if (xtype.empty()) {
+      xtype = fallback;
+    }
+    if (ytype.empty()) {
+      ytype = fallback;
     }
 
-    v = inputshaper["/shaper_type_x"_json_pointer];
-    if (!v.is_null()) {
-      xshaper_known = select_shaper(xshaper_dd, v.template get<std::string>());
+    if (!xtype.empty()) {
+      xshaper_known = select_shaper(xshaper_dd, xtype);
     }
-
-    v = inputshaper["/shaper_freq_y"_json_pointer];
-    if (!v.is_null()) {
-      double hz = std::stod(v.template get<std::string>());
-      lv_slider_set_value(yslider, hz * 10, LV_ANIM_OFF);
-      lv_label_set_text(ylabel, fmt::format("{} Hz", hz).c_str()); 
-    }
-
-    v = inputshaper["/shaper_type_y"_json_pointer];
-    if (!v.is_null()) {
-      yshaper_known = select_shaper(yshaper_dd, v.template get<std::string>());
+    if (!ytype.empty()) {
+      yshaper_known = select_shaper(yshaper_dd, ytype);
     }
   }
 
@@ -751,12 +783,11 @@ void InputShaperPanel::handle_update_slider(lv_event_t *e) {
   const lv_event_code_t code = lv_event_get_code(e);
   if (code == LV_EVENT_VALUE_CHANGED) {
     lv_obj_t * obj = lv_event_get_target(e);
-    double hz = (double)lv_slider_get_value(obj);
-    lv_slider_set_value(obj, hz, LV_ANIM_OFF);
+    double hz = (double)lv_slider_get_value(obj) / 10.0;
     if (obj == xslider) {
-      lv_label_set_text(xlabel, fmt::format("{} hz", hz / 10.0 ).c_str());
+      lv_label_set_text(xlabel, fmt::format("{:.1f} Hz", hz).c_str());
     } else if (obj == yslider) {
-      lv_label_set_text(ylabel, fmt::format("{} hz", hz / 10.0).c_str());      
+      lv_label_set_text(ylabel, fmt::format("{:.1f} Hz", hz).c_str());
     }
   }
 }
@@ -806,8 +837,7 @@ void InputShaperPanel::set_shaper_detail(json &res,
       }
       update_available();
 
-      lv_slider_set_value(slider, f * 10, LV_ANIM_OFF);
-      lv_label_set_text(slider_label, fmt::format("{:.1f} Hz", f).c_str());
+      set_frequency(slider, slider_label, f);
     }
 
     if (label != NULL) {

@@ -57,6 +57,10 @@ class InputShaperPanel {
 
   void set_status(const std::string &text);
 
+  // Put a frequency on a slider and its label together, so the two cannot
+  // disagree about the tenth of a Hz that gets saved.
+  void set_frequency(lv_obj_t *slider, lv_obj_t *label, double hz);
+
   // Where an axis has got to. Anything but idle means a spinner is up and the
   // panel is waiting on the printer for something.
   enum class RunState { idle, testing, analysing };
