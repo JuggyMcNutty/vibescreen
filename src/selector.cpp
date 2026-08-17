@@ -168,5 +168,17 @@ uint32_t Selector::get_selected_idx() {
 }
 
 void Selector::set_selected_idx(uint32_t idx) {
+  if (idx >= option_count()) {
+    spdlog::warn("selector index {} is past the last of {} options, ignoring",
+		 idx, option_count());
+    return;
+  }
+
   selector_idx = idx;
+
+  // Move the check too. Every caller so far was recording a tap LVGL had
+  // already drawn, so this was a no-op for them, but a caller selecting an
+  // option in code got an index the widget did not show.
+  // set_btn_ctrl clears the other buttons itself while one_checked is on.
+  lv_btnmatrix_set_btn_ctrl(btnm, selector_idx, LV_BTNMATRIX_CTRL_CHECKED);
 }
