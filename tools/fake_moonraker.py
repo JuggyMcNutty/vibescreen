@@ -14,15 +14,25 @@ printer. Needs the websockets package: pip install websockets
     python3 tools/fake_moonraker.py 240 240 --reject --burst
     python3 tools/fake_moonraker.py --mesh bowl        # pick a bed mesh shape
     python3 tools/fake_moonraker.py --wiper            # pretend WIPE_NOZZLE exists
+    python3 tools/fake_moonraker.py --shaper           # run resonance tests
+    python3 tools/fake_moonraker.py --shaper fail      # and have them fail
 
 Mesh shapes: adaptive, full, bowl, tilt, flat. BED_MESH_CLEAR and
 BED_MESH_CALIBRATE are acted on rather than just logged, so the panel's clear
 and recalibrate paths can be driven from here.
 
+--shaper acts on TEST_RESONANCES and RUN_SHELL_COMMAND CMD=guppy_input_shaper,
+emitting the notify_gcode_response sequence Klipper and gcode_shell_command.py
+really produce, so the input shaper panel's whole reply path is reachable
+without shaking a printer for five minutes per attempt. Modes: normal, slow,
+fail, timeout. --shaper-zvd reports a configured shaper type the panel's own
+list does not contain, and --no-shaper-config withholds the config sections the
+panel checks before offering to calibrate.
+
 Received gcode is appended to $GCODE_LOG, default /tmp/guppy_gcode_received.txt.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 """
-import asyncio, json, math, os, sys, time
+import asyncio, json, math, os, shlex, struct, sys, time, zlib
 import websockets
 
 # The two temperatures are positional and optional, so they have to be read from
@@ -54,6 +64,22 @@ def _arg_value(name, default):
         if i + 1 < len(sys.argv):
             return sys.argv[i + 1]
     return default
+
+
+def _mode_value(name, default, choices):
+    """A flag that works both bare and with a mode after it.
+
+    --shaper on its own is the common case and should not need a word after it,
+    but the next argv entry might be another flag rather than this one's value.
+    """
+    if name not in sys.argv:
+        return None
+    value = _arg_value(name, default)
+    if value not in choices:
+        print(f"unknown {name} {value}, using {default}. "
+              f"choices: {', '.join(choices)}", flush=True)
+        return default
+    return value
 
 
 EXTRUDER_SETTINGS = {
@@ -161,14 +187,122 @@ def build_bed_mesh(shape):
         },
     }
 
+SHAPER_MODES = ("normal", "slow", "fail", "timeout")
+SHAPER = _mode_value("--shaper", "normal", SHAPER_MODES)
+SHAPER_LOCK = None
+# A shaper type Klipper accepts in [input_shaper] but the analysis script never
+# proposes, because k1/scripts/shaper_calibrate.py leaves zvd out of
+# AUTOTUNE_SHAPERS. It reaches a config through Klipper's own SHAPER_CALIBRATE
+# or by hand, which is the only way the panel ever sees one.
+SHAPER_ZVD = "--shaper-zvd" in sys.argv
+SHAPER_CONFIG = "--no-shaper-config" not in sys.argv
+
+# Values measured off the development K1 Max on 2026-08-17. The panel clamps its
+# frequency control against min_freq and max_freq, so inventing them would test
+# the clamp against numbers no printer has.
+RESONANCE_TESTER = {
+    "move_speed": 50.0, "min_freq": 5.0, "max_freq": 133.33333333333334,
+    "accel_per_hz": 75.0, "hz_per_sec": 1.0, "probe_points": [[150.0, 150.0, 10.0]],
+    "low_mem": True, "accel_chip": "adxl345",
+}
+
+INPUT_SHAPER = {
+    "shaper_type": "mzv", "shaper_type_x": "zvd" if SHAPER_ZVD else "ei",
+    "damping_ratio_x": 0.1, "shaper_freq_x": 40.3,
+    "shaper_type_y": "zv", "damping_ratio_y": 0.1, "shaper_freq_y": 46.9,
+}
+
+# What calibrate_shaper.py prints for each axis. Deliberately includes a three
+# digit frequency and a two digit vibration figure, because those are the values
+# that expose a table whose columns are padded on the header row only.
+SHAPER_RESULTS = {
+    "x": {
+        "shapers": {
+            "zv": {"freq": 34.8, "vib": 12.45, "smooth": 0.084, "max_acel": 4500.0},
+            "mzv": {"freq": 40.3, "vib": 2.11, "smooth": 0.115, "max_acel": 3300.0},
+            "ei": {"freq": 47.4, "vib": 1.03, "smooth": 0.128, "max_acel": 3000.0},
+            "2hump_ei": {"freq": 66.4, "vib": 0.12, "smooth": 0.132, "max_acel": 2900.0},
+            "3hump_ei": {"freq": 103.6, "vib": 0.0, "smooth": 0.118, "max_acel": 3200.0},
+        },
+        "best": "mzv",
+    },
+    "y": {
+        "shapers": {
+            "zv": {"freq": 39.6, "vib": 9.87, "smooth": 0.065, "max_acel": 5800.0},
+            "mzv": {"freq": 46.9, "vib": 1.74, "smooth": 0.085, "max_acel": 4400.0},
+            "ei": {"freq": 55.2, "vib": 0.94, "smooth": 0.094, "max_acel": 4000.0},
+            "2hump_ei": {"freq": 77.4, "vib": 0.08, "smooth": 0.097, "max_acel": 3900.0},
+            "3hump_ei": {"freq": 120.8, "vib": 0.0, "smooth": 0.087, "max_acel": 4300.0},
+        },
+        "best": "ei",
+    },
+}
+
+
+def _png_chunk(tag, payload):
+    return (struct.pack(">I", len(payload)) + tag + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+
+
+def write_png(path, width, height, axis):
+    """Write a plot shaped enough to tell a fresh image from a stale one.
+
+    The printer draws the real thing with matplotlib, which is far too heavy to
+    require here and would make this file's dependency list a lie. The panel
+    only needs a PNG it can decode, so this draws the one property worth seeing
+    at a glance: a resonance peak where that axis's peak belongs.
+    """
+    peak = SHAPER_RESULTS[axis]["shapers"]["zv"]["freq"]
+    lo, hi = RESONANCE_TESTER["min_freq"], RESONANCE_TESTER["max_freq"]
+
+    def power(freq):
+        # A main resonance with a weaker harmonic above it, on a noise floor.
+        # A single narrow spike would sit on the bottom axis everywhere else and
+        # read as an empty image.
+        main = math.exp(-(((freq - peak) / (peak / 4.0)) ** 2))
+        harmonic = 0.32 * math.exp(-(((freq - 2 * peak) / (peak / 2.5)) ** 2))
+        return min(1.0, 0.06 + main + harmonic)
+
+    curve = []
+    for x in range(width):
+        freq = lo + (hi - lo) * x / max(width - 1, 1)
+        curve.append(height - 3 - int(power(freq) * (height - 14)))
+
+    trace = b"\x1f\x77\xb4" if axis == "x" else b"\xd6\x5f\x3a"
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)  # filter type none
+        for x in range(width):
+            # Fill between neighbours so a steep section stays a continuous
+            # line instead of breaking into dashes.
+            near = curve[max(x - 1, 0):x + 2]
+            if min(near) - 1 <= y <= max(near) + 1:
+                rows += trace
+            elif x <= 1 or y >= height - 2:
+                rows += b"\x40\x40\x40"
+            else:
+                rows += b"\xff\xff\xff"
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n"
+                + _png_chunk(b"IHDR", header)
+                + _png_chunk(b"IDAT", zlib.compress(bytes(rows), 6))
+                + _png_chunk(b"IEND", b""))
+
+
 STATUS = {
     "extruder": {"temperature": TEMP, "target": TARGET, "power": 0.0},
     "heater_bed": {"temperature": 25.0, "target": 0.0, "power": 0.0},
     "configfile": {
         "settings": {"extruder": EXTRUDER_SETTINGS,
                      "printer": {"max_velocity": 800.0, "max_accel": 20000.0,
-                                 "kinematics": "corexy"}},
-        "config": {"extruder": {"filament_diameter": "1.75"}},
+                                 "kinematics": "corexy"},
+                     "input_shaper": INPUT_SHAPER},
+        # config holds the raw file text, so every value here is a string even
+        # where settings has it typed. Panels reading the wrong one of the two
+        # is a recurring mistake, so both are served with their real shapes.
+        "config": {"extruder": {"filament_diameter": "1.75"},
+                   "input_shaper": {k: str(v) for k, v in INPUT_SHAPER.items()}},
     },
     "toolhead": {"max_velocity": 800.0, "max_accel": 20000.0,
                  "homed_axes": "xyz", "position": [0, 0, 0, 0]},
@@ -180,6 +314,32 @@ STATUS = {
     "display_status": {"progress": 0.0, "message": None},
     "bed_mesh": build_bed_mesh(MESH_SHAPE),
 }
+
+# The sections the panel checks before offering to calibrate or save. None of
+# them appear in printer.objects.list on a real printer, measured, because they
+# have no get_status, so configfile is the only place a panel can find them.
+# --no-shaper-config withholds them to drive the disabled half of that check.
+if SHAPER_CONFIG:
+    STATUS["configfile"]["settings"].update({
+        "resonance_tester": RESONANCE_TESTER,
+        "adxl345": {"axes_map": ["x", "-z", "y"], "rate": 3200,
+                    "cs_pin": "nozzle_mcu:PA4", "spi_speed": 5000000},
+        "calibrate_shaper_config": {"shaper_type": "mzv", "shaper_type_x": "mzv",
+                                    "shaper_freq_x": 0.0, "shaper_type_y": "mzv",
+                                    "shaper_freq_y": 0.0},
+        "gcode_shell_command guppy_input_shaper": {
+            "command": "/usr/data/printer_data/config/GuppyScreen/scripts/calibrate_shaper.py",
+            "timeout": 600.0, "verbose": True},
+    })
+    STATUS["configfile"]["config"].update({
+        "resonance_tester": {"accel_chip": "adxl345", "accel_per_hz": "75",
+                             "probe_points": "\n150,150,10"},
+        "adxl345": {"cs_pin": "nozzle_mcu:PA4", "spi_speed": "5000000"},
+        "calibrate_shaper_config": {},
+        "gcode_shell_command guppy_input_shaper": {
+            "command": "/usr/data/printer_data/config/GuppyScreen/scripts/calibrate_shaper.py",
+            "timeout": "600.0", "verbose": "True"},
+    })
 
 
 def result_for(method, params):
@@ -242,6 +402,102 @@ def bed_mesh_effect_of(script):
     return []
 
 
+async def respond(ws, text):
+    await ws.send(json.dumps({"jsonrpc": "2.0", "method": "notify_gcode_response",
+                              "params": [text]}))
+
+
+def _shell_params(line):
+    """The PARAMS="..." of a RUN_SHELL_COMMAND, split the way Klipper splits it.
+
+    Two stages, and both are needed. Klipper shlex.splits an extended command's
+    arguments before assigning them, which is what removes the quotes the panel
+    puts on with fmt's debug format, and gcode_shell_command.py then shlex.splits
+    the PARAMS value itself into argv. Doing it once leaves the whole argument
+    list as a single token and every flag in it invisible.
+    """
+    for token in shlex.split(line)[1:]:
+        key, _, value = token.partition("=")
+        if key.upper() == "PARAMS":
+            return shlex.split(value)
+    return []
+
+
+async def run_resonance_test(ws, axis, name):
+    csv = f"/tmp/resonances_{axis}_{name}.csv"
+    step = 0.7 if SHAPER == "slow" else 0.12
+    await respond(ws, f"// Testing axis {axis}")
+
+    lo, hi = RESONANCE_TESTER["min_freq"], RESONANCE_TESTER["max_freq"]
+    steps = 8
+    for i in range(steps):
+        await asyncio.sleep(step)
+        freq = lo + (hi - lo) * i / (steps - 1)
+        if SHAPER == "fail" and i == 2:
+            # An accelerometer that stops answering mid run. Klipper broadcasts
+            # this as an error rather than a reply, and the run never reaches
+            # the message the panel is waiting for.
+            await respond(ws, "!! adxl345: No data received from sensor")
+            return
+        await respond(ws, f"// Testing frequency {freq:.0f} Hz")
+
+    await asyncio.sleep(step)
+    await respond(ws, f"// Resonances data written to {csv} file")
+
+
+async def run_shaper_analysis(ws, params):
+    axis = "y" if "_y_" in (params[0] if params else "") else "x"
+    png = width = height = None
+    for i, arg in enumerate(params):
+        if arg == "-o" and i + 1 < len(params):
+            png = params[i + 1]
+        elif arg == "-w" and i + 1 < len(params):
+            width = float(params[i + 1])
+        elif arg == "-l" and i + 1 < len(params):
+            height = float(params[i + 1])
+
+    await respond(ws, "// Running Command {guppy_input_shaper}...:")
+    await asyncio.sleep(1.4 if SHAPER == "slow" else 0.3)
+
+    if SHAPER == "timeout":
+        # The shell command's own timeout. Nothing was printed, so a panel
+        # waiting for the JSON payload waits forever unless it reads this.
+        await respond(ws, "// Command {guppy_input_shaper} timed out")
+        return
+
+    payload = dict(SHAPER_RESULTS[axis])
+    payload["logfile"] = params[0] if params else f"/tmp/resonances_{axis}_{axis}.csv"
+    if png:
+        # matplotlib's savefig defaults to 100 dpi, and the panel asks for the
+        # size in inches, so this is the pixel size the printer really produces.
+        write_png(png, int((width or 8.0) * 100), int((height or 4.8) * 100), axis)
+        payload["png"] = png
+
+    await respond(ws, "// " + json.dumps(payload))
+    await respond(ws, "// Command {guppy_input_shaper} finished")
+
+
+async def shaper_effect_of(ws, script):
+    """Act on the resonance commands in a script, one after another.
+
+    Klipper runs one command at a time, and the panel's sequencing bugs only
+    show up against that, so these are serialized rather than run concurrently.
+    """
+    async with SHAPER_LOCK:
+        for line in script.splitlines():
+            line = line.strip()
+            upper = line.upper()
+            if upper.startswith("TEST_RESONANCES"):
+                fields = dict(f.split("=", 1) for f in line.split()[1:] if "=" in f)
+                axis = fields.get("AXIS", "").lower()
+                # The belts panel drives the same command with AXIS=1,1 and
+                # AXIS=1,-1, which is a different flow and not ours to answer.
+                if axis in ("x", "y"):
+                    await run_resonance_test(ws, axis, fields.get("NAME", axis))
+            elif "RUN_SHELL_COMMAND" in upper and "guppy_input_shaper" in line:
+                await run_shaper_analysis(ws, _shell_params(line))
+
+
 async def handler(ws):
     print("guppyscreen connected", flush=True)
 
@@ -258,6 +514,9 @@ async def handler(ws):
                 return
 
     pusher = asyncio.create_task(push_status())
+    # Held only so the tasks are not garbage collected while they run, which
+    # asyncio does not otherwise prevent for a task nobody awaits.
+    tasks = set()
     try:
         async for raw in ws:
             msg = json.loads(raw)
@@ -273,6 +532,12 @@ async def handler(ws):
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "method": "notify_status_update",
                         "params": [delta, time.time()]}))
+                if SHAPER:
+                    # Detached, because a resonance run outlasts the request
+                    # that starts it and Moonraker keeps answering meanwhile.
+                    task = asyncio.create_task(shaper_effect_of(ws, script))
+                    tasks.add(task)
+                    task.add_done_callback(tasks.discard)
 
             if "id" in msg:
                 if method == "printer.gcode.script" and REJECT_GCODE:
@@ -290,11 +555,18 @@ async def handler(ws):
                                           "result": result_for(method, params)}))
     finally:
         pusher.cancel()
+        for task in tasks:
+            task.cancel()
 
 
 async def main():
+    global SHAPER_LOCK
+    # Built here rather than at import, because before Python 3.10 an
+    # asyncio.Lock binds to whatever loop is current when it is constructed.
+    SHAPER_LOCK = asyncio.Lock()
+    shaper = f", shaper {SHAPER}" if SHAPER else ""
     print(f"fake moonraker on 7125, extruder {TEMP}/{TARGET}, "
-          f"mesh {MESH_SHAPE}", flush=True)
+          f"mesh {MESH_SHAPE}{shaper}", flush=True)
     async with websockets.serve(handler, "127.0.0.1", 7125):
         await asyncio.Future()
 
