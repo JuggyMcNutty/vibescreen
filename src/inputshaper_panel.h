@@ -4,11 +4,20 @@
 #include "websocket_client.h"
 #include "event_guard.h"
 #include "button_container.h"
+#include "selector.h"
 #include "lvgl/lvgl.h"
 
+#include <array>
+#include <string>
 #include <vector>
 #include <mutex>
 
+// Resonance testing and input shaper tuning, one axis at a time.
+//
+// The panel shows a single axis: its plot or its numbers, its shaper type and
+// its frequency. The axis row picks which one, and picks what Calibrate will
+// run. Showing both at once was how this started out, and it bought two
+// half-size plots and two of every control on a 480px panel.
 class InputShaperPanel {
  public:
   InputShaperPanel(KWebSocketClient &c, std::mutex &l);
@@ -16,11 +25,12 @@ class InputShaperPanel {
 
   void foreground();
   void handle_callback(lv_event_t *event);
-  void handle_image_clicked(lv_event_t *event);
+  void handle_selector(lv_event_t *event);
   void handle_macro_response(json &j);
   void handle_update_slider(lv_event_t *event);
   void handle_klippy_gone();
-  
+  void check_timeouts();
+
   static void _handle_callback(lv_event_t *event) {
     KGuard::event("InputShaperPanel::_handle_callback", [&] {
       InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
@@ -28,10 +38,10 @@ class InputShaperPanel {
     });
   };
 
-  static void _handle_image_clicked(lv_event_t *event) {
-    KGuard::event("InputShaperPanel::_handle_image_clicked", [&] {
+  static void _handle_selector(lv_event_t *event) {
+    KGuard::event("InputShaperPanel::_handle_selector", [&] {
       InputShaperPanel *panel = (InputShaperPanel*)event->user_data;
-      panel->handle_image_clicked(event);
+      panel->handle_selector(event);
     });
   };
 
@@ -42,48 +52,6 @@ class InputShaperPanel {
     });
   };
 
-  // Index of a shaper in the list, or -1 when it is not one we know.
-  int32_t find_shaper_index(const std::vector<std::string> &s,
-			    const std::string &shaper);
-
-  // Point a dropdown at a shaper by name. Returns false and leaves the
-  // selection untouched when the name is not one of ours, so the caller
-  // decides what to do rather than having a wrong value picked for it.
-  bool select_shaper(lv_obj_t *dd, const std::string &shaper);
-
-  // Enable or disable Calibrate and Save from what the printer's config says it
-  // can do, and say why on the status line when either is off.
-  void update_available();
-
-  void set_status(const std::string &text);
-
-  // Put a frequency on a slider and its label together, so the two cannot
-  // disagree about the tenth of a Hz that gets saved.
-  void set_frequency(lv_obj_t *slider, lv_obj_t *label, double hz);
-
-  // Where an axis has got to. Anything but idle means a spinner is up and the
-  // panel is waiting on the printer for something.
-  enum class RunState { idle, testing, analysing };
-
-  void start_run(bool is_x);
-  void finish_run(bool is_x);
-
-  // Send the next queued axis, or tidy up when there is none left. Klipper
-  // runs one command at a time, so queueing both tests up front only meant the
-  // first axis could not be analysed until the second had finished shaking.
-  void start_next_axis();
-
-  // Drop a stale result and put the spinner up for an axis about to run.
-  void clear_axis(bool is_x);
-
-  // Give up on runs in flight and say why. Not per axis: while both axes are
-  // queued at once there is no telling which of them a failure belongs to, and
-  // a spinner nothing ever clears is the worse outcome. analysing_only spares
-  // an axis whose test has not run yet, for the failures that can only have
-  // come from the analysis step.
-  void abandon_runs(const std::string &why, bool analysing_only = false);
-  void check_timeouts();
-
   static void _handle_watchdog(lv_timer_t *timer) {
     KGuard::event("InputShaperPanel::_handle_watchdog", [&] {
       InputShaperPanel *panel = (InputShaperPanel*)timer->user_data;
@@ -91,85 +59,101 @@ class InputShaperPanel {
     });
   };
 
-  void set_shaper_detail(json &res,
-			 lv_obj_t *label,
-			 lv_obj_t *slider,
-			 lv_obj_t *slider_label,
-			 lv_obj_t *dd);
-  
  private:
+  // Where an axis has got to. Anything but idle means a spinner is up and the
+  // panel is waiting on the printer for something.
+  enum class RunState { idle, testing, analysing };
+
+  // One axis's worth of everything. This file used to carry two of every
+  // member and two of every branch, which is how a fix could land on the X
+  // half and not the Y half and nobody notice.
+  struct Axis {
+    const char *name;     // "X", for the user
+    const char *csv;      // where TEST_RESONANCES writes its data
+    const char *png;      // basename of the plot the analysis draws
+    bool pending;         // queued for calibration but not sent yet
+    RunState run;
+    uint32_t since;       // lv_tick when run last changed, for the watchdog
+    bool shaper_known;    // the configured type is one of ours
+    double freq;
+    std::string shaper;
+    std::string plot_path;  // "A:" prefixed, once the plot is on disk
+    json result;            // last shapers/best payload
+  };
+
+  Axis &shown_axis();
+  void show_axis(size_t idx);
+
+  // Which axes Calibrate will run, from the axis row's selection.
+  bool wants(size_t idx) const;
+
+  void start_next_axis();
+  void start_run(size_t idx);
+  void finish_run(size_t idx);
+
+  // Give up on runs in flight and say why. Not per axis: while an analysis is
+  // in flight there is no telling from the message which axis it belongs to,
+  // and a spinner nothing ever clears is the worse outcome. analysing_only
+  // spares an axis whose test has not run yet.
+  void abandon_runs(const std::string &why, bool analysing_only = false);
+
+  void apply_result(Axis &axis, json &res);
+  void request_analysis(Axis &axis);
+
+  // Fixed width columns in the mono font, in shaper_defs order. The old table
+  // padded its header row only and separated with tabs, which LVGL renders as
+  // exactly two spaces rather than a tab stop, so any three digit frequency or
+  // two digit vibration figure shifted every column after it.
+  std::string render_table(const json &result) const;
+  std::string render_headline(const Axis &axis) const;
+
+  void set_status(const std::string &text);
+  void set_frequency(double hz);
+  void update_available();
+  void update_view();
+
+  // Point the shaper row at a name. Leaves it alone and returns false when the
+  // name is not one of ours: lv_dropdown_set_selected used to clamp an out of
+  // range index to the last option, so an unrecognised shaper silently became
+  // 3hump_ei and Save wrote that back.
+  bool select_shaper(const std::string &shaper);
+
   KWebSocketClient &ws;
   std::mutex &lv_lock;
   lv_obj_t *cont;
 
-  // xgraph
-  lv_obj_t *xgraph_cont;
-  lv_obj_t *xgraph;
-  lv_obj_t *xoutput; // calibrate shaper output x
-  lv_obj_t *xspinner;
+  Selector axis_sel;
+  lv_obj_t *headline;
 
-  // y graph
-  lv_obj_t *ygraph_cont;
-  lv_obj_t *ygraph;
-  lv_obj_t *youtput; // calibrate shaper output y
-  lv_obj_t *yspinner;
+  lv_obj_t *plot_cont;
+  lv_obj_t *plot;
+  lv_obj_t *table;
+  lv_obj_t *spinner;
 
-  // x controls
-  lv_obj_t *xcontrol;
-  lv_obj_t *xaxis_label;
-  lv_obj_t *x_switch;
-  lv_obj_t *xslider_cont;
-  lv_obj_t *xslider;
-  lv_obj_t *xlabel;
-  lv_obj_t *xshaper_dd;
-
-  // y controls
-  lv_obj_t *ycontrol;
-  lv_obj_t *yaxis_label;
-  lv_obj_t *y_switch;
-  lv_obj_t *yslider_cont;
-  lv_obj_t *yslider;
-  lv_obj_t *ylabel;
-  lv_obj_t *yshaper_dd;
-
-  // Why a button is off, or what a run is doing. Floats over the top of the
-  // graph area, which is empty whenever there is anything to say here.
+  Selector view_sel;
   lv_obj_t *status;
 
+  Selector shaper_sel;
+  lv_obj_t *freq_cont;
+  lv_obj_t *freq_slider;
+  lv_obj_t *freq_label;
+
   lv_obj_t *button_cont;
-  lv_obj_t *switch_cont;
-  lv_obj_t *graph_switch_label;
-  lv_obj_t *graph_switch;
   ButtonContainer calibrate_btn;
   ButtonContainer save_btn;
   ButtonContainer emergency_btn;
   ButtonContainer back_btn;
-  bool ximage_fullsized;
-  bool yimage_fullsized;
-  json calibrate_output;
 
-  // Whether the shaper type showing for each axis came from a name we
-  // recognised. Save is disabled while either is false, because what it would
-  // write is whatever the dropdown happens to be sitting on rather than
-  // anything the printer told us.
-  bool xshaper_known;
-  bool yshaper_known;
+  std::array<Axis, 2> axes;
+  size_t shown;
 
-  RunState xrun;
-  RunState yrun;
-  // Axes the user asked for that have not been sent yet.
-  bool xpending;
-  bool ypending;
   // Whether the analysis currently bracketed by gcode_shell_command's own
   // "Running Command" and "finished" lines has printed a result yet.
   bool analysis_produced_result;
-  // lv_tick when each axis last changed state, for the watchdog.
-  uint32_t xrun_since;
-  uint32_t yrun_since;
+
   lv_timer_t *watchdog;
 
   static std::vector<std::string> shapers;
-  
 };
 
 #endif // __INPUTSHAPER_PANEL_H__
