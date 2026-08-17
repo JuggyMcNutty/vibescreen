@@ -413,11 +413,12 @@ void BedMeshPanel::handle_callback(lv_event_t *event) {
     }
 
     // A blob of filament on the nozzle is measured as bed, so wipe first on
-    // printers that can. WIPE_NOZZLE is from the Advanced Nozzle Wiper mod and
-    // is not on a stock machine, so it has to be checked for rather than sent
-    // hopefully: Klipper abandons the rest of a script at the first unknown
-    // command, which would mean Calibrate popped an error and never probed at
-    // all for anyone without the mod.
+    // printers that can. WIPE_NOZZLE comes from the ProWiper mod, formerly
+    // Advanced Nozzle Wiper, and is not on a stock machine, so it has to be
+    // checked for rather than sent hopefully: Klipper abandons the rest of a
+    // script at the first unknown command, which would mean Calibrate popped an
+    // error and never probed at all for anyone without the mod.
+    // https://www.printables.com/model/1023575-prowiper-for-creality-k1-series
     //
     // It is its own no-op when the wiper is toggled off, and homes itself only
     // when it has to, so the decision above still governs. Wrapped because it

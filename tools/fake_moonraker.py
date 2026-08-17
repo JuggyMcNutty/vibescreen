@@ -33,8 +33,8 @@ REJECT_GCODE = "--reject" in sys.argv
 REJECT_BURST = 10 if "--burst" in sys.argv else 1
 GCODE_LOG = os.environ.get("GCODE_LOG", "/tmp/guppy_gcode_received.txt")
 
-# Pretend the Advanced Nozzle Wiper mod is installed, so the bed mesh panel's
-# check for it can be exercised both ways round.
+# Pretend the ProWiper mod is installed, so the bed mesh panel's check for it
+# can be exercised both ways round.
 EXTRA_OBJECTS = ["gcode_macro WIPE_NOZZLE"] if "--wiper" in sys.argv else []
 
 

@@ -29,10 +29,20 @@ microns of probe noise into a mountain range.
 
 The same mesh interpolated, and as the 36 points the probe actually visited.
 
-**Calibrating is less rude about it.** It homes only when an axis needs homing,
-rather than re-homing a machine that was already homed, and on printers that
-have the macro it wipes the nozzle first, since a blob of filament on the tip
-gets measured as bed.
+**Calibrate wipes the nozzle first.** A blob of filament on the tip gets
+measured as bed and lands in the mesh as a bump that is not on the plate. When
+the printer has a `WIPE_NOZZLE` macro, Calibrate runs it before probing,
+wrapped in a gcode state save so it cannot leave a modal mode set behind it. On
+a K1, K1C, K1SE or K1 Max that macro comes from
+[ProWiper](https://www.printables.com/model/1023575-prowiper-for-creality-k1-series),
+formerly Advanced Nozzle Wiper, and that mod's own toggle still governs: switch
+wiping off there and the macro is a no-op, so calibration simply proceeds. The
+macro is tested for rather than sent hopefully, because Klipper abandons the
+rest of a script at the first command it does not recognise, which would leave
+anyone without the mod with an error and no mesh at all.
+
+**Calibrate homes only when something is unhomed**, rather than re-homing a
+machine that already is, which is the normal state after a print.
 
 **A refused command is no longer silent.** Every gcode reply is checked, and a
 rejection is raised where you pressed the button instead of only in the
