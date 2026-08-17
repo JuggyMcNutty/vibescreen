@@ -8,6 +8,7 @@
 #include <cmath>
 
 LV_IMG_DECLARE(resume);
+LV_IMG_DECLARE(refresh_img);
 LV_IMG_DECLARE(sd_img);
 LV_IMG_DECLARE(emergency);
 LV_IMG_DECLARE(back);
@@ -92,7 +93,13 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   , freq_label(lv_label_create(freq_cont))
   , button_cont(lv_obj_create(cont))
   , calibrate_btn(button_cont, &resume, "Calibrate", &InputShaperPanel::_handle_callback, this)
-  , save_btn(button_cont, &sd_img, "Save", &InputShaperPanel::_handle_callback, this)
+  , apply_btn(button_cont, &refresh_img, "Apply", &InputShaperPanel::_handle_callback, this)
+  // Always prompted, never governed by the emergency stop setting. SAVE_CONFIG
+  // restarts Klipper, which on a touch panel is one stray tap away from ending
+  // a print that was merely paused.
+  , save_btn(button_cont, &sd_img, "Save", &InputShaperPanel::_handle_callback, this,
+	     "Save these shapers to printer.cfg?\nKlipper restarts, which stops any print.",
+	     [this]() { this->save_to_config(); }, false)
   , emergency_btn(button_cont, &emergency, "Stop", &InputShaperPanel::_handle_callback, this,
 		  "Do you want to emergency stop?",
 		  [&c]() {
@@ -443,6 +450,9 @@ void InputShaperPanel::update_available() {
   bool can_test = KUtils::has_config_section("resonance_tester");
   bool can_analyse = KUtils::has_config_section("gcode_shell_command guppy_input_shaper");
   bool can_save = KUtils::has_config_section("calibrate_shaper_config");
+  // SET_INPUT_SHAPER is registered by the input_shaper module, so it exists
+  // only on a printer that has the section Apply would be changing.
+  bool can_apply = KUtils::has_config_section("input_shaper");
 
   std::vector<std::string> missing;
   if (!can_test) {
@@ -454,6 +464,9 @@ void InputShaperPanel::update_available() {
   if (!can_save) {
     missing.push_back("[calibrate_shaper_config]");
   }
+  if (!can_apply) {
+    missing.push_back("[input_shaper]");
+  }
 
   if (can_test && can_analyse) {
     calibrate_btn.enable();
@@ -462,6 +475,12 @@ void InputShaperPanel::update_available() {
   }
 
   bool types_known = axes[0].shaper_known && axes[1].shaper_known;
+  if (can_apply && types_known) {
+    apply_btn.enable();
+  } else {
+    apply_btn.disable();
+  }
+
   if (can_save && types_known) {
     save_btn.enable();
   } else {
@@ -707,6 +726,18 @@ void InputShaperPanel::handle_macro_response(json &j) {
   }
 }
 
+void InputShaperPanel::save_to_config() {
+  // Both axes every time. SAVE_INPUT_SHAPER takes its per axis defaults from
+  // [calibrate_shaper_config], not from the running [input_shaper], so sending
+  // only one axis would write the module's own default over the other one.
+  // Measured on the K1 Max: that default is mzv at 0.0 Hz, which disables
+  // shaping on the axis it lands on.
+  ws.gcode_script(
+    fmt::format("SAVE_INPUT_SHAPER SHAPER_FREQ_X={:.1f} SHAPER_TYPE_X={} "
+		"SHAPER_FREQ_Y={:.1f} SHAPER_TYPE_Y={}\nSAVE_CONFIG",
+		axes[0].freq, axes[0].shaper, axes[1].freq, axes[1].shaper));
+}
+
 void InputShaperPanel::handle_klippy_gone() {
   std::lock_guard<std::mutex> lock(lv_lock);
   abandon_runs("Klipper disconnected while the resonance test was running.");
@@ -771,16 +802,19 @@ void InputShaperPanel::handle_callback(lv_event_t *event) {
 
     start_next_axis();
 
-  } else if (btn == save_btn.get_container()) {
-    // Both axes every time. SAVE_INPUT_SHAPER takes its per axis defaults from
-    // [calibrate_shaper_config], not from the running [input_shaper], so
-    // sending only one axis would write the module's own default over the
-    // other one. Measured on the K1 Max: that default is mzv at 0.0 Hz, which
-    // disables shaping on the axis it lands on.
+  } else if (btn == apply_btn.get_container()) {
+    // Live, and gone at the next Klipper restart. Hearing the difference
+    // before committing to it is the whole point of separating this from Save:
+    // there was no way to try a shaper without writing printer.cfg and
+    // restarting the firmware to find out.
     ws.gcode_script(
-      fmt::format("SAVE_INPUT_SHAPER SHAPER_FREQ_X={:.1f} SHAPER_TYPE_X={} "
-		  "SHAPER_FREQ_Y={:.1f} SHAPER_TYPE_Y={}\nSAVE_CONFIG",
+      fmt::format("SET_INPUT_SHAPER SHAPER_FREQ_X={:.1f} SHAPER_TYPE_X={} "
+		  "SHAPER_FREQ_Y={:.1f} SHAPER_TYPE_Y={}",
 		  axes[0].freq, axes[0].shaper, axes[1].freq, axes[1].shaper));
+    set_status(fmt::format("Applied X {} at {:.1f} Hz, Y {} at {:.1f} Hz. "
+			   "Not saved, so a restart undoes it.",
+			   axes[0].shaper, axes[0].freq,
+			   axes[1].shaper, axes[1].freq));
 
   } else if (btn == back_btn.get_container()) {
     lv_obj_move_background(cont);

@@ -9,13 +9,18 @@
 
 class ButtonContainer {
  public:
+  // prompt_optional means the confirmation may be turned off by the
+  // prompt_emergency_stop setting, which is what every prompt here was for
+  // when that setting was added. Pass false for a confirmation that is about
+  // something else and has no business being governed by it.
   ButtonContainer(lv_obj_t *parent,
 		  const void *btn_img,
 		  const char *text,
 		  lv_event_cb_t cb,
 		  void *user_data,
 		  const std::string &prompt_text = {},
-		  const std::function<void()> &prompt_callback = {});
+		  const std::function<void()> &prompt_callback = {},
+		  bool prompt_optional = true);
   ~ButtonContainer();
 
   lv_obj_t *get_container();

@@ -100,6 +100,9 @@ class InputShaperPanel {
   void apply_result(Axis &axis, json &res);
   void request_analysis(Axis &axis);
 
+  // Behind Save's confirmation, because SAVE_CONFIG restarts Klipper.
+  void save_to_config();
+
   // Fixed width columns in the mono font, in shaper_defs order. The old table
   // padded its header row only and separated with tabs, which LVGL renders as
   // exactly two spaces rather than a tab stop, so any three digit frequency or
@@ -140,6 +143,7 @@ class InputShaperPanel {
 
   lv_obj_t *button_cont;
   ButtonContainer calibrate_btn;
+  ButtonContainer apply_btn;
   ButtonContainer save_btn;
   ButtonContainer emergency_btn;
   ButtonContainer back_btn;

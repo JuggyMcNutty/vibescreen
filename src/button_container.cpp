@@ -8,7 +8,8 @@ ButtonContainer::ButtonContainer(lv_obj_t *parent,
 				 lv_event_cb_t cb,
 				 void* user_data,
 				 const std::string &prompt,
-				 const std::function<void()> &pcb)
+				 const std::function<void()> &pcb,
+				 bool prompt_optional)
   : btn_cont(lv_obj_create(parent))
   , btn(lv_imgbtn_create(btn_cont))
   , label(lv_label_create(btn_cont))
@@ -32,6 +33,7 @@ ButtonContainer::ButtonContainer(lv_obj_t *parent,
   Config *conf = Config::get_instance();
   auto estop = conf->get_json("/prompt_emergency_stop");
   auto prompt_estop = estop.is_null() ? false : estop.template get<bool>();
+  bool should_prompt = prompt_estop || !prompt_optional;
 
   if (cb != NULL && !pcb) {
     lv_obj_add_event_cb(btn_cont, &ButtonContainer::_handle_callback, LV_EVENT_PRESSED, this);
@@ -40,7 +42,7 @@ ButtonContainer::ButtonContainer(lv_obj_t *parent,
     lv_obj_add_event_cb(btn_cont, cb, LV_EVENT_CLICKED, user_data);
   }
   else if (cb != NULL && pcb) {
-    if (prompt_estop) {
+    if (should_prompt) {
       lv_obj_add_event_cb(btn_cont, [](lv_event_t *e) {
 	KGuard::event("ButtonContainer prompt open", [&] {
 	  lv_event_code_t code = lv_event_get_code(e);
