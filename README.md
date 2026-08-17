@@ -146,14 +146,28 @@ acceleration limits, Spoolman integration, and multi-printer support.
 | --- | --- |
 | ![Move panel](screenshots/move.png) | ![Tuning menu](screenshots/printer_tune.png) |
 
+| Fine tune | Limits |
+| --- | --- |
+| ![Live z-offset, pressure advance, speed and flow](screenshots/finetune.png) | ![Velocity and acceleration limits](screenshots/limits.png) |
+
 | Macros | Console |
 | --- | --- |
 | ![Macro list with parameters](screenshots/macros.png) | ![Console with the command palette](screenshots/console.png) |
 
-The screenshots are the simulator build. The bed mesh, the macros and the
-command list came from the development K1 Max, so they are that machine's own
-data. The rejected command is `tools/fake_moonraker.py` refusing on purpose,
-which is not a thing worth doing to a real printer.
+| Temperature | Fans |
+| --- | --- |
+| ![Entering a target on the numpad](screenshots/temp.png) | ![Fan speed control](screenshots/fan.png) |
+
+| LED | Settings |
+| --- | --- |
+| ![LED brightness control](screenshots/led.png) | ![Settings menu](screenshots/settings.png) |
+
+The screenshots are the simulator build. Everything showing printer state came
+from the development K1 Max, so the bed mesh, the macros, the command list, the
+limits and the single fan that machine exposes are its own. The numpad and the
+rejected command come from `tools/fake_moonraker.py`, the second because
+provoking a refusal on a real printer means sending it something bad on
+purpose.
 
 ## Building
 
