@@ -267,11 +267,14 @@ async def handler(ws):
             if "id" in msg:
                 if method == "printer.gcode.script" and REJECT_GCODE:
                     # Reply the way Moonraker does when Klipper refuses a command.
+                    # The burst counter is only worth showing when bursting, so a
+                    # plain rejection reads exactly as Klipper's own would.
                     for n in range(REJECT_BURST):
+                        detail = f" (burst {n + 1})" if REJECT_BURST > 1 else ""
                         await ws.send(json.dumps({
                             "jsonrpc": "2.0", "id": msg["id"],
                             "error": {"code": -32602,
-                                      "message": f"Extrude below minimum temp (burst {n + 1})"}}))
+                                      "message": f"Extrude below minimum temp{detail}"}}))
                     continue
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg["id"],
                                           "result": result_for(method, params)}))
