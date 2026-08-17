@@ -18,9 +18,16 @@ LV_FONT_DECLARE(dejavusans_mono_14);
 #define Y_DATA "/tmp/resonances_y_y.csv"
 #define Y_PNG "resonances_y.png"
 
+// Every shaper Klipper accepts in [input_shaper], from
+// k1/scripts/shaper_defs.py. Note this is six and not the five the analysis
+// proposes: k1/scripts/shaper_calibrate.py leaves zvd out of AUTOTUNE_SHAPERS,
+// so a calibration never suggests it, but Klipper's own SHAPER_CALIBRATE will
+// and a config can be written by hand. The panel has to be able to show back
+// what the printer is actually configured for.
 std::vector<std::string> InputShaperPanel::shapers = {
   "zv",
   "mzv",
+  "zvd",
   "ei",
   "2hump_ei",
   "3hump_ei"
@@ -76,6 +83,10 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   , back_btn(cont, &back, "Back", &InputShaperPanel::_handle_callback, this)
   , ximage_fullsized(false)
   , yimage_fullsized(false)
+  // Nothing has been read off the printer yet, so both start trusted and
+  // foreground() decides. A panel that has never been opened saves nothing.
+  , xshaper_known(true)
+  , yshaper_known(true)
 {
   lv_obj_move_background(cont);
 
@@ -265,10 +276,8 @@ void InputShaperPanel::foreground() {
 
     v = inputshaper["/shaper_type_x"_json_pointer];
     if (!v.is_null()) {
-      auto shaper = v.template get<std::string>();
-      auto idx = find_shaper_index(shapers, shaper);
-      lv_dropdown_set_selected(xshaper_dd, idx);
-    }    
+      xshaper_known = select_shaper(xshaper_dd, v.template get<std::string>());
+    }
 
     v = inputshaper["/shaper_freq_y"_json_pointer];
     if (!v.is_null()) {
@@ -279,13 +288,20 @@ void InputShaperPanel::foreground() {
 
     v = inputshaper["/shaper_type_y"_json_pointer];
     if (!v.is_null()) {
-      auto shaper = v.template get<std::string>();
-      auto idx = find_shaper_index(shapers, shaper);
-      lv_dropdown_set_selected(yshaper_dd, idx);
+      yshaper_known = select_shaper(yshaper_dd, v.template get<std::string>());
     }
   }
-  
+
+  update_save_enabled();
   lv_obj_move_foreground(cont);
+}
+
+void InputShaperPanel::update_save_enabled() {
+  if (xshaper_known && yshaper_known) {
+    save_btn.enable();
+  } else {
+    save_btn.disable();
+  }
 }
 
 
@@ -525,9 +541,26 @@ void InputShaperPanel::handle_update_slider(lv_event_t *e) {
   }
 }
 
-uint32_t InputShaperPanel::find_shaper_index(const std::vector<std::string> &s,
-					     const std::string &shaper) {
-  return std::distance(s.cbegin(), std::find(s.cbegin(), s.cend(), shaper));
+int32_t InputShaperPanel::find_shaper_index(const std::vector<std::string> &s,
+					    const std::string &shaper) {
+  auto it = std::find(s.cbegin(), s.cend(), shaper);
+  return it == s.cend() ? -1 : std::distance(s.cbegin(), it);
+}
+
+bool InputShaperPanel::select_shaper(lv_obj_t *dd, const std::string &shaper) {
+  // This used to hand lv_dropdown_set_selected the one-past-the-end index that
+  // std::distance gives for a name that is not in the list. That function
+  // clamps an out of range index to the last option instead of rejecting it,
+  // so an unrecognised shaper silently became 3hump_ei on screen, and Save
+  // wrote 3hump_ei back to printer.cfg at the original shaper's frequency.
+  int32_t idx = find_shaper_index(shapers, shaper);
+  if (idx < 0) {
+    spdlog::warn("unknown input shaper '{}', leaving the selection alone", shaper);
+    return false;
+  }
+
+  lv_dropdown_set_selected(dd, idx);
+  return true;
 }
 
 void InputShaperPanel::set_shaper_detail(json &res,
@@ -545,8 +578,13 @@ void InputShaperPanel::set_shaper_detail(json &res,
 	.template get<double>();
       shaper_details.push_back(fmt::format("Best shaper is {} @ {:.2f} Hz\n", bs_name, f));
 
-      uint32_t idx = find_shaper_index(shapers, bs_name);
-      lv_dropdown_set_selected(dd, idx);
+      bool known = select_shaper(dd, bs_name);
+      if (dd == xshaper_dd) {
+	xshaper_known = known;
+      } else {
+	yshaper_known = known;
+      }
+      update_save_enabled();
 
       lv_slider_set_value(slider, f * 10, LV_ANIM_OFF);
       lv_label_set_text(slider_label, fmt::format("{:.1f} Hz", f).c_str());

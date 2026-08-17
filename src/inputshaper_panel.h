@@ -41,8 +41,17 @@ class InputShaperPanel {
     });
   };
 
-  uint32_t find_shaper_index(const std::vector<std::string> &s,
-			     const std::string &shaper);
+  // Index of a shaper in the list, or -1 when it is not one we know.
+  int32_t find_shaper_index(const std::vector<std::string> &s,
+			    const std::string &shaper);
+
+  // Point a dropdown at a shaper by name. Returns false and leaves the
+  // selection untouched when the name is not one of ours, so the caller
+  // decides what to do rather than having a wrong value picked for it.
+  bool select_shaper(lv_obj_t *dd, const std::string &shaper);
+
+  // Save is only offered while both axes show a shaper we recognise.
+  void update_save_enabled();
 
   void set_shaper_detail(json &res,
 			 lv_obj_t *label,
@@ -96,6 +105,13 @@ class InputShaperPanel {
   bool ximage_fullsized;
   bool yimage_fullsized;
   json calibrate_output;
+
+  // Whether the shaper type showing for each axis came from a name we
+  // recognised. Save is disabled while either is false, because what it would
+  // write is whatever the dropdown happens to be sitting on rather than
+  // anything the printer told us.
+  bool xshaper_known;
+  bool yshaper_known;
 
   static std::vector<std::string> shapers;
   
