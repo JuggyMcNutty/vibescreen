@@ -83,14 +83,17 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   , spinner(lv_spinner_create(cont, 1000, 60))
   , view_sel(cont, "", {"Graph", "Numbers"}, 0, 100, 11,
 	     &InputShaperPanel::_handle_selector, this)
-  , status(lv_label_create(cont))
+  , freq_cont(lv_obj_create(cont))
+  , freq_slider(lv_slider_create(freq_cont))
+  , freq_label(lv_label_create(freq_cont))
   // Two rows. Six of these across one row leaves about 50px a button, and
   // "2hump_ei" does not fit in that at any font this panel has.
   , shaper_sel(cont, "", {"zv", "mzv", "zvd", "\n", "ei", "2hump_ei", "3hump_ei"},
 	       1, 100, 18, &InputShaperPanel::_handle_selector, this)
-  , freq_cont(lv_obj_create(cont))
-  , freq_slider(lv_slider_create(freq_cont))
-  , freq_label(lv_label_create(freq_cont))
+  // Keeps its caption, unlike the other three, because a row of bare numbers
+  // says nothing about what they are.
+  , smoothing_sel(cont, "Max smoothing", {"Auto", "0.10", "0.15", "0.20", "0.25"},
+		  0, 100, 11, &InputShaperPanel::_handle_selector, this)
   , button_cont(lv_obj_create(cont))
   , calibrate_btn(button_cont, &resume, "Calibrate", &InputShaperPanel::_handle_callback, this)
   , apply_btn(button_cont, &refresh_img, "Apply", &InputShaperPanel::_handle_callback, this)
@@ -119,6 +122,7 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   lv_obj_set_style_pad_all(cont, 0, 0);
 
   auto scale = (double)lv_disp_get_physical_hor_res(NULL) / 800.0;
+  auto hscale = (double)lv_disp_get_physical_ver_res(NULL) / 480.0;
 
   // The best result of the shown axis, so switching between the plot and the
   // numbers never hides the one line worth acting on.
@@ -141,9 +145,6 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_size(spinner, 90 * scale, 90 * scale);
 
-  lv_label_set_long_mode(status, LV_LABEL_LONG_WRAP);
-  lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
-
   lv_obj_clear_flag(freq_cont, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_pad_all(freq_cont, 0, 0);
   lv_obj_set_flex_flow(freq_cont, LV_FLEX_FLOW_COLUMN);
@@ -159,11 +160,20 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
   lv_label_set_text(freq_label, "0.0 Hz");
 
   lv_obj_set_size(button_cont, LV_PCT(100), LV_PCT(100));
-  lv_obj_clear_flag(button_cont, LV_OBJ_FLAG_SCROLLABLE);
+  // Scrolls rather than clips. Five buttons fit the 480px panel with room to
+  // spare and do not fit the 272px one, where the labels ran into the icon
+  // below them and Back fell off the bottom edge.
+  lv_obj_set_scroll_dir(button_cont, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(button_cont, LV_SCROLLBAR_MODE_AUTO);
   lv_obj_set_style_pad_all(button_cont, 0, 0);
   lv_obj_set_flex_flow(button_cont, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_align(button_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+  // START rather than SPACE_EVENLY, with a fixed gap. Five buttons come to
+  // 410px of a 478px column at 800x480 and 305px of a 271px one at 480x272,
+  // and LVGL's SPACE_EVENLY divides a shortfall into negative gaps, which is
+  // why every label landed on the icon below it on the smaller panel.
+  lv_obj_set_flex_align(button_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 			LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(button_cont, 16 * hscale, 0);
 
   // Selectors are built with an empty caption. Hiding the label rather than
   // leaving it blank is what keeps it out of the container's flex column,
@@ -197,11 +207,12 @@ InputShaperPanel::InputShaperPanel(KWebSocketClient &c, std::mutex &l)
 
   lv_obj_set_grid_cell(view_sel.get_container(), LV_GRID_ALIGN_STRETCH, 1, 1,
 		       LV_GRID_ALIGN_CENTER, 2, 1);
-  lv_obj_set_grid_cell(status, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 2, 1);
+  lv_obj_set_grid_cell(freq_cont, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 2, 1);
 
   lv_obj_set_grid_cell(shaper_sel.get_container(), LV_GRID_ALIGN_STRETCH, 1, 1,
 		       LV_GRID_ALIGN_CENTER, 3, 1);
-  lv_obj_set_grid_cell(freq_cont, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 3, 1);
+  lv_obj_set_grid_cell(smoothing_sel.get_container(), LV_GRID_ALIGN_STRETCH, 2, 1,
+		       LV_GRID_ALIGN_CENTER, 3, 1);
 
   // Paused until a run starts, so an idle panel costs nothing.
   watchdog = lv_timer_create(&InputShaperPanel::_handle_watchdog, 1000, this);
@@ -300,7 +311,7 @@ void InputShaperPanel::show_axis(size_t idx) {
   select_shaper(axis.shaper);
   set_frequency(axis.freq);
 
-  lv_label_set_text(headline, render_headline(axis).c_str());
+  refresh_headline();
   lv_label_set_text(table, axis.result.is_null()
 		    ? fmt::format("Calibrate to measure the {} axis.", axis.name).c_str()
 		    : render_table(axis.result).c_str());
@@ -439,7 +450,25 @@ void InputShaperPanel::set_frequency(double hz) {
 }
 
 void InputShaperPanel::set_status(const std::string &text) {
-  lv_label_set_text(status, text.c_str());
+  status_text = text;
+  refresh_headline();
+}
+
+void InputShaperPanel::refresh_headline() {
+  lv_label_set_text(headline, status_text.empty()
+		    ? render_headline(shown_axis()).c_str()
+		    : status_text.c_str());
+}
+
+std::string InputShaperPanel::smoothing_arg() {
+  // Index 0 is Auto, which means leaving calibrate_shaper.py to its own
+  // default rather than passing a number.
+  if (smoothing_sel.get_selected_idx() == 0) {
+    return "";
+  }
+
+  const char *text = smoothing_sel.selected_text();
+  return text == nullptr ? "" : fmt::format(" -s {}", text);
 }
 
 void InputShaperPanel::update_available() {
@@ -608,8 +637,9 @@ void InputShaperPanel::request_analysis(Axis &axis) {
   // Always ask for the plot. It used to be tied to the Graph switch, so
   // flipping the view after a run meant re-running the whole test to get the
   // picture, and the analysis is the expensive half either way.
-  std::string arg = fmt::format("{} -o {} -w {:.2f} -l {:.2f}",
-				axis.csv, png_path, cw / 100.0, ch / 100.0);
+  std::string arg = fmt::format("{} -o {} -w {:.2f} -l {:.2f}{}",
+				axis.csv, png_path, cw / 100.0, ch / 100.0,
+				smoothing_arg());
 
   axis.run = RunState::analysing;
   axis.since = lv_tick_get();
@@ -762,6 +792,9 @@ void InputShaperPanel::handle_selector(lv_event_t *e) {
   } else if (selector == view_sel.get_selector()) {
     view_sel.set_selected_idx(idx);
     update_view();
+
+  } else if (selector == smoothing_sel.get_selector()) {
+    smoothing_sel.set_selected_idx(idx);
 
   } else if (selector == shaper_sel.get_selector()) {
     shaper_sel.set_selected_idx(idx);

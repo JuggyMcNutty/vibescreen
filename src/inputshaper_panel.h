@@ -111,7 +111,11 @@ class InputShaperPanel {
   std::string render_headline(const Axis &axis) const;
 
   void set_status(const std::string &text);
+  void refresh_headline();
   void set_frequency(double hz);
+
+  // The -s argument for calibrate_shaper.py, or empty for its own default.
+  std::string smoothing_arg();
   void update_available();
   void update_view();
 
@@ -134,12 +138,17 @@ class InputShaperPanel {
   lv_obj_t *spinner;
 
   Selector view_sel;
-  lv_obj_t *status;
-
-  Selector shaper_sel;
   lv_obj_t *freq_cont;
   lv_obj_t *freq_slider;
   lv_obj_t *freq_label;
+
+  Selector shaper_sel;
+  Selector smoothing_sel;
+
+  // Shown on the headline in place of the axis summary while it is set. There
+  // is one line of room up there, and a run in progress or an error that
+  // stopped one outranks a result the user has already read.
+  std::string status_text;
 
   lv_obj_t *button_cont;
   ButtonContainer calibrate_btn;
