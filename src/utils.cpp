@@ -34,6 +34,31 @@ namespace KUtils {
     return false;
   }
 
+  bool has_gcode_macro(const std::string &name) {
+    auto &objects = State::get_instance()
+      ->get_data("/printer_objs/objects"_json_pointer);
+    if (objects.is_null()) {
+      return false;
+    }
+
+    // printer.objects.list reports macros with whatever case the config used,
+    // while configfile.settings lowercases them, so neither side can be
+    // trusted to match a literal.
+    const std::string want = "gcode_macro " + name;
+    for (auto &o : objects) {
+      const std::string obj_name = o.template get<std::string>();
+      if (obj_name.size() == want.size()
+	  && std::equal(obj_name.begin(), obj_name.end(), want.begin(),
+			[](char a, char b) {
+			  return std::tolower(static_cast<unsigned char>(a))
+			    == std::tolower(static_cast<unsigned char>(b));
+			})) {
+	return true;
+      }
+    }
+    return false;
+  }
+
   bool is_running_local() {
     Config *conf = Config::get_instance();
     std::string df_host = conf->get<std::string>(conf->df() + "moonraker_host");

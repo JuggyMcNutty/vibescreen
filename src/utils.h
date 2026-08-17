@@ -12,6 +12,12 @@ using json = nlohmann::json;
 
 namespace KUtils {
   bool is_homed();
+
+  // Whether the printer defines a gcode macro of this name. Nothing checks
+  // whether Klipper accepted a command, so anything we send that not every
+  // printer has must be tested for before it goes out rather than after.
+  bool has_gcode_macro(const std::string &name);
+
   bool is_running_local();
   std::string get_root_path(const std::string root_name);
 

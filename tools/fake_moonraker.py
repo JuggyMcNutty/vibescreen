@@ -13,6 +13,7 @@ printer. Needs the websockets package: pip install websockets
     python3 tools/fake_moonraker.py 240 240 --reject   # reject every command
     python3 tools/fake_moonraker.py 240 240 --reject --burst
     python3 tools/fake_moonraker.py --mesh bowl        # pick a bed mesh shape
+    python3 tools/fake_moonraker.py --wiper            # pretend WIPE_NOZZLE exists
 
 Mesh shapes: adaptive, full, bowl, tilt, flat. BED_MESH_CLEAR and
 BED_MESH_CALIBRATE are acted on rather than just logged, so the panel's clear
@@ -31,6 +32,10 @@ TARGET = float(sys.argv[2]) if len(sys.argv) > 2 else 240.0
 REJECT_GCODE = "--reject" in sys.argv
 REJECT_BURST = 10 if "--burst" in sys.argv else 1
 GCODE_LOG = os.environ.get("GCODE_LOG", "/tmp/guppy_gcode_received.txt")
+
+# Pretend the Advanced Nozzle Wiper mod is installed, so the bed mesh panel's
+# check for it can be exercised both ways round.
+EXTRA_OBJECTS = ["gcode_macro WIPE_NOZZLE"] if "--wiper" in sys.argv else []
 
 
 def _arg_value(name, default):
@@ -179,7 +184,10 @@ def result_for(method, params):
     if method == "printer.objects.subscribe" or method == "printer.objects.query":
         return {"eventtime": time.time(), "status": STATUS}
     if method == "printer.objects.list":
-        return {"objects": list(STATUS.keys())}
+        # Macros are listed but not subscribed to, and their case is whatever
+        # the config used, which is why WIPE_NOZZLE is upper here and lower in
+        # configfile.settings on a real printer.
+        return {"objects": list(STATUS.keys()) + EXTRA_OBJECTS}
     if method == "server.database.get_item":
         return {"namespace": params.get("namespace", ""), "value": {}}
     if method == "printer.gcode.help":

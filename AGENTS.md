@@ -302,10 +302,17 @@ RESTORE_GCODE_STATE NAME=guppy_<what>
 `RESTORE_GCODE_STATE` defaults to `MOVE=0`, so it restores the mode without
 moving the toolhead.
 
-**Nothing checks whether Klipper accepted it.** `KWebSocketClient::gcode_script`
-logs the payload and never looks at the reply. So any limit a panel enforces is
-advisory, and a rejected command is silent in that panel. Validate before
-sending rather than relying on the error coming back.
+**Validate before sending anyway.** `KWebSocketClient::gcode_script` does now
+check the reply and surface a rejection, which it did not before `fc12faa`, so
+a refused command is no longer silent. That is a backstop, not a substitute for
+checking first, because **Klipper abandons the rest of a script at the first
+command it does not like**. Send a command the printer lacks and everything
+after it in the same script never runs, which is a worse failure than not
+offering the button.
+
+So test for what you are about to use. `KUtils::has_gcode_macro` covers macros
+that only exist on modded machines, and `KUtils::is_homed` covers the other
+common precondition. `BedMeshPanel`'s Calibrate is the worked example of both.
 
 Where a panel offers preset values, clamp them against the printer's own limits
 read from `/printer_state/configfile/settings/...` in `State`. `LimitsPanel::init`
