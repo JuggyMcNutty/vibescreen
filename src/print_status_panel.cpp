@@ -34,7 +34,16 @@ PrintStatusPanel::PrintStatusPanel(KWebSocketClient &websocket_client,
   , status_cont(lv_obj_create(lv_scr_act()))
   , buttons_cont(lv_obj_create(status_cont))
   , finetune_btn(buttons_cont, &fine_tune_img, "Fine Tune", &PrintStatusPanel::_handle_callback, this)
-  , pause_btn(buttons_cont, &pause_img, "Pause", &PrintStatusPanel::_handle_callback, this)
+  // Behind the same prompt as Cancel. A single tap pauses instantly, and this
+  // is the screen people tap to wake, so a double tap on a sleeping display
+  // pauses the print. Upstream #56.
+  , pause_btn(buttons_cont, &pause_img, "Pause", &PrintStatusPanel::_handle_callback, this,
+	      "Do you want to pause the print?",
+	      [this]() {
+		spdlog::debug("pause print prompt");
+		ws.send_jsonrpc("printer.print.pause");
+		pause_btn.disable();
+	      })
   , resume_btn(buttons_cont, &resume, "Resume", &PrintStatusPanel::_handle_callback, this)
   , cancel_btn(buttons_cont, &cancel, "Cancel", &PrintStatusPanel::_handle_callback, this,
 	       "Do you want to cancel the print?",
@@ -477,10 +486,6 @@ void PrintStatusPanel::handle_callback(lv_event_t *event) {
 
   } else if (btn == emergency_btn.get_container()) {
     ws.send_jsonrpc("printer.emergency_stop");
-  } else if (btn == pause_btn.get_container()) {
-    ws.send_jsonrpc("printer.print.pause");
-    pause_btn.disable();
-
   } else if (btn == resume_btn.get_container()) {
     ws.send_jsonrpc("printer.print.resume");
     resume_btn.disable();
