@@ -293,9 +293,12 @@ def mhi_lut(mhi):
 ######################################################################
 
 def plot_compare_frequency(ax, lognames, signal1, signal2, max_freq):
-    # Get the belt name for the legend to avoid putting the full file name
-    signal1_belt = (lognames[0].split('/')[-1]).split('_')[-1][0]
-    signal2_belt = (lognames[1].split('/')[-1]).split('_')[-1][0]
+    # Get the belt name for the legend to avoid putting the full file name.
+    # Upper cased because the guppy macro used to pass NAME=a and NAME=b, so
+    # CSVs left in /tmp by an older install still carry lower case letters and
+    # would otherwise fall through to the warning below.
+    signal1_belt = (lognames[0].split('/')[-1]).split('_')[-1][0].upper()
+    signal2_belt = (lognames[1].split('/')[-1]).split('_')[-1][0].upper()
 
     if signal1_belt == 'A' and signal2_belt == 'B':
         signal1_belt += " (axis 1,-1)"
@@ -518,14 +521,19 @@ def belts_calibration(lognames, klipperdir="~/klipper", max_freq=200., graph_spe
     else:
         fig, ax1 = matplotlib.pyplot.subplots()
 
-    # Add title
+    # Add title. This used to dig a timestamp out of the filename, expecting
+    # Klippain's <prefix>_<date>_<time>_<belt>.csv. Klipper's TEST_RESONANCES
+    # names its output raw_data_axis=<axis>_<name>.csv, which carries no date at
+    # all, so the parse threw on every single run and printed a warning that the
+    # filenames looked different than expected. They are not different, they are
+    # the only shape TEST_RESONANCES produces. Use the file's own timestamp,
+    # which is when the sweep ran rather than when the plot was drawn.
+    filename = lognames[0].split('/')[-1]
     try:
-        filename = lognames[0].split('/')[-1]
-        dt = datetime.strptime(f"{filename.split('_')[1]} {filename.split('_')[2]}", "%Y%m%d %H%M%S")
-        title_line2 = dt.strftime('%x %X')
-    except:
-        print("Warning: CSV filenames look to be different than expected (%s , %s)" % (lognames[0], lognames[1]))
-        title_line2 = lognames[0].split('/')[-1] + " / " +  lognames[1].split('/')[-1]
+        title_line2 = datetime.fromtimestamp(
+            os.path.getmtime(lognames[0])).strftime('%x %X')
+    except OSError:
+        title_line2 = filename
     fig.suptitle(title_line2)
 
     # Plot the graphs
