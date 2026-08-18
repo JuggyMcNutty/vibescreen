@@ -30,13 +30,14 @@ line number is one commit away from pointing at something else.
 | `src/print_panel.cpp` | `// XXX: maybe use the directory instead of file endpoint in moonraker` |
 | `src/inputshaper_panel.cpp` | subscribe only to the macros the panel cares about, then unregister |
 | `src/printertune_panel.cpp` | `// TODO: handle remote guppy instance` |
-| `src/setting_panel.cpp` | `// TODO: throw this inside the global threadpool to make it async` |
 | `src/spoolman_panel.cpp` | `// TODO: calculate color distance` |
 | `src/tree.h` | `// XXX: fix my index` |
 
-It was 15 when this was written. `fc12faa` retired one of the two "check
-success" markers by actually checking the reply, and the survivor now says
-"callback" where it used to say "consumer".
+It was 15 when this was written, and 13 now. `fc12faa` retired one of the two
+"check success" markers by actually checking the reply, and the survivor now
+says "callback" where it used to say "consumer". The `setting_panel.cpp`
+threadpool marker went with the update dialog, which runs `update.sh` on its own
+thread.
 
 The two "this is a race condition" notes are the interesting ones. They are not
 two local bugs, they are two sightings of one structural problem. See C1.
@@ -257,6 +258,50 @@ what the multi-printer switch in `PrinterSelectPanel` would want to do.
 deletes happen in. The same pattern applied to `ButtonContainer`, `Selector`
 and `ImageLabel` would close it off, but that is a sweep of its own rather than
 something to fold into an unrelated change.
+
+### C18. Startup crashes about one time in six, in the connect callback (open)
+
+`InitPanel::connected` runs on the libhv websocket thread and builds widgets
+from there. Measured 2026-08-17 against `tools/fake_moonraker.py`: one startup
+in six segfaults, always with the same shape.
+
+```
+#0  obj_valid_child          <- the object tree is already inconsistent
+#1  lv_obj_is_valid
+#2  lv_obj_get_screen
+#3  lv_obj_mark_layout_as_dirty
+#4  lv_obj_class_init_obj
+#5  lv_obj_create
+#6  SensorContainer::SensorContainer
+#7  MainPanel::create_sensors
+#8  InitPanel::connected(...)::{lambda}
+#9  KWebSocketClient::connect(...)::{lambda}     <- websocket thread
+#10 on_frame_end(websocket_parser*)
+```
+
+A second shape appears when something is deleted afterwards: `lv_obj_del` ->
+`lv_obj_destructor` -> `_lv_event_mark_deleted` walking `event_head`, LVGL's
+global chain of in-flight events, into a pointer that is plainly not one. Both
+say the same thing, that LVGL's own globals have been written by two threads.
+
+The odd part is that `MainPanel::create_sensors`, `MainPanel::init`,
+`PowerPanel::create_devices` and every `consume` do take `lv_lock`, and it is
+the same mutex the main loop holds around `lv_timer_handler`. So the hole is
+somewhere the lock is not taken rather than the lock being wrong.
+`SettingPanel::enable_spoolman` is one confirmed hole, calling
+`ButtonContainer::enable` with no lock, though that path needs a printer
+running spoolman and was not what crashed here.
+
+Reproduce with `scripts/build.sh sim` against the fake, opening a panel a few
+seconds after start, six runs. It is not specific to any panel or to anything
+the user does: the run above only navigated between panels and opened no
+dialog. An earlier crash from before the update dialog was written fits the
+same picture but left a stack too corrupt to read, so it proves nothing.
+
+This is the same disease as C1 and C9 and wants the same cure: dispatch onto a
+queue drained by the LVGL loop, so that no websocket callback ever touches a
+widget. Until then, every new websocket-thread path needs `lv_lock` and an
+audit of the ones already there.
 
 ### C8. Rejected gcode is invisible to the user (fixed, `fc12faa`)
 
@@ -552,7 +597,9 @@ Remaining, roughly in order:
    switching to actually work.
 5. M1, the commented-out code. Pure churn, best done as its own quiet
    pass when nothing else is in flight.
-6. C1 plus the C9 lifetime hazard, as the message-queue change above. The
-   largest piece of work left and the one that retires the most.
+6. C1, C18 and the C9 lifetime hazard, as the message-queue change above. The
+   largest piece of work left and the one that retires the most. C18 is a
+   crash on one startup in six, so it argues for doing this sooner than its
+   place in this list suggests.
 
 M2, the four leaked singletons, is harmless and stays open.

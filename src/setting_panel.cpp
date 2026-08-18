@@ -1,5 +1,6 @@
 #include "setting_panel.h"
 #include "config.h"
+#include "update_dialog.h"
 #include "spdlog/spdlog.h"
 #include "subprocess.hpp"
 
@@ -107,14 +108,7 @@ void SettingPanel::handle_callback(lv_event_t *event) {
       }
     } else if (btn == guppy_update_btn.get_container()) {
       spdlog::trace("update guppy pressed");
-      // TODO: throw this inside the global threadpool to make it async
-      auto update_script = fs::canonical("/proc/self/exe").parent_path() / "update.sh";
-      const fs::path script(update_script);
-      if (fs::exists(script)) {
-	sp::call(script);
-      } else {
-	spdlog::warn("Failed to update Guppy Screen. Did not find update script.");
-      }
+      UpdateDialog::show();
     } else if (btn == printer_select_btn.get_container()) {
       spdlog::trace("setting printers pressed");
       printer_select_panel.foreground();

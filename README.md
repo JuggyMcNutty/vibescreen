@@ -22,6 +22,11 @@ clamped to the printer's own limits read from Klipper.
 
 **A refused command is no longer silent.**
 
+**Update Guppy shows what it is doing.** It used to run the updater on the UI
+thread, so the screen froze for the length of the download and then said
+nothing either way. The update now runs in the background and its output
+appears as it arrives, ending on Update finished or Update failed.
+
 | Extruder options | A rejected command |
 | --- | --- |
 | ![Extruder panel with configurable option lists](screenshots/extrude_retract.png) | ![Dialog reading printer rejected the command](screenshots/gcode_rejected.png) |
