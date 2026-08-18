@@ -264,8 +264,10 @@ void GuppyScreen::show_error(const std::string &message) {
   lv_obj_set_size(error_box, LV_PCT(80), LV_PCT(45));
   lv_obj_center(error_box);
 
+  // Async, or the delete happens with lv_btnmatrix_event still on the stack
+  // and still using the button matrix that closing frees.
   lv_obj_add_event_cb(error_box, [](lv_event_t *e) {
-    lv_msgbox_close(lv_obj_get_parent(lv_event_get_target(e)));
+    lv_msgbox_close_async(lv_obj_get_parent(lv_event_get_target(e)));
   }, LV_EVENT_VALUE_CHANGED, NULL);
 
   // Clear the handle however it goes away, so the next error can open a new one.
