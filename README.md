@@ -1,98 +1,49 @@
 # vibescreen
 
-A touch UI for Klipper printers. It talks to Moonraker over a websocket and
-draws straight to the framebuffer, so there is no X or Wayland underneath and
-nothing else to install alongside it.
+A touch UI for Klipper printers.
 
 This is a maintained fork of [guppyscreen](https://github.com/ballaswag/guppyscreen),
-which stopped receiving commits in July 2024 with 69 issues open.
+which stopped receiving commits in July 2024.
 
 ![Bed mesh drawn as a shaded surface](screenshots/bedmesh.png)
 
-That is a real K1 Max bed, 6x6 probed, 1.988mm from its lowest point to its
-highest.
 
-## What it does
+## What has changed sense guppyscreen?
 
-Print status with thumbnails, a file browser, a console and macro shell, a bed
-mesh viewer, input shaper with frequency response plots, belt calibration, TMC
-metrics and tuning, temperature control, fan, LED and movement control, extrude
-and retract, fine tuning for speed, flow, z-offset and pressure advance,
-velocity and acceleration limits, wifi setup, Spoolman integration, and
-multi-printer support.
-
-| Move | Tuning |
-| --- | --- |
-| ![Move panel](screenshots/move.png) | ![Tuning menu](screenshots/printer_tune.png) |
-
-Most of that is upstream's. What this fork changed:
-
-**The bed mesh panel was rewritten.** Upstream drew the mesh as a table of
-cells tinted by a ramp that saturated at 0.25mm, and only wrote the numbers in
-when the mesh was smaller than 6x6. A K1 Max probes 6x6 by default, so the one
-panel you look at to judge the bed gave you a block of undifferentiated red
-squares with no numbers on it. It now draws onto a canvas, either as a surface
-you drag to rotate or as a flat heatmap, on a diverging scale normalised about
-zero, with a floor so a trammed bed reads as trammed instead of turning eight
-microns of probe noise into a mountain range.
+**The bed mesh panel was rewritten.** 
 
 | Flat heatmap | The probed points |
 | --- | --- |
 | ![Bed mesh as a flat heatmap](screenshots/bedmesh_flat.png) | ![The 36 probed points](screenshots/bedmesh_probed.png) |
 
-The same mesh interpolated, and as the 36 points the probe actually visited.
+**Rewrote the extruder panel and option are configurable and clamped to the
+printer's own limits read from Klipper**
 
-**Bed mesh Calibrate wipes the nozzle first.** A blob of filament on the tip
-gets measured as bed and lands in the mesh as a bump that is not on the plate.
-When the printer has a `WIPE_NOZZLE` macro, Calibrate runs it before probing,
-wrapped in a gcode state save so it cannot leave a modal mode set behind it. On
-a K1, K1C, K1SE or K1 Max that macro comes from
-[ProWiper](https://www.printables.com/model/1023575-prowiper-for-creality-k1-series),
-formerly Advanced Nozzle Wiper, and that mod's own toggle still governs: switch
-wiping off there and the macro is a no-op, so calibration simply proceeds. The
-macro is tested for rather than sent hopefully, because Klipper abandons the
-rest of a script at the first command it does not recognise.
-
-**Bed mesh Calibrate homes only when something is unhomed**, rather than
-re-homing a machine that already is, which is the normal state after a print.
-
-**The input shaper panel was rebuilt.** Upstream put both axes on screen at
-once as two quarter-size plots, with a switch that swapped each plot for its
-numbers so you could never see both. A shaper type it did not have in its own
-list was silently rewritten, so a printer set to `zvd` displayed `3hump_ei` and
-saving wrote that back at the original frequency. It now shows one axis at a
-time across the full width, asks the analysis for a plot the size it will be
-drawn at rather than shrinking a screen-sized one into a corner, and refuses to
-write back a type it does not recognise. Apply sets the shaper live so it can
-be heard before Save commits it, and Save is behind a confirmation because it
-restarts Klipper. A run that fails says what failed instead of leaving a spinner
-going forever, and on a printer without `[resonance_tester]` and an
-accelerometer the button is disabled with the missing section named, rather than
-moving nothing and explaining nothing.
-
-| Input shaper | The same run, as numbers |
-| --- | --- |
-| ![Frequency response for one axis](screenshots/inputshaper.png) | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
-
-**A refused command is no longer silent.** Every gcode reply is checked, and a
-rejection is raised where you pressed the button instead of only in the
-console.
+**A refused command is no longer silent.**
 
 | Extruder options | A rejected command |
 | --- | --- |
 | ![Extruder panel with configurable option lists](screenshots/extrude_retract.png) | ![Dialog reading printer rejected the command](screenshots/gcode_rejected.png) |
 
-**The extruder panel's option lists are configurable** and clamped to the
-printer's own limits read from Klipper, so the temperatures stop where your
-hotend's configuration stops rather than at a hardcoded 240.
+**Bed mesh Calibrate wipes the nozzle first.** When the printer has a `WIPE_NOZZLE` macro, Calibrate runs it before probing,
+On a K1, K1C, K1SE or K1 Max that macro comes from
+[ProWiper](https://www.printables.com/model/1023575-prowiper-for-creality-k1-series),
 
-Underneath: exceptions are contained at the LVGL event callbacks, where one
-escaping used to freeze the UI outright, the websocket client's shared state is
-locked across the two threads that touch it, and parses that could abort the
-process on bad configuration no longer can. [docs/audit.md](docs/audit.md)
-lists all of it, fixed and still open.
+**Bed mesh Calibrate homes only when something is unhomed**
+
+**The input shaper panel was rebuilt.**
+
+| Input shaper with graphs | Input shaper with numbers |
+| --- | --- |
+| ![Frequency response for one axis](screenshots/inputshaper.png) | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
+
+**Underneath: lots of bug fixes and exception handlers.**
 
 The rest of the interface:
+
+| Move | Tuning |
+| --- | --- |
+| ![Move panel](screenshots/move.png) | ![Tuning menu](screenshots/printer_tune.png) |
 
 | Files | WiFi |
 | --- | --- |
@@ -114,28 +65,16 @@ The rest of the interface:
 | --- | --- |
 | ![LED brightness control](screenshots/led.png) | ![Settings menu](screenshots/settings.png) |
 
-The screenshots are the simulator build. Everything showing printer state came
-from the development K1 Max, so the bed mesh, the gcode files, the macros, the
-command list, the limits and the single fan that machine exposes are its own,
-and the network names are blurred for the obvious reason. The numpad, the
-rejected command and both input shaper shots come from
-`tools/fake_moonraker.py`: provoking a refusal on a real printer means sending
-it something bad on purpose, and a resonance run means shaking one for minutes
-per axis. The shaper curve and figures there are synthetic, so read them as the
-layout rather than as a measurement.
-
 ## Scope
 
-Built and tested on a **Creality K1 Max**. That is the machine the work is
-aimed at and the only one anything is verified on.
+Built and tested on my **Creality K1 Max**. That is the machine anything is verified against.
 
-CI also builds two other variants, both inherited from upstream and neither
-tested here:
+we also build for:
 
 - `guppyscreen-smallscreen.tar.gz` for the Ender 3 V3 KE and Nebula Pad
 - `guppyscreen-arm.tar.gz` for aarch64 boards such as a Pi or BTT Pad
 
-They compile on every push. Whether they run is unknown. Treat them as a
+Whether they run is unknown. Treat them as a
 starting point rather than a supported target.
 
 Android is not supported. Upstream shipped an APK built from a separate branch
@@ -215,8 +154,7 @@ them.
 
 Everything it talks to and borrows from:
 
-- [Klipper](https://github.com/Klipper3d/klipper), the firmware this is a front
-  end for, and whose own `calibrate_shaper.py` does the input shaper analysis
+- [Klipper](https://github.com/Klipper3d/klipper), the firmware all this is built around
 - [Moonraker](https://github.com/Arksine/moonraker), the API it speaks to
 - [KlipperScreen](https://github.com/KlipperScreen/KlipperScreen), prior art
   that shaped what a Klipper touch UI should do
