@@ -31,6 +31,17 @@ namespace {
     }
     return j.template get<std::vector<std::vector<double>>>();
   }
+
+  // mesh_min and mesh_max are [x, y] in millimetres. Off the websocket, so
+  // check the shape rather than trusting it.
+  bool corner_from(const json &j, double &x, double &y) {
+    if (!j.is_array() || j.size() != 2 || !j[0].is_number() || !j[1].is_number()) {
+      return false;
+    }
+    x = j[0].template get<double>();
+    y = j[1].template get<double>();
+    return true;
+  }
 }
 
 BedMeshPanel::BedMeshPanel(KWebSocketClient &c, std::mutex &l)
@@ -246,6 +257,27 @@ void BedMeshPanel::refresh_views(json &bm) {
       interp_j = state->get_data("/printer_state/bed_mesh/mesh_matrix"_json_pointer);
     }
     interpolated = matrix_from(interp_j);
+
+    // The bed area the loaded mesh covers, which labels the corners of the 3D
+    // view. This and not the active profile's mesh_params below: an adaptive
+    // calibrate loads a mesh over the objects being printed, which is a
+    // smaller area than the profile it was saved from.
+    auto mesh_min_j = bm["/mesh_min"_json_pointer];
+    if (mesh_min_j.is_null()) {
+      mesh_min_j = state->get_data("/printer_state/bed_mesh/mesh_min"_json_pointer);
+    }
+    auto mesh_max_j = bm["/mesh_max"_json_pointer];
+    if (mesh_max_j.is_null()) {
+      mesh_max_j = state->get_data("/printer_state/bed_mesh/mesh_max"_json_pointer);
+    }
+
+    double min_x = 0.0, min_y = 0.0, max_x = 0.0, max_y = 0.0;
+    if (!corner_from(mesh_min_j, min_x, min_y) || !corner_from(mesh_max_j, max_x, max_y)) {
+      // Zeroes mark the extents unknown, so the last profile's numbers cannot
+      // stay on a mesh they do not describe.
+      min_x = min_y = max_x = max_y = 0.0;
+    }
+    mesh_view.set_extents(min_x, min_y, max_x, max_y);
 
     auto algo = state->get_data(json::json_pointer(
         fmt::format("/printer_state/bed_mesh/profiles/{}/mesh_params/algo", active_profile)));

@@ -104,6 +104,10 @@ MeshView::MeshView(lv_obj_t *parent, lv_coord_t w, lv_coord_t h)
   , plot_x1(w - 3)
   , plot_y1(h - 3)
   , bg(lv_color_black())
+  , ext_min_x(0.0)
+  , ext_min_y(0.0)
+  , ext_max_x(0.0)
+  , ext_max_y(0.0)
   , zmin(0.0)
   , zmax(0.0)
   , zref(0.0)
@@ -210,7 +214,17 @@ void MeshView::set_mesh(const std::vector<std::vector<double>> &m) {
 void MeshView::clear() {
   mesh.clear();
   zmin = zmax = zref = 0.0;
+  // Or the next mesh to arrive without extents would be labelled with the
+  // cleared one's bed area.
+  ext_min_x = ext_min_y = ext_max_x = ext_max_y = 0.0;
   render();
+}
+
+void MeshView::set_extents(double min_x, double min_y, double max_x, double max_y) {
+  ext_min_x = min_x;
+  ext_min_y = min_y;
+  ext_max_x = max_x;
+  ext_max_y = max_y;
 }
 
 void MeshView::set_mode(Mode m) {
@@ -219,6 +233,10 @@ void MeshView::set_mode(Mode m) {
   }
   mode = m;
   render();
+}
+
+lv_color_t MeshView::ink() const {
+  return lv_color_brightness(bg) > 140 ? lv_color_black() : lv_color_white();
 }
 
 void MeshView::fill_background() {
@@ -281,9 +299,7 @@ void MeshView::render_legend() {
   lv_draw_label_dsc_t dsc;
   lv_draw_label_dsc_init(&dsc);
   dsc.font = &lv_font_montserrat_8;
-  // These sit on the canvas background, which follows the theme, so pick the
-  // contrasting ink rather than assuming the dark theme.
-  dsc.color = lv_color_brightness(bg) > 140 ? lv_color_black() : lv_color_white();
+  dsc.color = ink();
 
   // The scale is symmetric, so its ends are the reference and its middle is
   // always zero. Labelling all three makes both facts visible.
@@ -476,6 +492,109 @@ void MeshView::render_surface() {
       edge_dsc.color = shaded_color_at(zavg, shade * 0.6);
       lv_canvas_draw_line(canvas, poly, 5, &edge_dsc);
     }
+  }
+
+  // Last, so nothing is drawn over the labels.
+  render_axes(cam);
+}
+
+// Which corner of the render is which corner of the bed, which the surface
+// alone cannot say and dragging it makes worse. Three corners of the z=0 plane
+// get labelled: the one nearest the viewer with both its coordinates, and the
+// two either side of it with the axis running along the edge between. The
+// fourth is the far one, behind the surface, where a label would read as
+// belonging to whatever it landed on.
+void MeshView::render_axes(const Camera &cam) {
+  // The same corners in the same order as the frame drawn above.
+  static const double corner_x[4] = {-1.0, 1.0, 1.0, -1.0};
+  static const double corner_y[4] = {-1.0, -1.0, 1.0, 1.0};
+
+  // Nearest corner by the depth the quads are sorted on, evaluated at z=0.
+  // Whichever it turns out to be, its neighbours in this order are the far
+  // ends of the two edges meeting there, and each differs from it in exactly
+  // one axis: the axis that edge runs along.
+  int near_i = 0;
+  double nearest = -1e30;
+  for (int i = 0; i < 4; i++) {
+    const double d =
+      (corner_x[i] * cam.cos_yaw + corner_y[i] * cam.sin_yaw) * cam.cos_elev;
+    if (d > nearest) {
+      nearest = d;
+      near_i = i;
+    }
+  }
+
+  lv_draw_label_dsc_t dsc;
+  lv_draw_label_dsc_init(&dsc);
+  dsc.font = &lv_font_montserrat_8;
+  dsc.color = ink();
+
+  // Tipped towards plan view the plane fills the plot and there is no longer
+  // an outside to put a label in, so each one carries a little of the
+  // background with it. Otherwise white text lands on the pale end of the
+  // colour scale and disappears.
+  lv_draw_rect_dsc_t chip_dsc;
+  lv_draw_rect_dsc_init(&chip_dsc);
+  chip_dsc.bg_color = bg;
+  chip_dsc.bg_opa = LV_OPA_70;
+  chip_dsc.radius = 2;
+
+  const lv_point_t mid = to_screen(cam, 0.0, 0.0, 0.0);
+
+  auto draw_at = [&](int i, const char *txt) {
+    lv_point_t size;
+    lv_txt_get_size(&size, txt, dsc.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+    const lv_point_t p = to_screen(cam, corner_x[i], corner_y[i], 0.0);
+    const double dx = p.x - mid.x;
+    const double dy = p.y - mid.y;
+    const double len = std::sqrt(dx * dx + dy * dy);
+    const double push = len > 1.0 ? 8.0 / len : 0.0;
+    // Away from the plane, then down. All three labelled corners are in the
+    // lower half of the projection, so down is further out for each of them,
+    // and the camera only leaves a few pixels of horizontal slack to work
+    // with while there is always room below.
+    lv_coord_t x = static_cast<lv_coord_t>(std::lround(p.x + dx * push)) - size.x / 2;
+    lv_coord_t y = static_cast<lv_coord_t>(std::lround(p.y + dy * push + 10.0)) - size.y / 2;
+    // Measured rather than guessed at, so this keeps the text itself inside
+    // the plot and off the colour scale.
+    x = std::max<lv_coord_t>(plot_x0, std::min<lv_coord_t>(x, plot_x1 - size.x));
+    y = std::max<lv_coord_t>(plot_y0, std::min<lv_coord_t>(y, plot_y1 - size.y));
+    lv_canvas_draw_rect(canvas, x - 2, y - 1, size.x + 4, size.y + 2, &chip_dsc);
+    lv_canvas_draw_text(canvas, x, y, size.x, &dsc, txt);
+  };
+
+  if (!has_extents()) {
+    // No mesh_min from the printer. Which way the axes run is still worth
+    // having, even without the millimetres.
+    for (int step : {1, 3}) {
+      const int i = (near_i + step) % 4;
+      draw_at(i, corner_x[i] != corner_x[near_i] ? "X" : "Y");
+    }
+    return;
+  }
+
+  auto mm_x = [&](int i) {
+    return ext_min_x + (corner_x[i] + 1.0) / 2.0 * (ext_max_x - ext_min_x);
+  };
+  auto mm_y = [&](int i) {
+    return ext_min_y + (corner_y[i] + 1.0) / 2.0 * (ext_max_y - ext_min_y);
+  };
+
+  // Whole millimetres. A tenth of a millimetre says nothing about which way
+  // round the bed is and costs the width of two more digits.
+  char txt[24];
+  snprintf(txt, sizeof(txt), "%.0f, %.0f", mm_x(near_i), mm_y(near_i));
+  draw_at(near_i, txt);
+
+  for (int step : {1, 3}) {
+    const int i = (near_i + step) % 4;
+    if (corner_x[i] != corner_x[near_i]) {
+      snprintf(txt, sizeof(txt), "X %.0f", mm_x(i));
+    } else {
+      snprintf(txt, sizeof(txt), "Y %.0f", mm_y(i));
+    }
+    draw_at(i, txt);
   }
 }
 

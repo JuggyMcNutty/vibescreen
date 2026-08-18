@@ -28,6 +28,12 @@ class MeshView {
   void set_mesh(const std::vector<std::vector<double>> &m);
   void clear();
 
+  // The bed area the mesh covers, in millimetres, used to label the corners of
+  // the surface view. Stored rather than drawn: every path that changes the
+  // extents goes on to replace the mesh, and set_mesh renders, so rendering
+  // here as well would only draw the same frame twice.
+  void set_extents(double min_x, double min_y, double max_x, double max_y);
+
   void set_mode(Mode m);
   Mode get_mode() const { return mode; }
 
@@ -77,7 +83,17 @@ class MeshView {
   void render_surface();
   void render_flat();
   void render_legend();
+  // Bed coordinates on the corners of the z=0 plane, so a rotated surface can
+  // still be matched to the machine.
+  void render_axes(const Camera &cam);
   void fill_background();
+
+  // A degenerate rectangle means the extents are unknown, which is what a mesh
+  // whose bed_mesh update carried no mesh_min leaves behind.
+  bool has_extents() const { return ext_max_x > ext_min_x && ext_max_y > ext_min_y; }
+  // Whichever ink contrasts with the canvas background, which follows the
+  // theme and so cannot be assumed dark.
+  lv_color_t ink() const;
 
   // Projects every mesh point and returns the camera that was fitted to them,
   // so anything else drawn in the same space can reuse it.
@@ -100,6 +116,12 @@ class MeshView {
   lv_color_t bg;
 
   std::vector<std::vector<double>> mesh;
+  // The bed area the mesh spans, in millimetres. Row 0 column 0 of the matrix
+  // is the min x, min y corner.
+  double ext_min_x;
+  double ext_min_y;
+  double ext_max_x;
+  double ext_max_y;
   double zmin;
   double zmax;
   // Half width of the colour scale, max(|zmin|, |zmax|). Zero for a mesh of

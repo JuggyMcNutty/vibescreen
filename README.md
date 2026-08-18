@@ -9,7 +9,9 @@ which stopped receiving commits in July 2024.
 
 ## What has changed since guppyscreen?
 
-**The bed mesh panel was rewritten.**
+**The bed mesh panel was rewritten.** The 3D view labels the corners of its
+ground plane with the bed's own coordinates, so the mesh can still be matched to
+the machine after dragging it round.
 
 | Flat heatmap | The probed points |
 | --- | --- |
