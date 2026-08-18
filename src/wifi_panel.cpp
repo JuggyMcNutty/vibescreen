@@ -11,6 +11,44 @@
 
 LV_IMG_DECLARE(back);
 
+// LVGL's stock symbol page leaves ^, ~, | and ` unreachable, and all four are
+// legal in a WPA passphrase, so a randomly generated one could simply not be
+// typed. Upstream #146: a user with a ^ in their password had no way to get
+// onto their network and no SSH to fall back on.
+//
+// This is LVGL's own default_kb_map_spec with a fifth row carrying the four,
+// alongside the punctuation that was already reachable but on the other page,
+// so a password can be typed without switching back and forth.
+#define KB_BTN(w) (LV_BTNMATRIX_CTRL_POPOVER | (w))
+
+// Not const-qualified on the pointers: lv_keyboard_set_map takes const char**
+// rather than const char* const*, so the map has to match.
+static const char *kb_map_spec[] = {
+  "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", LV_SYMBOL_BACKSPACE, "\n",
+  "abc", "+", "&", "/", "*", "=", "%", "!", "?", "#", "<", ">", "\n",
+  "\\", "@", "$", "(", ")", "{", "}", "[", "]", ";", "\"", "'", "\n",
+  "^", "~", "|", "`", "-", "_", ":", ".", ",", "\n",
+  LV_SYMBOL_KEYBOARD, LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t kb_ctrl_spec_map[] = {
+  KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1),
+  KB_BTN(1), KB_BTN(1), KB_BTN(1), LV_BTNMATRIX_CTRL_CHECKED | 2,
+
+  LV_KEYBOARD_CTRL_BTN_FLAGS | 2, KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1),
+  KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1),
+
+  KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1),
+  KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1),
+
+  KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1),
+  KB_BTN(1), KB_BTN(1),
+
+  LV_KEYBOARD_CTRL_BTN_FLAGS | 2, LV_BTNMATRIX_CTRL_CHECKED | 2, 6,
+  LV_BTNMATRIX_CTRL_CHECKED | 2, LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+
 static void draw_part_event_cb(lv_event_t * e)
 {
   lv_obj_t * obj = lv_event_get_target(e);
@@ -86,6 +124,8 @@ WifiPanel::WifiPanel(std::mutex &l)
   lv_obj_set_size(password_input, LV_PCT(80), LV_SIZE_CONTENT);
   lv_textarea_set_password_mode(password_input, true);
   lv_textarea_set_one_line(password_input, true);
+
+  lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec_map);
 
   lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_event_cb(password_input, &WifiPanel::_handle_kb_input, LV_EVENT_FOCUSED, this);
