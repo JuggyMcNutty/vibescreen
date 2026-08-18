@@ -1,3 +1,5 @@
+#include "utils.h"
+
 #include "hv/requests.h"
 #include "hv/hurl.h"
 #include "config.h"
@@ -73,6 +75,107 @@ namespace KUtils {
 		   [](unsigned char c) { return std::tolower(c); });
 
     return settings.contains(want);
+  }
+
+  double config_number(const std::string &section,
+		       const std::string &key,
+		       double fallback) {
+    auto &settings = State::get_instance()
+      ->get_data("/printer_state/configfile/settings"_json_pointer);
+    if (!settings.is_object()) {
+      return fallback;
+    }
+
+    std::string want = section;
+    std::transform(want.begin(), want.end(), want.begin(),
+		   [](unsigned char c) { return std::tolower(c); });
+
+    if (!settings.contains(want)) {
+      return fallback;
+    }
+
+    auto &v = settings[want];
+    if (!v.is_object() || !v.contains(key)) {
+      return fallback;
+    }
+
+    // Klipper types these properly in settings, unlike the raw config text it
+    // also serves, but a gcode_macro variable can still arrive as a string.
+    auto &n = v[key];
+    if (n.is_number()) {
+      return n.template get<double>();
+    }
+    if (n.is_string()) {
+      return parse_double(n.template get<std::string>(), fallback);
+    }
+    return fallback;
+  }
+
+  // The value below which an [output_pin] fan does not turn at all.
+  //
+  // Creality keeps these in the PRINTER_PARAM macro's variables, one per fan,
+  // named after the pin: fan2_min for output_pin fan2. Measured on a K1 Max
+  // they are 25, 50 and 180 out of 255 for the toolhead, back and side fans.
+  // Their own M106 maps a requested speed onto min..255 so that the whole
+  // control does something.
+  //
+  // Zero on anything that does not have the macro, which makes the mapping
+  // below the identity and is what a non-Creality machine wants.
+  static double fan_min_raw(const std::string &fan_id) {
+    auto &v = State::get_instance()->get_data(json::json_pointer(
+	fmt::format("/printer_state/gcode_macro PRINTER_PARAM/{}_min",
+		    get_obj_name(fan_id))));
+    if (v.is_number()) {
+      return v.template get<double>();
+    }
+    if (v.is_string()) {
+      return parse_double(v.template get<std::string>(), 0.0);
+    }
+    return 0.0;
+  }
+
+  // What VALUE is measured in. 255 on a K1, 1 by default in Klipper.
+  //
+  // Falls back to 255 rather than to Klipper's own default, because that is
+  // what this code sent unconditionally before it asked, and the only way to
+  // reach the fallback is the config not being readable at all.
+  static double fan_scale(const std::string &fan_id) {
+    double scale = config_number(fan_id, "scale", 255.0);
+    return scale > 0.0 ? scale : 255.0;
+  }
+
+  double fan_pct_to_raw(const std::string &fan_id, int pct) {
+    if (pct <= 0) {
+      // Off is off. Creality's M106 does the same: it only applies the minimum
+      // when a non-zero speed was asked for, so that S0 really stops the fan
+      // rather than parking it at its slowest turning speed.
+      return 0.0;
+    }
+
+    double scale = fan_scale(fan_id);
+    double min = fan_min_raw(fan_id);
+    if (min <= 0.0 || min >= scale) {
+      return scale * pct / 100.0;
+    }
+
+    return min + (scale - min) * pct / 100.0;
+  }
+
+  int fan_value_to_pct(const std::string &fan_id, double value) {
+    double scale = fan_scale(fan_id);
+    double raw = value * scale;
+    double min = fan_min_raw(fan_id);
+
+    double pct = (min <= 0.0 || min >= scale)
+      ? raw * 100.0 / scale
+      : (raw - min) * 100.0 / (scale - min);
+
+    // A pin sitting just under the minimum is a fan that is not turning, and
+    // the arithmetic gives a small negative for it.
+    if (pct < 0.0) {
+      return 0;
+    }
+    return pct > 100.0 ? 100 : static_cast<int>(pct + 0.5);
   }
 
   bool is_running_local() {

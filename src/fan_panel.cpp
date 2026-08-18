@@ -44,7 +44,7 @@ void FanPanel::consume(json &j) {
     // hack for output_pin fans
     auto fan_value = j[json::json_pointer(fmt::format("/params/0/{}/value", f.first))];
     if (!fan_value.is_null()) {
-      int v = static_cast<int>(fan_value.template get<double>() * 100);
+      int v = KUtils::fan_value_to_pct(f.first, fan_value.template get<double>());
       f.second->update_value(v);
     }
 
@@ -93,7 +93,7 @@ void FanPanel::foreground() {
     auto fan_value = State::get_instance()
       ->get_data(json::json_pointer(fmt::format("/printer_state/{}/value", f.first)));
     if (!fan_value.is_null()) {
-      int v = static_cast<int>(fan_value.template get<double>() * 100);
+      int v = KUtils::fan_value_to_pct(f.first, fan_value.template get<double>());
       f.second->update_value(v);
     }
 
@@ -119,18 +119,25 @@ void FanPanel::handle_callback(lv_event_t *event) {
   }
 }
 
+// The slider speaks 0 to 100. What SET_PIN wants is a raw value in whatever
+// unit the pin's scale says, offset past the point where the fan starts to
+// turn. KUtils::fan_pct_to_raw does both, and is the identity on a machine
+// whose fans have no minimum.
+//
+// Before it did, the slider wrote raw values straight through, so on a K1 Max
+// the Side Fan did nothing at all until it passed 71 percent, the Back Fan
+// until 20 and the Toolhead Fan until 10. Measured: those fans need 180, 50
+// and 25 of 255 respectively to move.
 void FanPanel::handle_fan_update(lv_event_t *event) {
   lv_obj_t *obj = lv_event_get_target(event);
 
   if (lv_event_get_code(event) == LV_EVENT_RELEASED) {
-    double pct = 255 * (double)lv_slider_get_value(obj) / 100.0;
-
-    spdlog::trace("updating fan speed to {}", pct);
     for (auto &f : fans) {
       if (obj == f.second->get_slider()) {
 	std::string fan_name = KUtils::get_obj_name(f.first);
-      	spdlog::trace("update fan {}", fan_name);
-	ws.gcode_script(fmt::format(fmt::format("SET_PIN PIN={} VALUE={}", fan_name, pct)));
+	double raw = KUtils::fan_pct_to_raw(f.first, lv_slider_get_value(obj));
+	spdlog::trace("update fan {} to {}", fan_name, raw);
+	ws.gcode_script(fmt::format("SET_PIN PIN={} VALUE={:.4g}", fan_name, raw));
 	break;
       }
     }
@@ -145,8 +152,9 @@ void FanPanel::handle_fan_update(lv_event_t *event) {
 	break;
       } else if (obj == f.second->get_max()) {
 	std::string fan_name = KUtils::get_obj_name(f.first);
+	double raw = KUtils::fan_pct_to_raw(f.first, 100);
 	spdlog::trace("turning fan to max {}", fan_name);
-	ws.gcode_script(fmt::format("SET_PIN PIN={} VALUE=255", fan_name));
+	ws.gcode_script(fmt::format("SET_PIN PIN={} VALUE={:.4g}", fan_name, raw));
 	f.second->update_value(100);
 	break;
       }

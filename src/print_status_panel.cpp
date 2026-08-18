@@ -192,7 +192,10 @@ void PrintStatusPanel::init(json &fans) {
     auto fan_value = State::get_instance()
       ->get_data(json::json_pointer(fmt::format("/printer_state/{}/value", fan_name)));    
     if (!fan_value.is_null()) {
-      int v = static_cast<int>(fan_value.template get<double>() * 100);
+      // Same mapping the fan panel's sliders use, so the two agree and so that
+      // the number here means what the slicer asked for rather than the raw
+      // duty cycle. See KUtils::fan_value_to_pct.
+      int v = KUtils::fan_value_to_pct(fan_name, fan_value.template get<double>());
       fan_speeds.insert({fan_name, v});
       values.push_back(fmt::format("{}%", v));
     }
@@ -369,7 +372,7 @@ void PrintStatusPanel::consume(json &j) {
     int fv = f.second;
     auto fan_value = j[json::json_pointer(fmt::format("/params/0/{}/value", fan_name))];
     if (!fan_value.is_null()) {
-      fv = static_cast<int>(fan_value.template get<double>() * 100);
+      fv = KUtils::fan_value_to_pct(fan_name, fan_value.template get<double>());
       f.second = fv;
     }
 

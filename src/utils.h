@@ -69,6 +69,28 @@ namespace KUtils {
   // Hex colour values out of theme files and the Spoolman API.
   uint32_t parse_hex(const std::string &s, uint32_t fallback);
 
+  // A number out of the live Klipper config, by section and key.
+  //
+  // Klipper lowercases section names in configfile.settings while
+  // printer.objects.list preserves whatever case printer.cfg used, so a lookup
+  // keyed on an object name has to be lowercased first. output_pin LED on a K1
+  // is the one that catches this.
+  double config_number(const std::string &section,
+		       const std::string &key,
+		       double fallback);
+
+  // Converting between the 0 to 100 the fan sliders speak and the raw value
+  // SET_PIN takes for an [output_pin] fan.
+  //
+  // Two things are in the way of it being a plain multiply. The pin's scale
+  // decides what unit VALUE is in, 255 on a K1 and 1 by default elsewhere. And
+  // Creality's fans do not turn at all below a minimum, held in the
+  // PRINTER_PARAM macro's variables, which their own M106 maps around so the
+  // whole control is useful. fan_value_to_pct takes the normalised 0 to 1
+  // Klipper reports in an output_pin's status, not the raw value.
+  double fan_pct_to_raw(const std::string &fan_id, int pct);
+  int fan_value_to_pct(const std::string &fan_id, double value);
+
   template<typename T, typename U> void sort_map_values(std::map<T, U> v,
 							std::vector<U> &out_vect,
 							std::function<bool(U&, U&)> sorter) {

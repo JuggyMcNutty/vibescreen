@@ -101,6 +101,12 @@ void InitPanel::connected(KWebSocketClient &ws) {
 	    std::string obj_name = obj.template get<std::string>();
 	    if (obj_name.rfind("gcode_macro ", 0 ) != 0) {
 	      sub_objs[obj_name] = nullptr;
+	    } else if (obj_name == "gcode_macro PRINTER_PARAM") {
+	      // Macros are skipped because there are dozens of them and no panel
+	      // wants their status. This one is the exception: Creality keeps the
+	      // minimum value each fan will actually turn at in its variables, and
+	      // the fan sliders are wrong without them. See KUtils::fan_pct_to_raw.
+	      sub_objs[obj_name] = nullptr;
 	    }
 	  }
 
