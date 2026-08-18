@@ -44,27 +44,51 @@ SensorContainer::SensorContainer(KWebSocketClient &c,
     lv_obj_set_size(sensor_cont, 330 * width_scale, 60 * height_scale);
     lv_obj_set_style_pad_all(sensor_cont, 0, 0);
 
+    // A flex row rather than five hand placed alignments, because the old
+    // arrangement broke in both directions at once.
+    //
+    // Every label had a fixed width and LVGL's default long mode is
+    // LV_LABEL_LONG_WRAP, so a three digit temperature was wider than its box
+    // and folded onto a second line: "204/" above "205". The widths scaled with
+    // the horizontal resolution while the font is chosen from the vertical one
+    // (src/main.cpp), so which displays hit it did not follow from either
+    // number on its own. Upstream #116, #91 and #41 are all this.
+    //
+    // The name had no width bound at all and was aligned out-right of the icon,
+    // so a long one ran underneath the value instead: the home screen on the
+    // development printer read "Temperature Fan 20Chamber Fan", one sensor's
+    // value sitting on top of the next sensor's name. That is audit M5.
+    //
+    // Flex fixes both: the name takes what is left over and ellipsizes, and the
+    // numbers size to their content so a wide value pushes its neighbours along
+    // rather than wrapping. Hidden children are skipped by the layout, so a
+    // sensor with no target still fills the row.
+    lv_obj_set_flex_flow(sensor_cont, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(sensor_cont, LV_FLEX_ALIGN_START,
+			  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
     lv_img_set_src(sensor_img, img);
-    lv_obj_align(sensor_img, LV_ALIGN_LEFT_MID, 0, 0);
 
     lv_label_set_text(sensor_label, text);
-    lv_obj_align_to(sensor_label, sensor_img, LV_ALIGN_OUT_RIGHT_MID, -7 * width_scale, 0);
+    lv_label_set_long_mode(sensor_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_flex_grow(sensor_label, 1);
 
+    // Minimum widths rather than fixed ones, so the columns still line up
+    // across rows at the two digits that are the common case, without stopping
+    // a third digit from fitting.
     lv_label_set_text(value_label, "0");
-    lv_obj_set_width(value_label, 50 * width_scale);
-    lv_obj_align(value_label, LV_ALIGN_RIGHT_MID, -75 * width_scale, 0);
+    lv_obj_set_style_min_width(value_label, 50 * width_scale, 0);
     lv_obj_set_style_pad_all(value_label, 8 * width_scale, 0);
+    lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_RIGHT, 0);
 
     lv_label_set_text(divider_label, "/");
-    lv_obj_set_width(divider_label, 50 * width_scale);
-    lv_obj_align(divider_label, LV_ALIGN_RIGHT_MID, -32 * width_scale, 0);
     lv_obj_set_style_pad_all(divider_label, 8 * width_scale, 0);
 
     if (show_target || can_edit) {
       lv_label_set_text(target_label, "0");
-      lv_obj_set_width(target_label, 60 * width_scale);
-      lv_obj_align(target_label, LV_ALIGN_RIGHT_MID, 0, 0);
+      lv_obj_set_style_min_width(target_label, 44 * width_scale, 0);
       lv_obj_set_style_pad_all(target_label, 8 * width_scale, 0);
+      lv_obj_set_style_text_align(target_label, LV_TEXT_ALIGN_CENTER, 0);
     } else {
       lv_obj_add_flag(target_label, LV_OBJ_FLAG_HIDDEN);
       lv_obj_add_flag(divider_label, LV_OBJ_FLAG_HIDDEN);

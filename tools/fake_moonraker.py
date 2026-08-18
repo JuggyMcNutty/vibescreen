@@ -345,6 +345,11 @@ STATUS = {
     "output_pin fan2": {"value": 0.0},
     "temperature_sensor chamber_temp": {"temperature": 21.4, "measured_min_temp": 19.8,
                                         "measured_max_temp": 46.2},
+    # Two more with long display names, because a K1 Max reports these and they
+    # are what made the home screen's rows overlap: the name had no width bound
+    # and ran underneath the next row's value. See audit M5.
+    "temperature_fan chamber_fan": {"temperature": 21.4, "target": 75.0, "speed": 0.0},
+    "temperature_fan soc_fan": {"temperature": 33.3, "target": 45.0, "speed": 0.0},
 
     # Creality keeps the value below which each fan does not turn at all in
     # this macro's variables. The panel needs them to map its slider onto the
@@ -360,6 +365,9 @@ STATUS["configfile"]["settings"].update({
     "output_pin fan1": {"pwm": True, "scale": 255.0, "value": 0.0},
     "output_pin fan2": {"pwm": True, "scale": 255.0, "value": 0.0},
     "temperature_sensor chamber_temp": {"sensor_type": "EPCOS 100K B57560G104F"},
+    "temperature_fan chamber_fan": {"sensor_type": "EPCOS 100K B57560G104F",
+                                    "target_temp": 75.0},
+    "temperature_fan soc_fan": {"sensor_type": "temperature_mcu", "target_temp": 45.0},
 })
 
 # The sections the panel checks before offering to calibrate or save. Neither

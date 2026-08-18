@@ -270,6 +270,26 @@ void MainPanel::create_sensors(json &temp_sensors) {
 			   display_name.c_str(), color_code, controllable, false, numpad, key,
         		   temp_chart, temp_series)});
   }
+
+  // Nothing bounded how many rows were laid out. A printer with more
+  // temperature sensors than fit ran them off the bottom of the container and
+  // under the temperature chart, where only a sliver of the colour bar showed.
+  // The development K1 Max has five, and four is what fits. Audit M5.
+  //
+  // Scrolling rather than truncating, which is what the fan and LED panels
+  // already do when they overflow, so nothing is hidden outright.
+  lv_obj_update_layout(temp_cont);
+  lv_coord_t needed = 0;
+  for (auto &s : sensors) {
+    needed += lv_obj_get_height(s.second->get_sensor());
+  }
+
+  if (needed > lv_obj_get_content_height(temp_cont)) {
+    lv_obj_add_flag(temp_cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(temp_cont, LV_DIR_VER);
+  } else {
+    lv_obj_clear_flag(temp_cont, LV_OBJ_FLAG_SCROLLABLE);
+  }
 }
 
 void MainPanel::create_fans(json &fans) {

@@ -527,7 +527,7 @@ root unconditionally, and `src/config.cpp` defaulted `log_path` to
 and for the Debian target. Worked around today by generating a config in
 `scripts/build.sh`, but the defaults should be platform-conditional.
 
-### M5. Home panel sensor rows overlap and clip (open)
+### M5. Home panel sensor rows overlap and clip (fixed)
 
 Visible in `screenshots/home.png`, captured against the development K1 Max on
 2026-08-16. That machine reports two extra temperature sensors beyond the
@@ -545,6 +545,20 @@ them than fit overruns the space the chart occupies.
 
 Cosmetic rather than dangerous, but it is on the first screen you see, and it
 is why the home panel is not in the README's gallery.
+
+`SensorContainer` is a flex row now, so the name takes what is left over and
+ellipsises rather than growing under the value, and the numbers size to their
+content so a three digit temperature pushes its neighbours along instead of
+wrapping onto a second line. That second half is upstream #116, #91 and #41,
+which are the same code seen from the other side: fixed label widths scaled
+with the horizontal resolution while `src/main.cpp` picks the font from the
+vertical one, so which displays wrapped did not follow from either number
+alone.
+
+`MainPanel::create_sensors` now scrolls the list when it does not fit, the same
+way `FanPanel` and `LedPanel` already did, rather than running rows off the
+bottom. Driven in the simulator with the five sensors the development K1 Max
+reports.
 
 ---
 
@@ -590,7 +604,7 @@ have to be undone to get there.
 
 ## Suggested order
 
-Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, B1 to B6, M3, M4, and the
+Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, B1 to B6, M3, M4, M5, and the
 `KUtils` parse helpers.
 
 Remaining, roughly in order:
@@ -599,15 +613,13 @@ Remaining, roughly in order:
    exception containment is complete rather than nearly complete. Two of them
    went with C13 to C17, the pair behind `ButtonContainer`'s prompt, because
    that prompt gained a second caller.
-2. M5, the overlapping sensor rows. Small, and it is the first screen anyone
-   sees on a printer with more than two temperature sensors.
-3. C7, the non-blocking heat change. Behavioural, wants its own discussion.
-4. C11, the panel destructor double-delete. Latent until something tears a
+2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+3. C11, the panel destructor double-delete. Latent until something tears a
    panel down, and a mechanical sweep once someone wants multi-printer
    switching to actually work.
-5. M1, the commented-out code. Pure churn, best done as its own quiet
+4. M1, the commented-out code. Pure churn, best done as its own quiet
    pass when nothing else is in flight.
-6. C1, C18 and the C9 lifetime hazard, as the message-queue change above. The
+5. C1, C18 and the C9 lifetime hazard, as the message-queue change above. The
    largest piece of work left and the one that retires the most. C18 is a
    crash on one startup in six, so it argues for doing this sooner than its
    place in this list suggests.
