@@ -30,6 +30,9 @@ the panel does not list gets in front of it, and --no-shaper-config withholds
 the config sections the panel checks before offering to calibrate.
 
 Received gcode is appended to $GCODE_LOG, default /tmp/guppy_gcode_received.txt.
+
+--print [complete|cancelled|error] walks a print from standby to that ending,
+over --print-seconds seconds, default 30.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 """
 import asyncio, json, math, os, re, shlex, struct, sys, time, zlib
@@ -56,6 +59,12 @@ GCODE_LOG = os.environ.get("GCODE_LOG", "/tmp/guppy_gcode_received.txt")
 # Pretend the ProWiper mod is installed, so the bed mesh panel's check for it
 # can be exercised both ways round.
 EXTRA_OBJECTS = ["gcode_macro WIPE_NOZZLE"] if "--wiper" in sys.argv else []
+
+# Walk a print from standby through to a finish, so the print status panel can
+# be watched doing the thing it gets wrong: reaching the end and staying there.
+# The value is how the run ends, and how many seconds it takes to get there.
+PRINT_RUN = None
+PRINT_SECONDS = 30.0
 
 
 def _arg_value(name, default):
@@ -188,6 +197,10 @@ def build_bed_mesh(shape):
     }
 
 SHAPER_MODES = ("normal", "slow", "fail", "timeout")
+PRINT_MODES = ("complete", "cancelled", "error")
+PRINT_RUN = _mode_value("--print", "complete", PRINT_MODES)
+PRINT_SECONDS = float(_arg_value("--print-seconds", "30"))
+
 SHAPER = _mode_value("--shaper", "normal", SHAPER_MODES)
 SHAPER_LOCK = None
 # The configured shaper type to report for X. Worth being able to set, because
@@ -371,6 +384,16 @@ if SHAPER_CONFIG:
     })
 
 
+# Enough of a gcodes root to populate the file browser and to answer the
+# metadata request the print status panel fires when a print starts. No
+# thumbnails: those are fetched over HTTP, which this does not serve.
+FILES = [
+    {"path": "fake_benchy.gcode", "modified": time.time() - 60, "size": 2118400},
+    {"path": "calibration/first_layer.gcode", "modified": time.time() - 86400,
+     "size": 184320},
+]
+
+
 def result_for(method, params):
     if method == "server.info":
         return {"klippy_connected": True, "klippy_state": "ready",
@@ -392,7 +415,15 @@ def result_for(method, params):
     if method == "printer.gcode.help":
         return {}
     if method == "server.files.list":
-        return []
+        return FILES
+    if method == "server.files.metadata":
+        for f in FILES:
+            if f["path"] == params.get("filename"):
+                return dict(f, estimated_time=int(PRINT_SECONDS),
+                            layer_count=120, first_layer_height=0.2,
+                            layer_height=0.2, object_height=24.0,
+                            filament_total=4210.0, thumbnails=[])
+        return {}
     if method == "machine.system_info":
         return {"system_info": {"cpu_info": {"cpu_count": 2}}}
     return {}
@@ -554,6 +585,56 @@ async def shaper_effect_of(ws, script):
                 await run_shaper_analysis(ws, _shell_params(line))
 
 
+async def run_print(ws):
+    """Drive print_stats and virtual_sdcard from standby to a finish.
+
+    The end is the part worth reproducing. virtual_sdcard.progress is file
+    position over file size, so it approaches 1.0 without necessarily reaching
+    it, and print_stats.state goes to complete while it is still short. A panel
+    that only trusts progress therefore stops at 99 and never dismisses, which
+    is upstream #94 and #103.
+    """
+    async def push(delta):
+        await ws.send(json.dumps({"jsonrpc": "2.0", "method": "notify_status_update",
+                                  "params": [delta, time.time()]}))
+
+    await asyncio.sleep(3.0)
+    name = "fake_benchy.gcode"
+    STATUS["print_stats"].update({"state": "printing", "filename": name,
+                                  "print_duration": 0.0,
+                                  "info": {"total_layer": 120, "current_layer": 0}})
+    STATUS["virtual_sdcard"].update({"is_active": True, "progress": 0.0})
+    await push({"print_stats": STATUS["print_stats"],
+                "virtual_sdcard": STATUS["virtual_sdcard"]})
+    print(f"fake print started, {PRINT_RUN} in {PRINT_SECONDS:.0f}s", flush=True)
+
+    steps = 40
+    for i in range(1, steps + 1):
+        await asyncio.sleep(PRINT_SECONDS / steps)
+        # Deliberately stops just short of 1.0. Klipper does the same, because
+        # the end gcode runs after the last position the slicer wrote.
+        progress = 0.994 * i / steps
+        STATUS["virtual_sdcard"]["progress"] = progress
+        STATUS["print_stats"]["print_duration"] = PRINT_SECONDS * i / steps
+        STATUS["print_stats"]["info"]["current_layer"] = int(120 * i / steps)
+        await push({"virtual_sdcard": {"progress": progress},
+                    "print_stats": {
+                        "print_duration": STATUS["print_stats"]["print_duration"],
+                        "info": STATUS["print_stats"]["info"]}})
+
+    STATUS["print_stats"]["state"] = PRINT_RUN
+    STATUS["virtual_sdcard"]["is_active"] = False
+    delta = {"print_stats": {"state": PRINT_RUN},
+             "virtual_sdcard": {"is_active": False}}
+    if PRINT_RUN != "complete":
+        # Klipper clears the filename when a run is abandoned. That empty string
+        # is what used to pull a blank status panel to the front.
+        STATUS["print_stats"]["filename"] = ""
+        delta["print_stats"]["filename"] = ""
+    await push(delta)
+    print(f"fake print ended: {PRINT_RUN}", flush=True)
+
+
 async def handler(ws):
     print("guppyscreen connected", flush=True)
 
@@ -570,6 +651,7 @@ async def handler(ws):
                 return
 
     pusher = asyncio.create_task(push_status())
+    printer = asyncio.create_task(run_print(ws)) if PRINT_RUN else None
     # Held only so the tasks are not garbage collected while they run, which
     # asyncio does not otherwise prevent for a task nobody awaits.
     tasks = set()
@@ -611,6 +693,8 @@ async def handler(ws):
                                           "result": result_for(method, params)}))
     finally:
         pusher.cancel()
+        if printer is not None:
+            printer.cancel()
         for task in tasks:
             task.cancel()
 
