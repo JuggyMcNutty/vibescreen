@@ -36,6 +36,9 @@ over --print-seconds seconds, default 30.
 
 --drop-file <seconds> announces a new gcode file that long after connect, the
 way Moonraker does after an upload.
+
+--belts [normal|slow|fail|timeout|empty] answers the belts panel's half-axis
+sweeps and its analysis, ending the way the mode says.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 """
 import asyncio, json, math, os, re, shlex, struct, sys, time, zlib
@@ -208,6 +211,9 @@ PRINT_MODES = ("complete", "cancelled", "error")
 PRINT_RUN = _mode_value("--print", "complete", PRINT_MODES)
 PRINT_SECONDS = float(_arg_value("--print-seconds", "30"))
 
+BELTS_MODES = ("normal", "slow", "fail", "timeout", "empty")
+BELTS = _mode_value("--belts", "normal", BELTS_MODES)
+
 SHAPER = _mode_value("--shaper", "normal", SHAPER_MODES)
 SHAPER_LOCK = None
 # The configured shaper type to report for X. Worth being able to set, because
@@ -378,6 +384,9 @@ STATUS["configfile"]["settings"].update({
 # --no-shaper-config withholds them to drive the disabled half of that check.
 if SHAPER_CONFIG:
     STATUS["configfile"]["settings"].update({
+        "gcode_shell_command guppy_belts_calibration": {
+            "command": "/usr/data/printer_data/config/GuppyScreen/scripts/graph_belts.py",
+            "timeout": 600.0, "verbose": True},
         "resonance_tester": RESONANCE_TESTER,
         "adxl345": {"axes_map": ["x", "-z", "y"], "rate": 3200,
                     "cs_pin": "nozzle_mcu:PA4", "spi_speed": 5000000},
@@ -547,6 +556,45 @@ async def run_resonance_test(ws, axis, name):
     await respond(ws, f"// Resonances data written to {csv} file")
 
 
+async def run_belts_test(ws, axis, name):
+    """A half-axis sweep, named the way Klipper names its output.
+
+    The filename is the whole point: it is what the panel waits for to know the
+    capture has been flushed, and what graph_belts.py reads the belt letter out
+    of. Klipper builds it from the axis and NAME, preserving NAME's case.
+    """
+    csv = f"/tmp/raw_data_axis={axis} file".replace(" file", f"_{name}.csv")
+    step = 0.7 if BELTS == "slow" else 0.12
+    await respond(ws, f"// Testing axis {axis}")
+
+    for i in range(6):
+        await asyncio.sleep(step)
+        if BELTS == "fail" and i == 2:
+            await respond(ws, "!! adxl345: No data received from sensor")
+            return
+        await respond(ws, f"// Testing frequency {5 + i * 25} Hz")
+
+    await asyncio.sleep(step)
+    await respond(ws, f"// Resonances data written to {csv} file")
+
+
+async def run_belts_analysis(ws, params):
+    await respond(ws, "// Running Command {guppy_belts_calibration}...:")
+    await asyncio.sleep(1.0 if BELTS != "slow" else 4.0)
+
+    if BELTS == "timeout":
+        await respond(ws, "// Command {guppy_belts_calibration} timed out")
+        return
+    if BELTS == "empty":
+        # The process exits without producing a plot. gcode_shell_command still
+        # says "finished", which is why "finished" alone cannot mean success.
+        await respond(ws, "// Command {guppy_belts_calibration} finished\n")
+        return
+
+    await respond(ws, "// Belts estimated similarity: 95.0%")
+    await respond(ws, "// Command {guppy_belts_calibration} finished\n")
+
+
 async def run_shaper_analysis(ws, params):
     axis = "y" if "_y_" in (params[0] if params else "") else "x"
     png = width = height = None
@@ -596,8 +644,16 @@ async def shaper_effect_of(ws, script):
                 # AXIS=1,-1, which is a different flow and not ours to answer.
                 if axis in ("x", "y"):
                     await run_resonance_test(ws, axis, fields.get("NAME", axis))
+                elif BELTS and "," in axis:
+                    # 1,1 and 1,-1 are the belts panel's half axes. Klipper
+                    # formats them into the filename as floats.
+                    a, b = (float(v) for v in axis.split(","))
+                    await run_belts_test(ws, f"{a:.3f},{b:.3f}",
+                                         fields.get("NAME", "A"))
             elif "RUN_SHELL_COMMAND" in upper and "guppy_input_shaper" in line:
                 await run_shaper_analysis(ws, _shell_params(line))
+            elif "RUN_SHELL_COMMAND" in upper and "guppy_belts_calibration" in line:
+                await run_belts_analysis(ws, _shell_params(line))
 
 
 async def drop_a_file(ws):
@@ -703,7 +759,7 @@ async def handler(ws):
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "method": "notify_status_update",
                         "params": [delta, time.time()]}))
-                if SHAPER:
+                if SHAPER or BELTS:
                     # Detached, because a resonance run outlasts the request
                     # that starts it and Moonraker keeps answering meanwhile.
                     task = asyncio.create_task(shaper_effect_of(ws, script))
