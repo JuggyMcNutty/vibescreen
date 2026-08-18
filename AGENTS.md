@@ -12,8 +12,15 @@ websocket, built on LVGL as a standalone binary with no X or Wayland underneath.
 It draws straight to `/dev/fb0` and reads touch from `/dev/input/event0`.
 
 This repo is a **takeover of an abandoned project**. Upstream
-`ballaswag/guppyscreen` stopped at commit `07409cb` on 2024-07-15 with 69 open
-issues. We forked from that commit and are picking it back up.
+`ballaswag/guppyscreen` stopped at commit `07409cb` on 2024-07-15. We forked
+from that commit and are picking it back up.
+
+It is still stopped, re-checked 2026-08-18: `main` is our fork point exactly,
+and the `dev` and `btt_pad7` branches are stale from December 2023 with nothing
+in them that is not already in `main`. What is left there is 63 open issues and
+6 open pull requests, all triaged in `docs/upstream-issues.md`. Read that before
+acting on anything anyone reports upstream, because about half of it we have
+already fixed.
 
 Our target is a **Creality K1 Max**. Everything measured about it is in
 `docs/k1max-facts.md`. Do not guess at hardware details, that file has the real
@@ -25,6 +32,7 @@ values.
 | --- | --- |
 | `docs/k1max-facts.md` | Real hardware, firmware, framebuffer and input values from the printer |
 | `docs/audit.md` | Known bugs in the inherited code, with severity and suggested order |
+| `docs/upstream-issues.md` | Upstream's 63 open issues and 6 open PRs, triaged against our tree |
 | `DEVELOPMENT.md` | Toolchain, build targets and running the simulator |
 
 ## Build
@@ -353,9 +361,12 @@ common precondition. `BedMeshPanel`'s Calibrate is the worked example of both.
 
 For anything that is not a macro, use `KUtils::has_config_section` and not the
 object list. **`printer.objects.list` only reports objects that implement
-`get_status`**, so `resonance_tester`, `adxl345` and `calibrate_shaper_config`
-are all missing from it on a K1 Max that plainly has them, measured. Only
-`configfile` shows a section either way. `InputShaperPanel::update_available` is
+`get_status`**, so `resonance_tester` and `adxl345` are both missing from it on
+a K1 Max that plainly has them, measured. `calibrate_shaper_config` does appear,
+because our module defines a `get_status`, but it returns an empty object, so
+the object list can tell you it exists and nothing else. Only `configfile` shows
+a section either way, with its settings, which is why `has_config_section` is
+the one to reach for. `InputShaperPanel::update_available` is
 the worked example, and it disables the button and names the missing section
 rather than hiding the control.
 

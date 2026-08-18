@@ -8,6 +8,10 @@ excluded except where our build touches them.
 Nothing here is speculative. Every finding was read in the source and the
 claims about reachability were checked rather than assumed.
 
+Bugs that upstream's own issue tracker reported are triaged separately in
+`docs/upstream-issues.md`, which says for each one whether it survives in our
+tree and where. This file is the code audit; that one is the inbox.
+
 Status key: **open** means we have not fixed it yet. Fixed items name the commit.
 
 ---
@@ -219,10 +223,16 @@ Klipper abandons the rest of a script at the first command it will not run.
 
 Finding the preconditions is the part worth remembering.
 `printer.objects.list` only reports objects implementing `get_status`, and
-measured on the development K1 Max none of `resonance_tester`, `adxl345` or
-`calibrate_shaper_config` appear in it despite all three being configured, so
-`KUtils::has_gcode_macro`'s source cannot answer this. `configfile` carries a
-section either way, which is what `KUtils::has_config_section` reads.
+measured on the development K1 Max neither `resonance_tester` nor `adxl345`
+appears in it despite both being configured, so `KUtils::has_gcode_macro`'s
+source cannot answer this. `configfile` carries a section either way, which is
+what `KUtils::has_config_section` reads.
+
+Re-measured 2026-08-18: `calibrate_shaper_config` **does** appear in the object
+list, which this entry originally said it did not. Our module defines a
+`get_status` and it returns `{}`, so the list confirms the object exists and
+carries no values. That does not change the conclusion, since the panel needs
+the configured shaper values and only `configfile` has them.
 
 ### C17. `SAVE_INPUT_SHAPER` silently disabled the axis it was not given (fixed)
 

@@ -317,9 +317,11 @@ STATUS = {
     "bed_mesh": build_bed_mesh(MESH_SHAPE),
 }
 
-# The sections the panel checks before offering to calibrate or save. None of
-# them appear in printer.objects.list on a real printer, measured, because they
-# have no get_status, so configfile is the only place a panel can find them.
+# The sections the panel checks before offering to calibrate or save. Neither
+# resonance_tester nor adxl345 appears in printer.objects.list on a real
+# printer, measured, because they have no get_status. calibrate_shaper_config
+# does appear but reports {}, so configfile is the only place a panel can find
+# any of their values.
 # --no-shaper-config withholds them to drive the disabled half of that check.
 if SHAPER_CONFIG:
     STATUS["configfile"]["settings"].update({
