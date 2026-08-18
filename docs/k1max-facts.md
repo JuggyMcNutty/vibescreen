@@ -64,6 +64,18 @@ installed guppyscreen answered yes to the "disable all Creality services"
 prompt. Some Creality services do still run: `cx_ai_middleware`, `webrtc`,
 `cam_app`, `mjpg_streamer`.
 
+## Getting on it
+
+SSH as `root`, password `creality_2023`. That is Creality's factory default for
+the K1 series, the same on every unmodified machine, which is why it is written
+down here rather than treated as a secret. It is not a secret worth keeping, but
+it is worth changing on a printer exposed to anything but a home LAN.
+
+Only password auth is accepted: there is no `authorized_keys` on the machine,
+so `sshpass` or an interactive prompt is the way in. `scripts/probe-printer.sh`
+still takes `PRINTER_PASS` from the environment, so a printer with a changed
+password needs nothing else.
+
 ## Moonraker
 
 Configured as `host: 0.0.0.0`, `port: 7125`, started by `S56moonraker_service`.
