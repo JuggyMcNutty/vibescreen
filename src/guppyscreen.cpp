@@ -12,6 +12,8 @@
 #include "state.h"
 #include "theme.h"
 
+#include <time.h>
+
 GuppyScreen *GuppyScreen::instance = NULL;
 lv_style_t GuppyScreen::style_container;
 lv_style_t GuppyScreen::style_imgbtn_default;
@@ -338,19 +340,34 @@ void GuppyScreen::refresh_theme() {
 }
 
 /*Set in lv_conf.h as `LV_TICK_CUSTOM_SYS_TIME_EXPR`*/
+//
+// Everything LVGL times runs off this: every animation, every timer, the
+// display sleep countdown and the input shaper's watchdog. It used to read
+// gettimeofday, which is the wall clock, so an NTP step moved all of them at
+// once. On the K1 that is not hypothetical, ntpd steps the clock at boot
+// because the machine has no RTC.
+//
+// It also computed tv_sec * 1000000 in time_t. Where time_t is 32 bits, which
+// is every glibc mips build including the one upstream's last tagged release
+// was made with, that overflows with a period of 2^32/10^6 seconds, or 71.6
+// minutes, and the tick sawtooths. Feed that to lv_tick_elaps and the display
+// sleeps immediately and wakes again exactly one sawtooth later, which is the
+// "screen turns itself on about every hour" of upstream #80 and #7, at the
+// right period. Our musl toolchain has a 64 bit time_t so it does not fire
+// here, but the expression is signed overflow either way.
+//
+// CLOCK_MONOTONIC is what a tick source wants: it does not move when the wall
+// clock does and it counts from boot, so the only wrap left is the 32 bit
+// millisecond one LVGL already handles in lv_tick_elaps.
 uint32_t custom_tick_get(void) {
-  static uint64_t start_ms = 0;
-  if (start_ms == 0) {
-    struct timeval tv_start;
-    gettimeofday(&tv_start, NULL);
-    start_ms = (tv_start.tv_sec * 1000000 + tv_start.tv_usec) / 1000;
+  static struct timespec start = {0, 0};
+  if (start.tv_sec == 0 && start.tv_nsec == 0) {
+    clock_gettime(CLOCK_MONOTONIC, &start);
   }
 
-  struct timeval tv_now;
-  gettimeofday(&tv_now, NULL);
-  uint64_t now_ms;
-  now_ms = (tv_now.tv_sec * 1000000 + tv_now.tv_usec) / 1000;
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
 
-  uint32_t time_ms = now_ms - start_ms;
-  return time_ms;
+  return (uint32_t)((now.tv_sec - start.tv_sec) * 1000
+		    + (now.tv_nsec - start.tv_nsec) / 1000000);
 }
