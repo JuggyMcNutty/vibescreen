@@ -205,8 +205,21 @@ out but Back, and it came back in that state.
 
 Every ending is handled now, from the `!!` prefix Klipper broadcasts errors with
 and the terminal lines in `k1/k1_mods/gcode_shell_command.py`, plus a watchdog
-for when nothing arrives at all. `BeltsCalibrationPanel` has the same shape and
-has not been done.
+for when nothing arrives at all.
+
+`BeltsCalibrationPanel` had the same shape and has since been given the same
+treatment, along with the preconditions of C16 and the one-at-a-time sequencing
+of C15. It also drives its two sweeps itself rather than through
+`GUPPY_BELTS_SHAPER_CALIBRATION`, which sent both back to back with only `M400`
+between them. `M400` waits for moves and not for the accelerometer writer, so
+two full datasets were held at once, which is what upstream #104 reports as an
+MCU timeout part way through the second belt.
+
+Worth recording one thing found while doing it: `gcode_shell_command.py` prints
+"Command {x} finished" whenever the process exits, crash included, so
+"finished" on its own never meant success. The panel keys on the similarity
+line `graph_belts.py` prints on its way to writing the plot, the same shape as
+the input shaper keying on its `{"shapers":...}` payload.
 
 ### C15. Input shaper queued both axes at once (fixed)
 
