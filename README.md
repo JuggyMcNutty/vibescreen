@@ -7,17 +7,16 @@ which stopped receiving commits in July 2024.
 
 ![Bed mesh drawn as a shaded surface](screenshots/bedmesh.png)
 
+## What has changed since guppyscreen?
 
-## What has changed sense guppyscreen?
-
-**The bed mesh panel was rewritten.** 
+**The bed mesh panel was rewritten.**
 
 | Flat heatmap | The probed points |
 | --- | --- |
 | ![Bed mesh as a flat heatmap](screenshots/bedmesh_flat.png) | ![The 36 probed points](screenshots/bedmesh_probed.png) |
 
-**Rewrote the extruder panel and option are configurable and clamped to the
-printer's own limits read from Klipper**
+**The extruder panel was rewritten.** Its option lists are configurable, and
+clamped to the printer's own limits read from Klipper.
 
 **A refused command is no longer silent.**
 
@@ -25,17 +24,22 @@ printer's own limits read from Klipper**
 | --- | --- |
 | ![Extruder panel with configurable option lists](screenshots/extrude_retract.png) | ![Dialog reading printer rejected the command](screenshots/gcode_rejected.png) |
 
-**Bed mesh Calibrate wipes the nozzle first.** When the printer has a `WIPE_NOZZLE` macro, Calibrate runs it before probing,
-On a K1, K1C, K1SE or K1 Max that macro comes from
+**Bed mesh Calibrate wipes the nozzle first.** When the printer has a
+`WIPE_NOZZLE` macro, Calibrate runs it before probing. On a K1, K1C, K1SE or
+K1 Max that macro comes from
 [ProWiper](https://www.printables.com/model/1023575-prowiper-for-creality-k1-series),
+formerly Advanced Nozzle Wiper.
 
-**Bed mesh Calibrate homes only when something is unhomed**
+**Bed mesh Calibrate homes only when something is unhomed.**
 
 **The input shaper panel was rebuilt.**
 
 | Input shaper with graphs | Input shaper with numbers |
 | --- | --- |
 | ![Frequency response for one axis](screenshots/inputshaper.png) | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
+
+Those two come from `tools/fake_moonraker.py`, so the curve and the figures are
+synthetic. A real run means shaking the printer for minutes per axis.
 
 **Underneath: lots of bug fixes and exception handlers.**
 
@@ -69,13 +73,13 @@ The rest of the interface:
 
 Built and tested on my **Creality K1 Max**. That is the machine anything is verified against.
 
-we also build for:
+We also build for:
 
 - `guppyscreen-smallscreen.tar.gz` for the Ender 3 V3 KE and Nebula Pad
 - `guppyscreen-arm.tar.gz` for aarch64 boards such as a Pi or BTT Pad
 
-Whether they run is unknown. Treat them as a
-starting point rather than a supported target.
+Whether they run is unknown. Treat them as a starting point rather than a
+supported target.
 
 Android is not supported. Upstream shipped an APK built from a separate branch
 and that has been removed.
