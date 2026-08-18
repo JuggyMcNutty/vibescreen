@@ -30,3 +30,7 @@ build/
 
 # Records which flags the objects were last built with
 /.build-flags
+
+# Python bytecode from running the klippy modules or scripts locally
+__pycache__/
+*.pyc
