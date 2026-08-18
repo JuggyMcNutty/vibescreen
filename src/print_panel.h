@@ -18,6 +18,7 @@ class PrintPanel : public NotifyConsumer {
   void consume(json &data);
   void populate_files(json &data);
   void subscribe();
+  void handle_filelist_changed(json &j);
   void foreground();
   void handle_callback(lv_event_t *event);
   void handle_metadata(Tree *, json & data);

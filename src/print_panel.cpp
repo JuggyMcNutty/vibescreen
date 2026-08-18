@@ -140,6 +140,14 @@ PrintPanel::PrintPanel(KWebSocketClient &websocket, std::mutex &lock, PrintStatu
   lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 0);
 
   ws.register_notify_update(this);
+
+  // Moonraker announces every upload, move, delete and rename on the gcodes
+  // root. Without this the list only changed when someone pressed Reload, so a
+  // file sent from the slicer was not there to print until the user worked out
+  // that they had to ask again. Upstream #95.
+  ws.register_method_callback("notify_filelist_changed",
+			      "PrintPanel",
+			      [this](json& d) { this->handle_filelist_changed(d); });
 }
 
 PrintPanel::~PrintPanel() {
@@ -172,6 +180,20 @@ void PrintPanel::consume(json &j) {
   } else {
     status_btn.enable();
   }
+}
+
+// Runs on the libhv thread. subscribe() takes lv_lock in its own reply handler
+// rather than here, so this must not hold it, and the refetch is what redraws
+// rather than this.
+void PrintPanel::handle_filelist_changed(json &j) {
+  auto &root_name = j["/params/0/item/root"_json_pointer];
+  if (!root_name.is_null() && root_name.template get<std::string>() != "gcodes") {
+    // Moonraker announces config and log changes down the same notification.
+    return;
+  }
+
+  spdlog::debug("file list changed, refetching: {}", j.dump());
+  subscribe();
 }
 
 void PrintPanel::subscribe() {
