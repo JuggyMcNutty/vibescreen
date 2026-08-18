@@ -1,6 +1,6 @@
 name: build
 
-# Replaces the workflow inherited from upstream. Three things are worth knowing
+# Replaces the workflow inherited from upstream. Four things are worth knowing
 # before editing this file.
 #
 # It no longer runs inside ballaswag/guppydev:latest. That is an unpinned image
@@ -11,6 +11,15 @@ name: build
 # It calls scripts/build.sh rather than repeating the patch and make steps, so
 # CI and a developer's machine cannot drift apart. Adding a build flag means
 # editing the script, not this file.
+#
+# Nothing calls apt-get directly. The runner's mirrorlist puts the Azure Ubuntu
+# mirror first and only fails over on a hard error, so when that mirror degrades
+# a download trickles rather than failing, and apt's inactivity timeout never
+# fires. That wedged nine jobs for hours in August 2026. scripts/ci-apt-install.sh
+# bounds each attempt on wall clock time and drops the Azure mirror before
+# retrying, and every job carries a timeout-minutes so a stall fails the run
+# instead of sitting until the 360 minute default. Only arm and the simulator
+# need apt at all; everything else the builds want is on the runner image.
 #
 # A push to main that changes source and builds cleanly publishes its own
 # release, tagged <date>-<sha>, so the release list is a build history rather
@@ -34,6 +43,7 @@ jobs:
   # differently from the string compiled into the binary.
   version:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.pick.outputs.version }}
       release: ${{ steps.pick.outputs.release }}
@@ -118,6 +128,10 @@ jobs:
             asset: guppyscreen-arm
 
     runs-on: ubuntu-24.04
+    # A healthy build is about four minutes. Without this the GitHub default of
+    # 360 applies, which is how a stalled apt sat wedged for hours instead of
+    # failing and letting the run be retried.
+    timeout-minutes: 25
     env:
       GUPPYSCREEN_VERSION: ${{ needs.version.outputs.version }}
 
@@ -126,14 +140,14 @@ jobs:
         with:
           submodules: recursive
 
+      # Only the arm build needs anything from apt. The runner image already
+      # ships cmake, gcc, g++ and make, so the mips builds installing
+      # build-essential and cmake was 13.6 MB of download to put an older cmake
+      # over a newer one, and three more chances to wedge on a bad mirror.
       - name: install build dependencies
+        if: matrix.target == 'arm'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential cmake
-          if [ "${{ matrix.target }}" = "arm" ]; then
-            sudo apt-get install -y --no-install-recommends \
-              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          fi
+          scripts/ci-apt-install.sh gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       # setup-toolchain.sh caches the archive here, so a hit skips the download.
       - name: cache mips toolchain
@@ -191,16 +205,15 @@ jobs:
     # Builds what developers actually run, which the upstream matrix never did.
     needs: version
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
 
+      # libsdl2-dev is the only thing the sim build needs that the image lacks.
       - name: install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libsdl2-dev
+        run: scripts/ci-apt-install.sh libsdl2-dev
 
       - name: build
         run: scripts/build.sh sim
@@ -212,6 +225,7 @@ jobs:
     needs: [ version, build, simulator ]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/download-artifact@v6
         with:
