@@ -158,6 +158,97 @@ if ! tar xzf "$TARBALL" -C "$GUPPY_DIR/.."; then
 fi
 rm -f "$TARBALL"
 
+# The tarball carries the Klipper side of the install as well as the binary:
+# scripts/*.cfg are the guppy macros and k1_mods/*.py the klippy extras. Klipper
+# does not read them from here, though. installer.sh copies them into the
+# printer's own config tree, so unpacking alone leaves Klipper running whatever
+# was installed the first time.
+#
+# That was not theoretical. Measured on the development K1 Max on 2026-08-18,
+# its _GUPPY_LOAD_MATERIAL extruded a hardcoded 120mm and ignored the EXTRUDE_LEN
+# the panel sends, which is neither our version of the macro nor upstream's. So
+# the Extrude Length selector did nothing, and every fix we make to the macros
+# would have stayed invisible. Copy them across too.
+refresh_klipper_files() {
+    [ -d "$GUPPY_DIR/scripts" ] || return 0
+
+    # Ask Moonraker where Klipper keeps its config and its extras rather than
+    # guessing. The printer's /usr/bin/curl is a Creality utility with an
+    # unrelated command line, so use busybox wget, which is fine over plain
+    # HTTP. Falls back to the stock K1 paths when Moonraker is not answering.
+    info=$(wget -q -T 10 -O - "http://127.0.0.1:7125/printer/info" 2>/dev/null || true)
+    paths=$(printf '%s' "$info" | "$PY" -c "
+import json, os, sys
+klipper, config = '/usr/share/klipper', '/usr/data/printer_data/config'
+try:
+    r = json.load(sys.stdin)['result']
+    klipper = r.get('klipper_path') or klipper
+    cfgfile = r.get('config_file')
+    if cfgfile:
+        config = os.path.dirname(cfgfile)
+except Exception:
+    pass
+print(klipper)
+print(config)" 2>/dev/null)
+
+    klipper_path=$(printf '%s' "$paths" | sed -n 1p)
+    config_dir=$(printf '%s' "$paths" | sed -n 2p)
+    [ -n "$klipper_path" ] || klipper_path=/usr/share/klipper
+    [ -n "$config_dir" ] || config_dir=/usr/data/printer_data/config
+
+    # Only touch an install that installer.sh has already set up. On anything
+    # else, including the Debian packaging, these files are not ours to place.
+    [ -d "$config_dir/GuppyScreen" ] || return 0
+
+    changed=0
+
+    # Keeps one backup of whatever was there before we replaced it. Anyone who
+    # hand-edited a macro loses the edit on update, which is why the supported
+    # way to change load and unload is the default_macros mapping in
+    # guppyconfig.json rather than editing these files.
+    install_file() {
+        src=$1
+        dst=$2
+        [ -f "$src" ] || return 0
+        if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+            return 0
+        fi
+        [ -f "$dst" ] && cp "$dst" "$dst.bak"
+        mkdir -p "$(dirname "$dst")"
+        cp "$src" "$dst" || return 1
+        echo "  updated $dst"
+        changed=$((changed + 1))
+    }
+
+    for f in "$GUPPY_DIR"/scripts/*.cfg; do
+        [ -f "$f" ] && install_file "$f" "$config_dir/GuppyScreen/$(basename "$f")"
+    done
+    for f in "$GUPPY_DIR"/scripts/*.py; do
+        [ -f "$f" ] && install_file "$f" "$config_dir/GuppyScreen/scripts/$(basename "$f")"
+    done
+
+    # gcode_shell_command.py and calibrate_shaper_config.py are copied into
+    # klippy/extras by the installer. The other three modules there are
+    # symlinks back into $GUPPY_DIR and so are already current.
+    for f in gcode_shell_command.py calibrate_shaper_config.py; do
+        [ -f "$klipper_path/klippy/extras/$f" ] &&
+            install_file "$GUPPY_DIR/k1_mods/$f" "$klipper_path/klippy/extras/$f"
+    done
+
+    if [ "$changed" -gt 0 ]; then
+        echo
+        echo "$changed Klipper file(s) changed. Klipper has to be restarted before"
+        echo "they take effect, and that ends any print in progress, so it is left"
+        echo "for you to do when the printer is idle:"
+        echo
+        echo "    FIRMWARE_RESTART"
+        echo
+    fi
+}
+
+echo "Refreshing the Klipper macros and modules"
+refresh_klipper_files
+
 if [ -f "$CUSTOM_UPGRADE_SCRIPT" ]; then
     echo "Running custom_upgrade.sh for release $LATEST_VERSION"
     "$CUSTOM_UPGRADE_SCRIPT"

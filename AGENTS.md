@@ -399,6 +399,21 @@ For plain HTTP to Moonraker on the printer, `wget -q -T <sec> -O -` is fine.
 unless given `--force`, so the Settings panel's "Update Guppy" button cannot
 silently discard a build you are testing on the printer.
 
+**The tarball is not where Klipper reads our macros from.** `installer.sh`
+copies `scripts/*.cfg` into `<config>/GuppyScreen/`, `scripts/*.py` into
+`<config>/GuppyScreen/scripts/`, and `gcode_shell_command.py` and
+`calibrate_shaper_config.py` into `klippy/extras/`. Only
+`guppy_module_loader.py`, `guppy_config_helper.py` and `tmcstatus.py` are
+symlinked back into `/usr/data/guppyscreen`. So anything you change under `k1/`
+reaches an existing install only because `update.sh` now re-copies it, keeping
+one `.bak` of whatever it replaced and telling the user that Klipper needs a
+`FIRMWARE_RESTART`. It never restarts Klipper itself, because that ends a print.
+
+This was found the hard way: the development printer was running a
+`_GUPPY_LOAD_MATERIAL` that extruded a hardcoded 120mm and ignored the
+`EXTRUDE_LEN` the panel sends, so the Extrude Length selector did nothing there
+while looking correct in the source.
+
 ## Never let an exception reach LVGL
 
 Every static callback LVGL calls into must contain its own exceptions, using
