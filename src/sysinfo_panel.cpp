@@ -45,7 +45,10 @@ static std::map<int32_t, uint32_t> sleepsec_to_dd_idx = {
   {18000, 5} // 5 hour
 };
 
-static std::map<std::string, uint32_t> sleep_label_to_sec = {
+// Signed, because Never is -1. In a uint32_t map it was stored as 4294967295
+// and only became -1 again by being narrowed on the way back out, which worked
+// but said the opposite of what it meant.
+static std::map<std::string, int32_t> sleep_label_to_sec = {
   {"Never", -1}, // never
   {"5 Minutes", 300}, // 5 min
   {"10 Minutes", 600}, // 10 min

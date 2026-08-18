@@ -181,7 +181,14 @@ void GuppyScreen::loop() {
 #ifndef SIMULATOR
   std::atomic_bool is_sleeping(false);
   Config *conf = Config::get_instance();
-  int32_t display_sleep = conf->get<int32_t>("/display_sleep_sec") * 1000;
+
+  // -1 is the Never sentinel the system panel writes. Scaling it first and then
+  // testing for -1 never matched, so the disable branch below was dead: what
+  // made Never work was the comparison promoting -1000 to an unsigned 49.7 day
+  // threshold. That is not a timeout anyone chose, and it would sleep instantly
+  // rather than never once the tick wrapped.
+  int32_t sleep_sec = conf->get<int32_t>("/display_sleep_sec");
+  int32_t display_sleep = sleep_sec < 0 ? -1 : sleep_sec * 1000;
 #endif
 
   while (1) {
