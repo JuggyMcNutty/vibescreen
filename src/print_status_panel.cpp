@@ -160,6 +160,17 @@ void PrintStatusPanel::background() {
   lv_obj_move_background(status_cont);
 }
 
+void PrintStatusPanel::update_progress(int pct) {
+  if (pct < 0) {
+    pct = 0;
+  } else if (pct > 100) {
+    pct = 100;
+  }
+  lv_bar_set_value(progress_bar, pct, LV_ANIM_ON);
+  lv_label_set_text(progress_label, fmt::format("{}%", pct).c_str());
+  mini_print_status.update_progress(pct);
+}
+
 void PrintStatusPanel::reset() {
   lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
   lv_label_set_text(progress_label, "0%");
@@ -168,6 +179,13 @@ void PrintStatusPanel::reset() {
   elapsed.update_label("0s");
   time_left.update_label("...");
   estimated_time_s = 0;
+
+  // The layer counter and the metadata behind it are read back out of
+  // current_file whenever print_stats.info is absent, so leaving them here
+  // showed the previous print's layer count until the metadata reply for the
+  // new one arrived.
+  layers.update_label("0 / 0");
+  current_file = json();
 
   auto v = State::get_instance()
     ->get_data("/printer_state/configfile/config/extruder/filament_diameter"_json_pointer);
@@ -253,10 +271,7 @@ void PrintStatusPanel::populate() {
   // progress percentage
   auto v = s->get_data("/printer_state/virtual_sdcard/progress"_json_pointer);
   if (!v.is_null()) {
-    int new_value = static_cast<int>(v.template get<double>() * 100);
-    lv_bar_set_value(progress_bar, new_value, LV_ANIM_ON);
-    lv_label_set_text(progress_label, fmt::format("{}%", new_value).c_str());
-    mini_print_status.update_progress(new_value);
+    update_progress(static_cast<int>(v.template get<double>() * 100));
   }
 
   v = s->get_data(
@@ -306,10 +321,21 @@ void PrintStatusPanel::consume(json &j) {
 
   auto printfile = j["/params/0/print_stats/filename"_json_pointer];
   if (!printfile.is_null()) {
-    // filename change indicates a start of a print
-    reset();
-    populate();
-    foreground(); // auto move to front when print is detected
+    // A filename we have not already got is the start of a print. Testing for
+    // the key alone was not enough: Klipper clears the filename when a print is
+    // cancelled or the stats are reset, and that empty string used to reset the
+    // panel and pull it to the front, so cancelling a print left a blank status
+    // screen covering whatever the user was looking at.
+    auto fname = printfile.is_string() ? printfile.template get<std::string>()
+                                       : std::string();
+    if (!fname.empty() && fname != current_filename) {
+      current_filename = fname;
+      reset();
+      populate();
+      foreground(); // auto move to front when print is detected
+    } else if (fname.empty()) {
+      current_filename.clear();
+    }
   }
 
   auto& pstate = j["/params/0/print_stats/state"_json_pointer];
@@ -317,6 +343,21 @@ void PrintStatusPanel::consume(json &j) {
     auto print_status = pstate.template get<std::string>();
     if (print_status != "printing" && print_status != "paused") {
       mini_print_status.hide();
+
+      // A print that has finished, been cancelled or errored is over, and the
+      // panel used to sit there afterwards with no way out but Back, which is
+      // upstream #94. standby is excluded on purpose: it is the resting state,
+      // and being thrown out of the panel because Klipper restarted underneath
+      // you is worse than staying.
+      if (print_status != "standby") {
+        if (print_status == "complete") {
+          // virtual_sdcard.progress is file position over file size and the
+          // conversion truncates, so a print that really did finish reported 99
+          // and stayed there. Upstream #103.
+          update_progress(100);
+        }
+        background();
+      }
     } else {
       mini_print_status.show();
     }
@@ -396,10 +437,7 @@ void PrintStatusPanel::consume(json &j) {
   // progress percentage
   v = j["/params/0/virtual_sdcard/progress"_json_pointer];
   if (!v.is_null()) {
-    int new_value = static_cast<int>(v.template get<double>() * 100);
-    lv_bar_set_value(progress_bar, new_value, LV_ANIM_ON);
-    lv_label_set_text(progress_label, fmt::format("{}%", new_value).c_str());
-    mini_print_status.update_progress(new_value);
+    update_progress(static_cast<int>(v.template get<double>() * 100));
   }
 
   v = j["/params/0/motion_report/live_extruder_velocity"_json_pointer];

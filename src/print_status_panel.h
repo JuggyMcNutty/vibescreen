@@ -25,6 +25,7 @@ class PrintStatusPanel : public NotifyConsumer {
   void populate();
   void foreground();
   void background();
+  void update_progress(int pct);
 
   void handle_metadata(const std::string &gcode_file, json &j);
   void handle_callback(lv_event_t *event);
@@ -87,6 +88,9 @@ class PrintStatusPanel : public NotifyConsumer {
   int extruder_target;
   int heater_bed_target;
   json current_file;
+  // What print_stats last named, so that a repeated notification for the same
+  // file is not mistaken for the start of a new print.
+  std::string current_filename;
 
   std::map<std::string, int> fan_speeds;
 };
