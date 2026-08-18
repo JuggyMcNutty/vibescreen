@@ -48,7 +48,6 @@ static const lv_btnmatrix_ctrl_t kb_ctrl_spec_map[] = {
   LV_BTNMATRIX_CTRL_CHECKED | 2, LV_KEYBOARD_CTRL_BTN_FLAGS | 2
 };
 
-
 static void draw_part_event_cb(lv_event_t * e)
 {
   lv_obj_t * obj = lv_event_get_target(e);
@@ -73,6 +72,7 @@ WifiPanel::WifiPanel(std::mutex &l)
   , prompt_cont(wifi_right)
   , wifi_label(lv_label_create(prompt_cont))
   , password_input(lv_textarea_create(prompt_cont))
+  , forget_btn(lv_btn_create(prompt_cont))
   , back_btn(cont, &back, "Back", &WifiPanel::_handle_back_btn, this)
   , kb(lv_keyboard_create(cont))
 {
@@ -118,12 +118,30 @@ WifiPanel::WifiPanel(std::mutex &l)
   lv_obj_clear_flag(prompt_cont, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_border_width(prompt_cont, 0, 0);
   
+  // Bounded and wrapping. It had no width at all, so anything longer than
+  // "Enter password for X" ran off both edges of the panel, which the new
+  // failure messages are.
+  lv_obj_set_width(wifi_label, LV_PCT(90));
+  lv_label_set_long_mode(wifi_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(wifi_label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(wifi_label, LV_ALIGN_TOP_MID, 0, 10);
-  lv_obj_align(password_input, LV_ALIGN_TOP_MID, 0, 40);
+  lv_obj_align(password_input, LV_ALIGN_TOP_MID, 0, 70);
 
   lv_obj_set_size(password_input, LV_PCT(80), LV_SIZE_CONTENT);
   lv_textarea_set_password_mode(password_input, true);
   lv_textarea_set_one_line(password_input, true);
+
+  // There was no way to forget a saved network at all. A password typed wrong
+  // is stored by SAVE_CONFIG and retried forever, with no failure state and no
+  // way to correct it, so upstream #156's reporter had to rename the network on
+  // their router to get out of it. Shown only for a network wpa_supplicant
+  // already has.
+  lv_obj_add_flag(forget_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_align(forget_btn, LV_ALIGN_TOP_MID, 0, 130);
+  lv_obj_add_event_cb(forget_btn, &WifiPanel::_handle_forget_btn, LV_EVENT_CLICKED, this);
+  lv_obj_t *forget_label = lv_label_create(forget_btn);
+  lv_label_set_text(forget_label, LV_SYMBOL_TRASH "  Forget");
+  lv_obj_center(forget_label);
 
   lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec_map);
 
@@ -181,6 +199,15 @@ void WifiPanel::handle_callback(lv_event_t *e) {
     }
 
     selected_network = lv_table_get_cell_value(wifi_table, row, 0);
+
+    // Offered for anything wpa_supplicant has a network block for, connected or
+    // not, since a wrong password is exactly the case you need it for.
+    if (list_networks.count(selected_network)) {
+      lv_obj_clear_flag(forget_btn, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(forget_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+
     if (cur_network.length() > 0 && cur_network == selected_network) {
       auto ip = KUtils::interface_ip(KUtils::get_wifi_interface());
       lv_label_set_text(wifi_label, fmt::format("Connected to network {}\nIP: {}",
@@ -192,6 +219,9 @@ void WifiPanel::handle_callback(lv_event_t *e) {
       auto nid = list_networks.find(selected_network)->second;
       wpa_event.send_command(fmt::format("SELECT_NETWORK {}", nid));
       wpa_event.send_command("SAVE_CONFIG");
+      lv_label_set_text(wifi_label,
+			fmt::format("Connecting to {} ...", selected_network).c_str());
+      lv_obj_add_flag(password_input, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_label_set_text(wifi_label, fmt::format("Enter password for {}", selected_network).c_str());
       lv_obj_clear_flag(password_input, LV_OBJ_FLAG_HIDDEN);
@@ -202,7 +232,51 @@ void WifiPanel::handle_callback(lv_event_t *e) {
   }
 }
 
+// wpa_supplicant's way of saying the attempt failed. Only SCAN-RESULTS and
+// CONNECTED were ever handled, so "Connecting to X ..." could be set and never
+// cleared: a wrong password left the panel saying it was still trying, forever,
+// which is the half of upstream #156 and #143 that makes the missing Forget
+// button unrecoverable.
+static const char *wpa_failure_reason(const std::string &event) {
+  if (event.find("CTRL-EVENT-SSID-TEMP-DISABLED") != std::string::npos) {
+    // wpa_supplicant emits this with reason=WRONG_KEY after enough failed
+    // handshakes, and it is as close to "wrong password" as it gets.
+    return event.find("WRONG_KEY") != std::string::npos
+      ? "Wrong password."
+      : "Could not authenticate.";
+  }
+  if (event.find("CTRL-EVENT-AUTH-REJECT") != std::string::npos) {
+    return "The network rejected the authentication.";
+  }
+  if (event.find("CTRL-EVENT-ASSOC-REJECT") != std::string::npos) {
+    return "The network refused the connection.";
+  }
+  if (event.find("CTRL-EVENT-NETWORK-NOT-FOUND") != std::string::npos) {
+    return "Network not found.";
+  }
+  if (event.find("reason=WRONG_KEY") != std::string::npos) {
+    return "Wrong password.";
+  }
+  return NULL;
+}
+
 void WifiPanel::handle_wpa_event(const std::string &event) {
+  const char *failure = wpa_failure_reason(event);
+  if (failure != NULL) {
+    spdlog::debug("wifi attempt failed: {}", event);
+    std::lock_guard<std::mutex> lock(lv_lock);
+    lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(password_input, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(wifi_label,
+		      fmt::format("Could not connect to {}.\n{}\nForget it to try a new password.",
+				  selected_network, failure).c_str());
+    lv_obj_clear_flag(prompt_cont, LV_OBJ_FLAG_HIDDEN);
+    if (list_networks.count(selected_network)) {
+      lv_obj_clear_flag(forget_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+    return;
+  }
+
   if (event.rfind("<3>CTRL-EVENT-SCAN-RESULTS", 0) == 0) {
     // result ready
     spdlog::trace("got scan result event");
@@ -322,15 +396,62 @@ void WifiPanel::handle_kb_input(lv_event_t *e)
   }
 }
 
+void WifiPanel::handle_forget_btn(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+    return;
+  }
+  forget_network();
+}
+
+void WifiPanel::forget_network() {
+  auto found = list_networks.find(selected_network);
+  if (found == list_networks.end()) {
+    return;
+  }
+
+  spdlog::debug("forgetting network {} (id {})", selected_network, found->second);
+  wpa_event.send_command(fmt::format("REMOVE_NETWORK {}", found->second));
+  wpa_event.send_command("SAVE_CONFIG");
+
+  list_networks.erase(found);
+  if (cur_network == selected_network) {
+    cur_network.clear();
+  }
+
+  lv_obj_add_flag(forget_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(password_input, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(wifi_label,
+		    fmt::format("Forgot {}.\nSelect it again to enter a new password.",
+				selected_network).c_str());
+}
+
 void WifiPanel::connect(const char *password) {
+  // Replace rather than accumulate. ADD_NETWORK on every attempt meant retyping
+  // a password left the old block behind, and wpa_supplicant kept trying both,
+  // so wpa_supplicant.conf filled up with duplicates of one SSID.
+  auto existing = list_networks.find(selected_network);
+  if (existing != list_networks.end()) {
+    wpa_event.send_command(fmt::format("REMOVE_NETWORK {}", existing->second));
+    list_networks.erase(existing);
+  }
+
   std::string nid = wpa_event.send_command("ADD_NETWORK");
-  spdlog::trace("add_nework {}", nid);
+  spdlog::trace("add_network {}", nid);
+
+  // The reply is the id followed by a newline, and it was interpolated raw into
+  // the commands below. wpa_supplicant's atoi based parse survived it, which is
+  // the only reason it worked.
+  while (nid.size() > 0 && (nid.back() == '\n' || nid.back() == '\r')) {
+    nid.pop_back();
+  }
+
   if (nid.length() > 0) {
     wpa_event.send_command(fmt::format("SET_NETWORK {} ssid {:?}", nid, selected_network));
     wpa_event.send_command(fmt::format("SET_NETWORK {} psk {:?}", nid, password));
     wpa_event.send_command(fmt::format("ENABLE_NETWORK {}", nid));
     wpa_event.send_command(fmt::format("SELECT_NETWORK {}", nid));
     wpa_event.send_command("SAVE_CONFIG");
+    list_networks.insert({selected_network, nid});
   }
 }
 

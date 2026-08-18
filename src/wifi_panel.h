@@ -24,6 +24,8 @@ class WifiPanel {
   void handle_kb_input(lv_event_t *e);
   void connect(const char *);
   bool find_current_network();
+  void forget_network();
+  void handle_forget_btn(lv_event_t *event);
 
   static void _handle_back_btn(lv_event_t *event) {
     KGuard::event("WifiPanel::_handle_back_btn", [&] {
@@ -39,6 +41,13 @@ class WifiPanel {
     });
   };
   
+  static void _handle_forget_btn(lv_event_t *event) {
+    KGuard::event("WifiPanel::_handle_forget_btn", [&] {
+      WifiPanel *panel = (WifiPanel*)event->user_data;
+      panel->handle_forget_btn(event);
+    });
+  };
+
   static void _handle_kb_input(lv_event_t *e) {
     KGuard::event("WifiPanel::_handle_kb_input", [&] {
       WifiPanel *panel = (WifiPanel*)e->user_data;
@@ -57,6 +66,7 @@ class WifiPanel {
   lv_obj_t *prompt_cont;
   lv_obj_t *wifi_label;
   lv_obj_t *password_input;
+  lv_obj_t *forget_btn;
   ButtonContainer back_btn;
   lv_obj_t *kb;
   std::string selected_network;
