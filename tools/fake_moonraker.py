@@ -33,6 +33,9 @@ Received gcode is appended to $GCODE_LOG, default /tmp/guppy_gcode_received.txt.
 
 --print [complete|cancelled|error] walks a print from standby to that ending,
 over --print-seconds seconds, default 30.
+
+--drop-file <seconds> announces a new gcode file that long after connect, the
+way Moonraker does after an upload.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 """
 import asyncio, json, math, os, re, shlex, struct, sys, time, zlib
@@ -197,6 +200,10 @@ def build_bed_mesh(shape):
     }
 
 SHAPER_MODES = ("normal", "slow", "fail", "timeout")
+# Announce a new gcode file this many seconds after connect, so the file panel
+# can be watched noticing it without anyone pressing Reload.
+FILE_DROP_SECONDS = float(_arg_value("--drop-file", "0")) if "--drop-file" in sys.argv else 0
+
 PRINT_MODES = ("complete", "cancelled", "error")
 PRINT_RUN = _mode_value("--print", "complete", PRINT_MODES)
 PRINT_SECONDS = float(_arg_value("--print-seconds", "30"))
@@ -585,6 +592,23 @@ async def shaper_effect_of(ws, script):
                 await run_shaper_analysis(ws, _shell_params(line))
 
 
+async def drop_a_file(ws):
+    """Announce a new gcode file the way Moonraker does after an upload.
+
+    The panel had no way to hear about this at all: it consumed only
+    notify_status_update, so the list changed when someone pressed Reload and
+    not before.
+    """
+    await asyncio.sleep(FILE_DROP_SECONDS)
+    item = {"path": "dropped_by_the_fake.gcode", "root": "gcodes",
+            "modified": time.time(), "size": 991232}
+    FILES.append({k: item[k] for k in ("path", "modified", "size")})
+    await ws.send(json.dumps({
+        "jsonrpc": "2.0", "method": "notify_filelist_changed",
+        "params": [{"action": "create_file", "item": item}]}))
+    print("fake announced a new file", flush=True)
+
+
 async def run_print(ws):
     """Drive print_stats and virtual_sdcard from standby to a finish.
 
@@ -652,6 +676,7 @@ async def handler(ws):
 
     pusher = asyncio.create_task(push_status())
     printer = asyncio.create_task(run_print(ws)) if PRINT_RUN else None
+    dropper = asyncio.create_task(drop_a_file(ws)) if FILE_DROP_SECONDS else None
     # Held only so the tasks are not garbage collected while they run, which
     # asyncio does not otherwise prevent for a task nobody awaits.
     tasks = set()
@@ -695,6 +720,8 @@ async def handler(ws):
         pusher.cancel()
         if printer is not None:
             printer.cancel()
+        if dropper is not None:
+            dropper.cancel()
         for task in tasks:
             task.cancel()
 
