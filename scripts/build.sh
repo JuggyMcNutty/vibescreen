@@ -148,10 +148,33 @@ fi
 if [ "$target" = "sim" ] && [ ! -f build/bin/guppyconfig.json ]; then
     sim_host="${PRINTER_HOST:-127.0.0.1}"
     mkdir -p "$REPO_ROOT/build/bin/thumbnails"
-    sed -e "s|<PRINTER_DATA_DIR>/logs|$REPO_ROOT/build/bin|" \
-        -e "s|<GUPPY_DIR>/thumbnails|$REPO_ROOT/build/bin/thumbnails|" \
-        -e "s|\"moonraker_host\": \"127.0.0.1\"|\"moonraker_host\": \"$sim_host\"|" \
-        debian/guppyconfig.json > build/bin/guppyconfig.json
+    # Starts from the Debian template but fills in the fans and sensors a K1 Max
+    # reports, because those two lists are what decide whether the fan, LED and
+    # home panels draw anything at all. Empty lists gave a simulator where
+    # several panels could not be exercised, which is the opposite of what it is
+    # for. The template itself stays empty: it ships to real Debian machines
+    # whose hardware we do not know.
+    python3 - "$REPO_ROOT" "$sim_host" <<'PYCONF'
+import json, sys
+root, host = sys.argv[1], sys.argv[2]
+c = json.load(open("debian/guppyconfig.json"))
+c["log_path"] = root + "/build/bin/guppyscreen.log"
+c["thumbnail_path"] = root + "/build/bin/thumbnails"
+p = c["printers"][c["default_printer"]]
+p["moonraker_host"] = host
+p["fans"] = [
+    {"id": "output_pin fan0", "display_name": "Toolhead Fan"},
+    {"id": "output_pin fan1", "display_name": "Back Fan"},
+    {"id": "output_pin fan2", "display_name": "Side Fan"},
+]
+p["monitored_sensors"] = [
+    {"id": "extruder", "display_name": "Extruder", "controllable": True, "color": "red"},
+    {"id": "heater_bed", "display_name": "Bed", "controllable": True, "color": "purple"},
+    {"id": "temperature_sensor chamber_temp", "display_name": "Chamber",
+     "controllable": False, "color": "blue"},
+]
+json.dump(c, open("build/bin/guppyconfig.json", "w"), indent=2, sort_keys=True)
+PYCONF
     echo "Wrote build/bin/guppyconfig.json pointing at moonraker on $sim_host"
     echo "Override with PRINTER_HOST=<ip>, or just edit the file."
 fi

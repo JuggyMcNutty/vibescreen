@@ -32,7 +32,7 @@ the config sections the panel checks before offering to calibrate.
 Received gcode is appended to $GCODE_LOG, default /tmp/guppy_gcode_received.txt.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 """
-import asyncio, json, math, os, shlex, struct, sys, time, zlib
+import asyncio, json, math, os, re, shlex, struct, sys, time, zlib
 import websockets
 
 # The two temperatures are positional and optional, so they have to be read from
@@ -315,7 +315,32 @@ STATUS = {
     "idle_timeout": {"state": "Idle"},
     "display_status": {"progress": 0.0, "message": None},
     "bed_mesh": build_bed_mesh(MESH_SHAPE),
+
+    # The K1's three fans, as Creality actually defines them: [output_pin] with
+    # scale 255 rather than [fan], which is why the panel drives them with
+    # SET_PIN and not M106. Klipper divides by scale before reporting, so value
+    # here is the normalised 0 to 1 and never the raw number SET_PIN took.
+    "output_pin fan0": {"value": 0.0},
+    "output_pin fan1": {"value": 0.0},
+    "output_pin fan2": {"value": 0.0},
+    "temperature_sensor chamber_temp": {"temperature": 21.4, "measured_min_temp": 19.8,
+                                        "measured_max_temp": 46.2},
+
+    # Creality keeps the value below which each fan does not turn at all in
+    # this macro's variables. The panel needs them to map its slider onto the
+    # part of the range that does something, so it is the one gcode_macro the
+    # UI subscribes to. Values measured on a K1 Max.
+    "gcode_macro PRINTER_PARAM": {"fans": 3, "fan0_min": 25, "fan1_min": 50,
+                                  "fan2_min": 180, "max_x_position": 300.0,
+                                  "max_y_position": 300.0, "max_z_position": 300.0},
 }
+
+STATUS["configfile"]["settings"].update({
+    "output_pin fan0": {"pwm": True, "scale": 255.0, "value": 0.0},
+    "output_pin fan1": {"pwm": True, "scale": 255.0, "value": 0.0},
+    "output_pin fan2": {"pwm": True, "scale": 255.0, "value": 0.0},
+    "temperature_sensor chamber_temp": {"sensor_type": "EPCOS 100K B57560G104F"},
+})
 
 # The sections the panel checks before offering to calibrate or save. Neither
 # resonance_tester nor adxl345 appears in printer.objects.list on a real
@@ -371,6 +396,33 @@ def result_for(method, params):
     if method == "machine.system_info":
         return {"system_info": {"cpu_info": {"cpu_count": 2}}}
     return {}
+
+
+SET_PIN_RE = re.compile(r"SET_PIN\s+PIN=(\S+)\s+VALUE=(\S+)", re.I)
+
+
+def set_pin_effect_of(script):
+    """Status deltas a SET_PIN would produce, applied to STATUS too.
+
+    Acted on rather than only logged, because the fan panel's real bug was that
+    what it wrote and what it read back were on different scales. Only running
+    the round trip shows that: Klipper stores VALUE / scale, so a slider at 50
+    percent on the side fan has to come back as 50 percent and not as the 85 it
+    used to.
+    """
+    m = SET_PIN_RE.search(script)
+    if not m:
+        return []
+    obj = "output_pin %s" % m.group(1)
+    if obj not in STATUS:
+        return []
+    scale = STATUS["configfile"]["settings"].get(obj, {}).get("scale", 1.0)
+    try:
+        raw = float(m.group(2))
+    except ValueError:
+        return []
+    STATUS[obj]["value"] = max(0.0, min(1.0, raw / scale))
+    return [{obj: {"value": STATUS[obj]["value"]}}]
 
 
 def bed_mesh_effect_of(script):
@@ -532,7 +584,7 @@ async def handler(ws):
                 print("=== GCODE RECEIVED ===\n" + script, flush=True)
                 with open(GCODE_LOG, "a") as f:
                     f.write("--- press ---\n" + script + "\n")
-                for delta in bed_mesh_effect_of(script):
+                for delta in bed_mesh_effect_of(script) + set_pin_effect_of(script):
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "method": "notify_status_update",
                         "params": [delta, time.time()]}))
