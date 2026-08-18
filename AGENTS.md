@@ -109,6 +109,23 @@ CI asserts the mips binary is statically linked, which is the property that
 decides whether it runs at all, since the glibc version moves between Creality
 firmware releases.
 
+**Never call `apt-get` directly in the workflow.** Use
+`scripts/ci-apt-install.sh`, and only for something the runner image genuinely
+lacks. The image already ships cmake, gcc, g++ and make, so only the arm build
+(`gcc-aarch64-linux-gnu`) and the simulator (`libsdl2-dev`) need apt at all.
+
+The runner's `/etc/apt/apt-mirrors.txt` lists `azure.archive.ubuntu.com` first
+and only fails over to the canonical archives on a hard error, never on a slow
+one. When that mirror degraded in August 2026 the package downloads dropped
+from 11 MB/s to 57 kB/s and then stalled outright. apt's
+`Acquire::http::Timeout` is an inactivity timeout, so a server dribbling a few
+bytes never trips it, and with no job timeout nine jobs sat wedged for hours
+rather than failing. The helper bounds each attempt with `timeout` on wall
+clock time and drops the Azure mirror before retrying. Every job also carries a
+`timeout-minutes`, so a stall now fails the run in minutes instead of sitting
+until the 360 minute default. Keep both: the helper alone cannot catch a hang
+somewhere else, and a timeout alone just fails without trying the good mirror.
+
 **Android is gone.** Upstream built an APK from a separate `android` branch.
 The workflow went with the CI rework and the `OS_ANDROID` guards and
 `platform.h` went with it. Do not add conditional code for a platform that
