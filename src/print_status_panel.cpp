@@ -14,6 +14,7 @@ LV_IMG_DECLARE(bed);
 LV_IMG_DECLARE(home_z);
 LV_IMG_DECLARE(fan);
 LV_IMG_DECLARE(layers_img);
+LV_IMG_DECLARE(heater);
 
 LV_IMG_DECLARE(fine_tune_img);
 LV_IMG_DECLARE(pause_img);
@@ -73,6 +74,7 @@ PrintStatusPanel::PrintStatusPanel(KWebSocketClient &websocket_client,
   , fan0(detail_cont, &fan, 100, "0%")
   , elapsed(detail_cont, &clock_img, 100, "0s")
   , time_left(detail_cont, &hourglass, 100, "...")
+  , aux_temp(detail_cont, &heater, 100, "")
   , estimated_time_s(0)
   , filament_diameter(1.75) // XXX: check config
   , extruder_target(-1)
@@ -108,7 +110,14 @@ PrintStatusPanel::PrintStatusPanel(KWebSocketClient &websocket_client,
 
   //detail containter row 5
   lv_obj_set_grid_cell(time_left.get_container(), LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_START, 4, 1);
-  // lv_obj_set_grid_cell(fan2.get_container(), LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_START, 4, 1);  
+
+  // The free cell, left by a commented out third fan. Which sensor lands here
+  // is decided in init() from the configured monitored_sensors rather than
+  // hardcoded, so it is the chamber on a K1 Max and whatever else a different
+  // printer has been told about. Upstream #117 asks for the chamber here while
+  // printing engineering materials, and PR #141 offers it by object name.
+  lv_obj_set_grid_cell(aux_temp.get_container(), LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_START, 4, 1);
+  lv_obj_add_flag(aux_temp.get_container(), LV_OBJ_FLAG_HIDDEN);
   
   static lv_coord_t grid_main_row_dsc[] = {LV_GRID_FR(2), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
   static lv_coord_t grid_main_col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
@@ -210,7 +219,28 @@ void PrintStatusPanel::reset() {
   mini_print_status.reset();
 }
 
-void PrintStatusPanel::init(json &fans) {
+void PrintStatusPanel::init(json &fans, json &sensors) {
+  // The extruder and the bed have tiles of their own, so the spare cell goes to
+  // the first configured sensor that is neither: a temperature_sensor or a
+  // temperature_fan. On the development K1 Max that is the chamber.
+  aux_sensor.clear();
+  for (auto &s : sensors.items()) {
+    const std::string &id = s.key();
+    if (id.rfind("temperature_sensor ", 0) == 0 || id.rfind("temperature_fan ", 0) == 0) {
+      aux_sensor = id;
+      auto name = s.value().find("display_name");
+      aux_temp.update_label(name != s.value().end()
+			    ? name->template get<std::string>().c_str()
+			    : KUtils::to_title(KUtils::get_obj_name(id)).c_str());
+      lv_obj_clear_flag(aux_temp.get_container(), LV_OBJ_FLAG_HIDDEN);
+      break;
+    }
+  }
+
+  if (aux_sensor.empty()) {
+    lv_obj_add_flag(aux_temp.get_container(), LV_OBJ_FLAG_HIDDEN);
+  }
+
   fan_speeds.clear();
   std::vector<std::string> values;
   for (auto &f : fans.items()) {
@@ -287,6 +317,14 @@ void PrintStatusPanel::populate() {
       "/printer_state/gcode_move/homing_origin/2"_json_pointer);
   if (!v.is_null()) {
     z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
+  }
+
+  if (!aux_sensor.empty()) {
+    v = s->get_data(json::json_pointer(
+	fmt::format("/printer_state/{}/temperature", aux_sensor)));
+    if (!v.is_null()) {
+      aux_temp.update_label(fmt::format("{}", (int)v.template get<double>()).c_str());
+    }
   }
 }
 
@@ -441,6 +479,13 @@ void PrintStatusPanel::consume(json &j) {
   if (!v.is_null()) {
     uint32_t passed = static_cast<uint32_t>(v.template get<float>());
     update_time_progress(passed);
+  }
+
+  if (!aux_sensor.empty()) {
+    v = j[json::json_pointer(fmt::format("/params/0/{}/temperature", aux_sensor))];
+    if (!v.is_null()) {
+      aux_temp.update_label(fmt::format("{}", (int)v.template get<double>()).c_str());
+    }
   }
 
   // progress percentage

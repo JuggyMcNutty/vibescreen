@@ -102,7 +102,8 @@ void MainPanel::init(json &j) {
   macros_panel.populate();
 
   auto fans = State::get_instance()->get_display_fans();
-  print_status_panel.init(fans);
+  auto status_sensors = State::get_instance()->get_display_sensors();
+  print_status_panel.init(fans, status_sensors);
   printertune_panel.init(j);
   extruder_panel.init(j);
 }

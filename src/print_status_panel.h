@@ -20,7 +20,7 @@ class PrintStatusPanel : public NotifyConsumer {
   PrintStatusPanel(KWebSocketClient &ws, std::mutex &lock, lv_obj_t *mini_parent);
   ~PrintStatusPanel();
 
-  void init(json &fans);
+  void init(json &fans, json &sensors);
   void reset();
   void populate();
   void foreground();
@@ -75,7 +75,7 @@ class PrintStatusPanel : public NotifyConsumer {
   ImageLabel elapsed;
   /* ImageLabel fan1; */
   ImageLabel time_left;
-  /* ImageLabel fan2; */
+  ImageLabel aux_temp;
 
   /* json &metadata; */
   uint32_t estimated_time_s;
@@ -93,6 +93,10 @@ class PrintStatusPanel : public NotifyConsumer {
   std::string current_filename;
 
   std::map<std::string, int> fan_speeds;
+
+  // The object behind the aux_temp tile, empty when the printer has no sensor
+  // to put there. See init().
+  std::string aux_sensor;
 };
 
 #endif // __PRINT_STATUS_PANEL_H__
