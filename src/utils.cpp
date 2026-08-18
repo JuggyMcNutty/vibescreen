@@ -77,6 +77,15 @@ namespace KUtils {
     return settings.contains(want);
   }
 
+  std::string short_measure(double v, const char *unit) {
+    // Half a micron. Below that the number is arithmetic residue rather than a
+    // setting anyone made, and printing its sign is worse than printing zero.
+    if (v > -0.0005 && v < 0.0005) {
+      v = 0.0;
+    }
+    return fmt::format("{:.3f} {}", v, unit);
+  }
+
   double config_number(const std::string &section,
 		       const std::string &key,
 		       double fallback) {

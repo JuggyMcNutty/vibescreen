@@ -4,6 +4,7 @@
 #include "hv/json.hpp"
 #include <vector>
 #include <map>
+#include <string>
 #include <functional>
 #include <algorithm>
 #include <utility>
@@ -78,6 +79,16 @@ namespace KUtils {
   double config_number(const std::string &section,
 		       const std::string &key,
 		       double fallback);
+
+  // A short offset or advance value, formatted for a label.
+  //
+  // fmt's "{:.5}" with no presentation type is the general format, which flips
+  // to an exponent once the value drops below 1e-4. Z offsets and pressure
+  // advance reach that routinely: two opposite Z_ADJUST calls leave float
+  // residue like 5.55e-17, which is zero for any purpose a user has and
+  // rendered as "5.5511e-17 mm". Fixed precision, and anything under half a
+  // micron reads as zero.
+  std::string short_measure(double v, const char *unit);
 
   // Converting between the 0 to 100 the fan sliders speak and the raw value
   // SET_PIN takes for an [output_pin] fan.

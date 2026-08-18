@@ -277,7 +277,7 @@ void PrintStatusPanel::populate() {
   v = s->get_data(
       "/printer_state/gcode_move/homing_origin/2"_json_pointer);
   if (!v.is_null()) {
-    z_offset.update_label(fmt::format("{:.5} mm", v.template get<double>()).c_str());
+    z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
 }
 
@@ -403,7 +403,7 @@ void PrintStatusPanel::consume(json &j) {
   // zoffset
   v = j["/params/0/gcode_move/homing_origin/2"_json_pointer];
   if (!v.is_null()) {
-    z_offset.update_label(fmt::format("{:.5} mm", v.template get<double>()).c_str());
+    z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
 
   std::vector<std::string> values;

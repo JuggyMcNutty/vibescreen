@@ -1,5 +1,6 @@
 #include "finetune_panel.h"
 #include "state.h"
+#include "utils.h"
 #include "spdlog/spdlog.h"
 #include "config.h"
 
@@ -103,13 +104,13 @@ void FineTunePanel::foreground() {
   auto v = State::get_instance()->get_data(
 		"/printer_state/gcode_move/homing_origin/2"_json_pointer);
   if (!v.is_null()) {
-    z_offset.update_label(fmt::format("{:.5} mm", v.template get<double>()).c_str());
+    z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
 
   v = State::get_instance()->get_data(
 		"/printer_state/extruder/pressure_advance"_json_pointer);
   if (!v.is_null()) {
-    pa.update_label(fmt::format("{:.5} mm/s", v.template get<double>()).c_str());
+    pa.update_label(KUtils::short_measure(v.template get<double>(), "mm/s").c_str());
   }
 
   v = State::get_instance()->get_data(
@@ -146,12 +147,12 @@ void FineTunePanel::consume(json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
   auto v = j["/params/0/gcode_move/homing_origin/2"_json_pointer];
   if (!v.is_null()) {
-    z_offset.update_label(fmt::format("{:.5} mm", v.template get<double>()).c_str());
+    z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
 
   v = j["/params/0/extruder/pressure_advance"_json_pointer];
   if (!v.is_null()) {
-    pa.update_label(fmt::format("{:.5} mm/s", v.template get<double>()).c_str());
+    pa.update_label(KUtils::short_measure(v.template get<double>(), "mm/s").c_str());
   }
 
   v = j["/params/0/gcode_move/speed_factor"_json_pointer];
@@ -217,7 +218,8 @@ void FineTunePanel::handle_pa(lv_event_t *e) {
       auto v = State::get_instance()->get_data(
 		     "/printer_state/configfile/settings/extruder/pressure_advance"_json_pointer);
       if (!v.is_null()) {
-	ws.gcode_script(fmt::format("SET_PRESSURE_ADVANCE ADVANCE={}", v.template get<double>()));
+	ws.gcode_script(fmt::format("SET_PRESSURE_ADVANCE ADVANCE={:.4f}",
+				    v.template get<double>()));
       }
     } else {
 
@@ -227,10 +229,16 @@ void FineTunePanel::handle_pa(lv_event_t *e) {
 	const char * step = lv_btnmatrix_get_btn_text(zoffset_selector.get_selector(),
 						      zoffset_selector.get_selected_idx());
 	
-	double direction = btn == paup_btn.get_container() ? std::stod(step) : -std::stod(step);
+	double direction = btn == paup_btn.get_container()
+	  ? KUtils::parse_double(step, 0.0)
+	  : -KUtils::parse_double(step, 0.0);
 	double new_pa = cur_pa.template get<double>() + direction;
 	new_pa = new_pa < 0 ? 0 : new_pa;
-	ws.gcode_script(fmt::format("SET_PRESSURE_ADVANCE ADVANCE={}", new_pa));
+	// Fixed precision because adding 0.05 to 0.1 in binary floating point
+	// gives 0.15000000000000002, and fmt's default for a double is the
+	// shortest round trip, so that is what went out and what the console
+	// showed. The panel's own steps are all multiples of 0.01.
+	ws.gcode_script(fmt::format("SET_PRESSURE_ADVANCE ADVANCE={:.4f}", new_pa));
       }
     }
   }
