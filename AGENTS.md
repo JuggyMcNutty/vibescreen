@@ -216,7 +216,7 @@ assets/               generated LVGL C arrays for icons and fonts
 debian/               Raspberry Pi and Debian packaging, plus the config template
 themes/               primary and secondary colour json, installed to the printer
 scripts/              ours, see below
-tools/                ours, fake_moonraker.py for local testing
+tools/                ours, the fakes and shot.py for local testing
 docs/                 ours
 screenshots/          referenced from README.md, ours plus some still upstream's
 ```
@@ -499,19 +499,34 @@ delta carrying no `profile_name`, which is the shape Moonraker really sends and
 the one panels get wrong.
 
 For screenshots, SDL picks Wayland when it can and the X root window is not
-capturable under XWayland. Force X11:
+capturable under XWayland. Force X11, then use `tools/shot.py`:
 
 ```sh
 SDL_VIDEODRIVER=x11 ./build/bin/guppyscreen &
-xwd -silent -name "TFT Simulator" | xwdtopnm | pnmtopng > shot.png
+python3 tools/shot.py shot.png
 ```
 
-**Check the colours in anything that pipeline produces.** On a 32 bpp TrueColor
-visual `xwdtopnm` emits maxval 65535 and maps the channels wrongly, pinning
-blue to `0xff`, which turns the whole UI a flat blue. It is not obviously
-broken, it just quietly lies, so a colour bug and a capture bug look the same.
-Decoding the XWD header's `red_mask`, `green_mask` and `blue_mask` yourself is
-exact and needs nothing installed.
+It prints the top-left pixel so a bad capture announces itself. On the dark
+theme that corner is a dark grey, around `(63, 66, 70)` on the left rail and
+`(40, 43, 48)` on a panel. **A blue channel near 255 means the capture is
+wrong, not the UI.**
+
+Two ways to get that wrong, and the second one bit us:
+
+`xwd | xwdtopnm | pnmtopng` looks like the obvious pipeline. On a 32 bpp
+TrueColor visual `xwdtopnm` emits maxval 65535 and maps the channels wrongly,
+pinning blue to `0xff` and turning the whole UI flat blue.
+
+Decoding the header's `red_mask`, `green_mask` and `blue_mask` yourself is
+exact **only if you also read the pixels in the right byte order**. The header
+is big-endian, but the pixel data is in the server's, named by the header's own
+`byte_order` field. Read 32 bpp pixels big-endian on a little-endian server and
+every channel shifts by a byte: red and green swap, and the alpha byte lands
+where blue belongs, so a `(40, 43, 48)` background reads `(43, 40, 255)`. That
+produces a plausible looking image, which is exactly what makes it dangerous.
+This document recommended the mask decode without the byte order until
+2026-08-19, and a capture taken by following it went unnoticed until the
+result was compared against a committed screenshot.
 
 `xdotool` can drive it, but LVGL polls its input device, so an instantaneous
 click gets missed. Move, then `mousedown`, wait ~0.4s, then `mouseup`.
@@ -521,15 +536,12 @@ Under XWayland a grab taken a second after a click can still show the state
 before it, which reads exactly like the click having been dropped. Retrying
 then double-presses the button: measured 2026-08-16, that is how an extra tap
 landed on the panel underneath a dialog that had already closed. Do not sleep
-and hope. Grab until two consecutive grabs are identical, then keep that one:
-
-```sh
-prev=""; while :; do
-  cur=$(xwd -silent -name "TFT Simulator" | md5sum)
-  [ "$cur" = "$prev" ] && break
-  prev=$cur; sleep 0.4
-done
-```
+and hope. Grab until two consecutive grabs are identical, then keep that one.
+`tools/shot.py` does this, and **bounds it**, which matters: an unbounded loop
+never terminates on a screen with an animation on it, and the main panel's
+temperature chart redraws every frame. Waiting for two identical grabs there
+hangs until something kills it. `--settle` sets the ceiling, and the last grab
+is used when it runs out.
 
 If input really does stop, the usual cause is a `mouseup` that never arrived,
 leaving the button stuck down so no later press is a new press. `xdotool
