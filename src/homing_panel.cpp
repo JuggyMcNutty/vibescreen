@@ -26,8 +26,8 @@ HomingPanel::HomingPanel(KWebSocketClient &websocket_client, std::mutex &lock)
   , y_down_btn(homing_cont, &arrow_down, "Y-", &HomingPanel::_handle_callback, this)    
   , x_up_btn(homing_cont, &arrow_right, "X+", &HomingPanel::_handle_callback, this)
   , x_down_btn(homing_cont, &arrow_left, "X-", &HomingPanel::_handle_callback, this)
-  , z_up_btn(homing_cont, &z_closer, "Z+", &HomingPanel::_handle_callback, this)
-  , z_down_btn(homing_cont, &z_farther, "Z-", &HomingPanel::_handle_callback, this)
+  , z_up_btn(homing_cont, &z_farther, "Z+", &HomingPanel::_handle_callback, this)
+  , z_down_btn(homing_cont, &z_closer, "Z-", &HomingPanel::_handle_callback, this)
   , emergency_btn(homing_cont, &emergency, "Stop", &HomingPanel::_handle_callback, this,
 		  "Do you want to emergency stop?",
 		  [&websocket_client]() {
@@ -130,10 +130,6 @@ void HomingPanel::foreground() {
       y_down_btn.disable();
     }
 
-    //Set the Z axis buttons
-    z_up_btn.set_image(&z_farther);
-    z_down_btn.set_image(&z_closer);
-
     if (homed_axes.find("z") != std::string::npos) {
       z_up_btn.enable();
       z_down_btn.enable();
@@ -143,18 +139,25 @@ void HomingPanel::foreground() {
     }
   }
 
-  //Set the Z axis buttons
-
-  v = Config::get_instance()->get_json("/invert_z_icon");
+  // The arrow in these icons is the nozzle and the plate below it is the bed,
+  // so z_farther means the gap opens. That is what Z+ does, on every machine,
+  // whichever of the two parts is the one that physically moves. The default
+  // used to be the other way round, putting the gap-closing arrow on a button
+  // labelled Z+, which is what upstream #28 and our own #1 both report.
+  //
+  // The toggle stays for people who would rather the arrow tracked the part
+  // they can see moving: on a K1 the bed drops when the gap opens, so a down
+  // arrow on Z+ describes the view even though it contradicts the label. The
+  // config key was renamed along with the meaning, so anyone who had turned
+  // the old Invert Z Icon on to get an up arrow on Z+ still has one.
+  v = Config::get_instance()->get_json("/invert_z_arrows");
   bool inverted = !v.is_null() && v.template get<bool>();
   if (inverted) {
-    // UP arrow
-    z_up_btn.set_image(&z_farther);
-    z_down_btn.set_image(&z_closer);
-  } else {
-    // DOWN arrow
     z_up_btn.set_image(&z_closer);
     z_down_btn.set_image(&z_farther);
+  } else {
+    z_up_btn.set_image(&z_farther);
+    z_down_btn.set_image(&z_closer);
   }
 
   lv_obj_move_foreground(homing_cont);

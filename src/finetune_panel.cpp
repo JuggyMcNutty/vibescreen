@@ -24,8 +24,8 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   , panel_cont(lv_obj_create(lv_scr_act()))
   , values_cont(lv_obj_create(panel_cont))
   , zreset_btn(panel_cont, &refresh_img, "Reset Z", &FineTunePanel::_handle_zoffset, this)
-  , zup_btn(panel_cont, &z_closer, "Z+", &FineTunePanel::_handle_zoffset, this)
-  , zdown_btn(panel_cont, &z_farther, "Z-", &FineTunePanel::_handle_zoffset, this)
+  , zup_btn(panel_cont, &z_farther, "Z+", &FineTunePanel::_handle_zoffset, this)
+  , zdown_btn(panel_cont, &z_closer, "Z-", &FineTunePanel::_handle_zoffset, this)
   , pareset_btn(panel_cont, &refresh_img, "Reset PA", &FineTunePanel::_handle_pa, this)
   , paup_btn(panel_cont, &pa_plus_img, "PA+", &FineTunePanel::_handle_pa, this)
   , padown_btn(panel_cont, &pa_minus_img, "PA-", &FineTunePanel::_handle_pa, this)
@@ -127,17 +127,17 @@ void FineTunePanel::foreground() {
 	   static_cast<int>(v.template get<double>() * 100)).c_str());
   }
 
-  //Set the Z axis buttons
-  v = Config::get_instance()->get_json("/invert_z_icon");
+  // Same convention as the homing panel, which carries the reasoning. Z+ here
+  // raises the gcode offset, which lifts the nozzle away from the bed, so the
+  // gap-opening arrow belongs on it.
+  v = Config::get_instance()->get_json("/invert_z_arrows");
   bool inverted = !v.is_null() && v.template get<bool>();
   if (inverted) {
-    // UP arrow
-    zup_btn.set_image(&z_farther);
-    zdown_btn.set_image(&z_closer);
-  } else {
-    // DOWN arrow
     zup_btn.set_image(&z_closer);
     zdown_btn.set_image(&z_farther);
+  } else {
+    zup_btn.set_image(&z_farther);
+    zdown_btn.set_image(&z_closer);
   }
   
   lv_obj_move_foreground(panel_cont);

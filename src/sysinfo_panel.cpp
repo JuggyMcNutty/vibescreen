@@ -180,11 +180,11 @@ SysInfoPanel::SysInfoPanel()
   lv_obj_set_style_pad_all(z_icon_toggle_cont, 0, 0);
 
   l = lv_label_create(z_icon_toggle_cont);
-  lv_label_set_text(l, "Invert Z Icon");
+  lv_label_set_text(l, "Invert Z Arrows");
   lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
   lv_obj_align(z_icon_toggle, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  v = conf->get_json("/invert_z_icon");
+  v = conf->get_json("/invert_z_arrows");
   if (!v.is_null()) {
     if (v.template get<bool>()) {
       lv_obj_add_state(z_icon_toggle, LV_STATE_CHECKED);
@@ -294,7 +294,7 @@ void SysInfoPanel::handle_callback(lv_event_t *e)
     }
     else if (obj == z_icon_toggle) {
       bool inverted = lv_obj_has_state(z_icon_toggle, LV_STATE_CHECKED);
-      conf->set<bool>("/invert_z_icon", inverted);
+      conf->set<bool>("/invert_z_arrows", inverted);
       conf->save();
     } else if (obj == theme_dd) {
       auto idx = lv_dropdown_get_selected(theme_dd);
