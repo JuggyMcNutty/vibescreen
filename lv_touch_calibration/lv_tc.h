@@ -102,10 +102,26 @@ lv_point_t _lv_tc_transform_point_indev(lv_indev_data_t *data);
 
 /**
  * Transform a point on the touch panel into a point on the screen.
+ *
+ * The result is in the display's pre-rotation frame, because LVGL rotates every
+ * pointer reading itself in indev_pointer_proc. Anything that wants a point it
+ * can hand to lv_obj_set_pos wants lv_tc_transform_point_screen instead.
+ *
+ * @param point the point on the touch panel (lv_point_t)
+ * @returns the point in the driver's own frame (lv_point_t)
+ */
+lv_point_t lv_tc_transform_point(lv_point_t point);
+
+/**
+ * Transform a point on the touch panel into a screen coordinate.
+ *
+ * The calibration is fit from raw panel readings to on-screen points, so this
+ * is just the affine with no rotation compensation after it.
+ *
  * @param point the point on the touch panel (lv_point_t)
  * @returns the point on the screen (lv_point_t)
  */
-lv_point_t lv_tc_transform_point(lv_point_t point);
+lv_point_t lv_tc_transform_point_screen(lv_point_t point);
 
 
 

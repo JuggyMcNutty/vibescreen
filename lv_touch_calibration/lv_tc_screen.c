@@ -206,8 +206,13 @@ static void lv_tc_screen_process_input(lv_obj_t* screenObj, lv_point_t tchPoint)
             //Go to the next calibration step
             lv_tc_screen_step(screenObj, tCScreenObj->currentStep + 1, tchPoint);
         } else {
-            //When the calibration is completed, show the cursor at touch position
-            lv_tc_screen_set_indicator_pos(screenObj, lv_tc_transform_point(tchPoint), true);
+            /* When the calibration is completed, show the cursor at touch
+             * position. Screen coordinates, because this goes to lv_obj_set_pos
+             * rather than back to LVGL's input pipeline: the point the indev
+             * path returns is pre-rotation and nothing un-rotates it here, so
+             * using it put the cursor somewhere the user was not touching and
+             * made a correct calibration look like it had been ignored. */
+            lv_tc_screen_set_indicator_pos(screenObj, lv_tc_transform_point_screen(tchPoint), true);
         }
     }
 }

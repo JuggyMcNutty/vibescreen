@@ -158,26 +158,56 @@ lv_point_t _lv_tc_transform_point_indev(lv_indev_data_t *data) {
     return point;
 }
 
-lv_point_t lv_tc_transform_point(lv_point_t point) {
+lv_point_t lv_tc_transform_point_screen(lv_point_t point) {
     lv_point_t transformedPoint = point;
     if (calibResult.isValid) {
         transformedPoint.x = roundf((lv_tc_val_t)point.x * calibResult.a + (lv_tc_val_t)point.y * calibResult.b + calibResult.c);
         transformedPoint.y = roundf((lv_tc_val_t)point.x * calibResult.d + (lv_tc_val_t)point.y * calibResult.e + calibResult.f);
-
-        lv_disp_t *disp = lv_disp_get_default();
-        if (disp->driver->rotated == LV_DISP_ROT_90 || disp->driver->rotated == LV_DISP_ROT_270) {
-            lv_coord_t tmp = transformedPoint.y;
-            transformedPoint.y = transformedPoint.x;
-            transformedPoint.x = lv_disp_get_ver_res(NULL) - tmp - 1;
-        }
-
-        if (disp->driver->rotated == LV_DISP_ROT_180) {
-            transformedPoint.y = lv_disp_get_ver_res(NULL) - transformedPoint.y;
-            transformedPoint.x = lv_disp_get_hor_res(NULL) - transformedPoint.x;
-        }
     }
 
     return transformedPoint;
+}
+
+lv_point_t lv_tc_transform_point(lv_point_t point) {
+    lv_point_t screenPoint = lv_tc_transform_point_screen(point);
+    if (!calibResult.isValid) {
+        return screenPoint;
+    }
+
+    /* The calibration is fit from raw panel readings to on-screen points, using
+     * lv_disp_get_*_res, which already accounts for rotation. But LVGL rotates
+     * every pointer reading again in indev_pointer_proc, so what has to be
+     * returned here is the point that becomes screenPoint after LVGL is done
+     * with it: the inverse of that rotation, in the driver's own resolutions
+     * rather than the logical ones.
+     *
+     * The version this replaces applied a rotation rather than its inverse and
+     * used the logical resolutions. For 270 the two happen to agree, which is
+     * why the K1 was never affected. For 180 it was off by a pixel. For 90 it
+     * put the touch somewhere else entirely. */
+    lv_disp_t *disp = lv_disp_get_default();
+    lv_coord_t w = disp->driver->hor_res;
+    lv_coord_t h = disp->driver->ver_res;
+    lv_point_t driverPoint = screenPoint;
+
+    switch (disp->driver->rotated) {
+        case LV_DISP_ROT_90:
+            driverPoint.x = screenPoint.y;
+            driverPoint.y = h - 1 - screenPoint.x;
+            break;
+        case LV_DISP_ROT_180:
+            driverPoint.x = w - 1 - screenPoint.x;
+            driverPoint.y = h - 1 - screenPoint.y;
+            break;
+        case LV_DISP_ROT_270:
+            driverPoint.x = w - 1 - screenPoint.y;
+            driverPoint.y = screenPoint.x;
+            break;
+        default:
+            break;
+    }
+
+    return driverPoint;
 }
 
 /**********************
