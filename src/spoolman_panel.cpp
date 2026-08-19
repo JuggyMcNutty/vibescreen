@@ -91,6 +91,15 @@ void SpoolmanPanel::init() {
   };
 
   ws.send_jsonrpc("server.spoolman.proxy", param, [this](json &d) {
+    // Only /result was ever looked at, so a Moonraker error reply went nowhere:
+    // no log line, nothing on screen, and a Spoolman button that opens an empty
+    // list. Upstream #107 and #115 are both people trying to work out why.
+    auto &err = d["/error"_json_pointer];
+    if (!err.is_null()) {
+      spdlog::warn("spoolman spool query failed: {}", err.dump());
+      return;
+    }
+
     auto &s = d["/result"_json_pointer];
     if (!s.is_null() && !s.empty()) {
       spools.clear();
@@ -114,6 +123,12 @@ void SpoolmanPanel::init() {
 
   ws.send_jsonrpc("server.spoolman.get_spool_id", [this](json &d) {
     spdlog::trace("got spool active id {}", d.dump());
+    auto &err = d["/error"_json_pointer];
+    if (!err.is_null()) {
+      spdlog::warn("spoolman active spool query failed: {}", err.dump());
+      return;
+    }
+
     auto &v = d["/result/spool_id"_json_pointer];
     if (!v.is_null()) {
       this->active_id = v.template get<int>();

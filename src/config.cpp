@@ -64,6 +64,13 @@ void Config::init(std::string config_path, const std::string thumbdir) {
     {"unload_filament", "_GUPPY_QUIT_MATERIAL"}
   };
 
+  // Spoolman is probed at every connect whenever Moonraker reports the
+  // component, and there was no way to say no. A Spoolman version guppy cannot
+  // parse, or one configured in Moonraker but not actually reachable, then
+  // makes itself felt on every start with nothing to do about it. Upstream PR
+  // #61 and issues #107 and #115.
+  bool default_disable_spoolman = false;
+
   // Options offered on the extruder panel. Wide enough to cover exotic
   // filaments: PC and nylon blends want 260 to 300, PPS-CF and similar go
   // higher still, and composite purges need far more than the 35mm this used
@@ -104,6 +111,7 @@ void Config::init(std::string config_path, const std::string thumbdir) {
                                  {"monitored_sensors", sensors_conf},
                                  {"fans", fans_conf},
                                  {"default_macros", default_macros_conf},
+                                 {"disable_spoolman", default_disable_spoolman},
                              }}}
         }
     };
@@ -151,6 +159,11 @@ void Config::init(std::string config_path, const std::string thumbdir) {
     auto &extrude_speeds = data[json::json_pointer(df() + "extrude_speeds")];
     if (extrude_speeds.is_null()) {
       data[json::json_pointer(df() + "extrude_speeds")] = extrude_speeds_conf;
+    }
+
+    auto &disable_spoolman = data[json::json_pointer(df() + "disable_spoolman")];
+    if (disable_spoolman.is_null()) {
+      data[json::json_pointer(df() + "disable_spoolman")] = default_disable_spoolman;
     }
 
     auto &guppy_init = data["/guppy_init_script"_json_pointer];

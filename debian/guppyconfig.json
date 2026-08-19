@@ -10,6 +10,7 @@
         "load_filament": "_GUPPY_LOAD_MATERIAL",
         "unload_filament": "_GUPPY_QUIT_MATERIAL"
       },
+      "disable_spoolman": false,
       "display_sleep_sec": 600,
       "fans": [],
       "log_level": "debug",

@@ -71,10 +71,21 @@ void InitPanel::connected(KWebSocketClient &ws) {
 	this->main_panel.subscribe();
 
 	// spoolman
-	ws.send_jsonrpc("server.info", [this](json &j) {
+	Config *conf = Config::get_instance();
+	auto &off = conf->get_json(conf->df() + "disable_spoolman");
+	bool spoolman_disabled = !off.is_null() && off.template get<bool>();
+
+	ws.send_jsonrpc("server.info", [this, spoolman_disabled](json &j) {
 	  spdlog::debug("server_info {}", j.dump());
 	  State::get_instance()->set_data("server_info", j, "/result");
-	  
+
+	  // server.info is worth having either way, it is only the spoolman
+	  // half that disable_spoolman turns off.
+	  if (spoolman_disabled) {
+	    spdlog::info("spoolman disabled in config, not probing for it");
+	    return;
+	  }
+
 	  auto &components = j["/result/components"_json_pointer];
 	  if (!components.is_null()) {
 	    const auto &has_spoolman = components.template get<std::vector<std::string>>();

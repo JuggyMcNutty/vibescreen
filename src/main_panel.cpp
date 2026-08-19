@@ -303,6 +303,12 @@ void MainPanel::create_leds(json &leds) {
 
 void MainPanel::enable_spoolman() {
   spoolman_panel.init();
+
+  // Both of these enable a ButtonContainer, and this runs on the libhv
+  // websocket thread out of InitPanel::connected, so without the lock they are
+  // touching LVGL from the wrong thread. docs/audit.md C18 names this as one of
+  // the confirmed holes behind the startup crash.
+  std::lock_guard<std::mutex> lock(lv_lock);
   setting_panel.enable_spoolman();
   extruder_panel.enable_spoolman();
 }
