@@ -48,9 +48,10 @@ Arch and derivatives (`sdl2` is `sdl2-compat` on current Arch):
 
 ### Building
 
-    git clone --recursive <your fork> && cd guppyscreen
+    git clone --recursive <your fork> && cd vibescreen
     scripts/setup-toolchain.sh      # downloads the cross toolchain, once
     scripts/build.sh mips           # K1 / K1 Max
+    scripts/build.sh arm            # aarch64, for the Debian package
     scripts/build.sh sim            # x86_64 SDL build for this machine
 
 `scripts/build.sh` applies the patches in `patches/`, builds the vendored
@@ -60,6 +61,7 @@ the right flags per target. The executable is `./build/bin/guppyscreen`.
 Variants:
 
     scripts/build.sh mips zbolt     # Z-Bolt icon set
+    scripts/build.sh mips --small   # Ender 3 V3 KE / Nebula Pad sized panel
     scripts/build.sh mips --clean   # rebuild the vendored libraries too
 
 Driving `make` directly still works, but then applying `patches/` and setting
@@ -76,15 +78,19 @@ first build if there is not one already. Point it at a printer with:
 Log and thumbnail paths default to directories beside the binary in simulator
 builds, so nothing needs `/usr/data` to exist.
 
-To test against something other than a real printer, `tools/fake_moonraker.py`
-speaks enough of the Moonraker protocol for the UI to start. It records every
-gcode it is sent, and can be told to reject them so error handling can be
-exercised. It also serves a bed mesh, in a choice of shapes, and acts on
-`BED_MESH_CLEAR` and `BED_MESH_CALIBRATE` rather than only logging them.
+To test against something other than a real printer, there are two fakes:
 
-    python3 tools/fake_moonraker.py 240 240 --reject   # reject every command
-    python3 tools/fake_moonraker.py --mesh bowl        # adaptive|full|bowl|tilt|flat
-    python3 tools/fake_moonraker.py --wiper            # pretend WIPE_NOZZLE exists
+    python3 tools/fake_moonraker.py 240 240      # enough Moonraker to run the UI
+    python3 tools/fake_wpa_supplicant.py --dir /tmp/fake-wpa   # for the wifi panel
 
-Use it for anything that would otherwise command real hardware. `AGENTS.md` has
-the detail, including why the calibrate reply is deliberately incomplete.
+Use them for anything that would otherwise command real hardware. Between them
+they cover a bed mesh, a whole print from standby to finished, the file list,
+the input shaper and belts runs, API key auth, and a wifi network that refuses
+your password.
+
+**Both are documented in `AGENTS.md`**, which is where their flags are kept up
+to date. This file used to list three of them and went on doing so long after
+there were twelve; two copies of the same instructions only ever diverge.
+
+`tools/shot.py` screenshots the simulator window. Use it rather than
+`xwd | xwdtopnm`, which silently gets the colours wrong.
