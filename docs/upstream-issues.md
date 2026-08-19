@@ -35,24 +35,26 @@ power loss rows on 2026-08-19.
 | `gcode_macro PRINTER_PARAM` | `fan0_min 25`, `fan1_min 50`, `fan2_min 180` | #33 |
 | `gcode_macro M106` | maps `S` onto `min + (255 - min) * S / 255`, and `S=0` stays 0 | #33, #118 |
 | `output_pin fan1` and `temperature_fan chamber_fan` | both on pin `PC0` | #118 |
-| `output_pin LED` | `scale: 1.0` | #72 |
+| `output_pin LED` | `scale: 1.0`, from Klipper's default. `configfile.config` sets no `scale` at all | #72 |
 | `temperature_sensor chamber_temp` | present | PR #141 |
 | `gcode_macro G28` | does not exist | #66 |
-| `printer.objects.list` | contains `calibrate_shaper_config`, not `resonance_tester` or `adxl345` | corrects `AGENTS.md` |
+| `printer.objects.list` | contains `calibrate_shaper_config`, not `resonance_tester` or `adxl345`, which are in `configfile.settings` instead | #114, and why `has_config_section` exists |
 | power loss recovery module | absent from `printer.objects.list` | #151, #100 |
 | power loss recovery macro | none. `RESUME` exists but only resumes a paused print | #151, #100 |
-| `save_variables` | holds `{"zoffset": {"z": 0}}` and nothing about an interrupted print | #151, #100 |
+| `save_variables` | holds `{"zoffset": {"z": 0}}` and nothing about an interrupted print. The file is helper-script's, `Helper-Script/variables.cfg` | #151, #100 |
+| `print_stats` | carries Creality's own `power_loss` and `z_pos` fields, which look like recovery state and drive nothing | #151, #100 |
 
-One more, which is about deployment rather than the printer: the installed
-`_GUPPY_LOAD_MATERIAL` on that machine is
+One more, which was about deployment rather than the printer. On 2026-08-18 the
+installed `_GUPPY_LOAD_MATERIAL` on that machine was
 
 ```
 G1 E120 F300
 ```
 
-It reads `EXTRUDE_LEN` into a variable and then ignores it. That is neither our
-version nor upstream's, which both say `G1 E{extrude_len} F180`. See #132 below
-and the `update.sh` entry for why.
+It read `EXTRUDE_LEN` into a variable and then ignored it, which is neither our
+version nor upstream's; both say `G1 E{extrude_len} F180`. The machine was
+finally refreshed on 2026-08-19 and now runs ours. See the #132 footnote below
+for why it took two goes.
 
 ---
 
@@ -61,11 +63,11 @@ and the `update.sh` entry for why.
 | PR | Title | Verdict |
 | --- | --- | --- |
 | #164 | Add CFS helper for hot filament overrides and UI enhancements | **declined** |
-| #141 | Add chamber temp to print status | **open**, taking the idea not the patch |
+| #141 | Add chamber temp to print status | **fixed**, `9d25e81`, taking the idea not the patch |
 | #137 | Prevent line breaks in env var list | **fixed**, `5658e14` rewrote `DEVELOPMENT.md` |
 | #136 | Add more extruder temperature options | **fixed**, `ff6dfad` and `a937708` |
 | #105 | SAVE_INPUT_SHAPER is not a valid command, SET_INPUT_SHAPER is | **declined** |
-| #61 | Add configuration option to disable spoolman integration | **open**, taking it |
+| #61 | Add configuration option to disable spoolman integration | **fixed**, `ec3b9e3` |
 
 **#164, CFS.** 2358 lines across 13 files. It adds a panel, a pre-print slot
 mapping dialog, an embedded Python module carried as a generated C header, and a
@@ -104,7 +106,7 @@ commit is named so the reasoning can be read back.
 | #104 | Belt calibration crashed Klipper, and its panel span forever | `745ab03` |
 | #135 | Belt calibration warned twice on every run | `c443f0b` |
 | #90 | Load filament leaked relative extrusion mode | `59993da` |
-| #132 | Extrude length had no effect on load | `87f1f56` |
+| #132 | Extrude length had no effect on load | `87f1f56`, `a5286cb` |
 | #116 | Tiny Z offsets rendered in scientific notation | `775bf27` |
 | #116, #91, #41 | Three digit temperatures wrapped onto two lines | `28e6c87` |
 | #32 | Moonraker API key was never sent | `ca18c1d` |
@@ -119,11 +121,20 @@ commit is named so the reasoning can be read back.
 
 Two of those deserve a footnote.
 
-**#132 is a deployment fix, not a code fix.** The macro we ship has always
-honoured `EXTRUDE_LEN`. `installer.sh` copies the Klipper configs into the
-printer's own config tree and `update.sh` only replaced the binary, so whatever
-was installed first stayed there forever. That also gated #90, #104 and #135,
-since all three are changes under `k1/`.
+**#132 is a deployment fix, not a code fix, and it took two goes.** The macro we
+ship has always honoured `EXTRUDE_LEN`. `installer.sh` copies the Klipper
+configs into the printer's own config tree and `update.sh` only replaced the
+binary, so whatever was installed first stayed there forever. That also gated
+#90 and #135, both of which are changes under `k1/`. Not #104: `745ab03`
+changes only panel source, which ships in the binary.
+
+`87f1f56` added the refresh but put it below `update.sh`'s early exit for an
+install already on the newest release, which made it unreachable on exactly the
+upgrade it existed for. The script that performs an upgrade is the copy already
+on disk, so the release that first shipped the refresh could not run it, and by
+the next run the version matched and it exited first. Found on the printer on
+2026-08-19 and fixed in `a5286cb`. Deployment was still broken for a day after
+this table first called #132 closed.
 
 **#102 is unverified on hardware.** A K1 Max builds with `EVDEV_CALIBRATE`
 unset and `touch_calibrated` false, so none of that code runs here. The
@@ -140,7 +151,10 @@ is not obvious from the issue text.
 
 **#33 and #118, the fans.** Creality defines the K1's fans as `[output_pin]`
 with `scale: 255`, and each has a minimum value below which it does not spin.
-Their `M106` maps a user 0-255 onto `min..255` so the whole slider is useful.
+The `M106` that does this is helper-script's (`Helper-Script/fans-control.cfg`);
+Creality's own copy is commented out on this machine. It maps a user 0-255 onto
+`min..255` so the whole slider is useful, with a `Qmode` branch that halves the
+top of the range.
 We write raw pin values, so on the development machine the Side Fan does nothing
 until the slider passes 71 percent, the Back Fan until 20, and the Toolhead Fan
 until 10. The readback has the mirrored problem: a slicer asking for half speed
@@ -190,8 +204,8 @@ ignored and sends people round the recalibration loop.
 | --- | --- |
 | #52, cross compile fails | `9e6d564` capped sub-make parallelism, `5658e14` rewrote the toolchain docs. Audit B1 and B5 |
 | #110, static linking fails for x86_64 | `4eabfc7`, only link statically when cross compiling. Audit B3 |
-| #161, #117 temperature half, #6, #132 lengths | `ff6dfad` widened the ranges to 320C and 200mm and clamps them against the printer's own limits, `a937708` made them configurable |
-| #51, layer counts not updating | Upstream `e21b163` and `9c52e8a` removed the monotonic guard. A small residual remains: `reset()` does not clear `current_file`, so the previous file's layer count shows until the metadata reply lands |
+| #161, #117 temperature half, #6, #132 lengths | `ff6dfad` made the lists configurable and clamped them against the printer's own limits, `a937708` widened the defaults to 320C and 200mm |
+| #51, layer counts not updating | Upstream `e21b163` and `9c52e8a` removed the monotonic guard. The residual noted here, `reset()` leaving `current_file` set so the previous file's layer count showed until the metadata reply landed, was closed by `6f355f8` |
 | #158, #119, Android | Android was removed from this fork in `b827111` |
 | #114, #81, input shaper problems | Largely addressed by the input shaper round, `cf4f60b` through `ad40b2a`. Audit C13 to C17 |
 | #155, #108, USB access | `installer.sh:152` symlinks `/tmp/udisk` into the gcodes root, so a stick appears as a folder in the file browser |
@@ -201,7 +215,7 @@ ignored and sends people round the recalibration loop.
 | Issue | Why |
 | --- | --- |
 | #106, non-ASCII filenames render as squares | Real, and a font job rather than a code job. Montserrat has no Cyrillic. `assets/dejavusans_mono_14.c` does cover Cyrillic, Greek, Hebrew and Arabic but only at 14px and monospaced, so a proper fix means generating font assets at the sizes the UI uses. Worth its own round |
-| #151, #100, power loss recovery | Measured above: this machine's Klipper has no recovery module, no recovery macro, and `save_variables` holds only a z offset, so there is nothing for a screen button to call. The feature is a Klipper extras module rather than a panel. It has to persist the file offset, Z, E, coordinate mode, heater targets and fan speeds to eMMC at every layer, from inside the gcode path, and then on boot re-home without dragging the toolhead through the part still on the bed. Guppyscreen observes Moonraker, is not in the gcode path, and is the first thing to die when the board browns out. Testing it means cutting power mid print, repeatedly, and the only machine here is the one that prints. Creality's stock firmware does have recovery, but it lives in their closed userspace rather than in the Klipper this printer runs. Where a machine does provide a recovery macro, wiring a confirmed button to it is small and worth doing then |
+| #151, #100, power loss recovery | Measured above: this machine's Klipper has no recovery module, no recovery macro, and `save_variables` holds only a z offset, so there is nothing for a screen button to call. The feature is a Klipper extras module rather than a panel. It has to persist the file offset, Z, E, coordinate mode, heater targets and fan speeds to eMMC at every layer, from inside the gcode path, and then on boot re-home without dragging the toolhead through the part still on the bed. Guppyscreen observes Moonraker, is not in the gcode path, and is the first thing to die when the board browns out. Testing it means cutting power mid print, repeatedly, and the only machine here is the one that prints. Creality's stock firmware does have recovery, but it lives in their closed userspace rather than in the Klipper this printer runs. Where a machine does provide a recovery macro, wiring a confirmed button to it is small and worth doing then Do not be misled by `print_stats.power_loss`: Creality's fork carries that field and a `z_pos` beside it, but nothing in the Klipper on this machine reads either, and `save_variables` is helper-script's file holding a z offset and nothing else. |
 | #44, screen brightness | Nothing exists in the tree, and the K1 has no sysfs backlight, so it would need a jzfb ioctl. `consp`'s `601736d` on the FF5M is the reference for how that looks |
 | #48, #41, progress indicator on long actions | A genuine gap, and the input shaper panel's status line is now the idiom to copy, but it touches every panel and deserves a round of its own |
 | #31, HappyHare integration | No MMU hardware to test against |
@@ -216,7 +230,7 @@ ignored and sends people round the recalibration loop.
 | Issue | Finding |
 | --- | --- |
 | #72, LED will not turn off or dim on a K1 Max | `output_pin LED` has `scale: 1.0`, which is exactly what `src/led_panel.cpp:128-163` assumes. Measured. The panel and the hardware agree |
-| #66, Home All homes twice | There is no `gcode_macro G28` override on a K1 Max, so `G28 X Y Z` is native homing. Reported on a CR10-SE. Worth noting that `src/homing_panel.cpp:171` sends `G28 X Y Z` while the bed mesh fix in `66cf61b` settled on a bare `G28` |
+| #66, Home All homes twice | There is no `gcode_macro G28` override on a K1 Max, so `G28 X Y Z` is native homing. Reported on a CR10-SE. Worth noting that `src/homing_panel.cpp:174` sends `G28 X Y Z` while the bed mesh fix in `66cf61b` settled on a bare `G28` |
 | #84, Y axis arrows opposite bed movement | Reported on an Ender 3 V3 KE. There is an Invert Z Arrows setting and no Y equivalent, so a Y toggle would answer it, but it cannot be verified here |
 
 ### No depth
