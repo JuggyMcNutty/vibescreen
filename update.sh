@@ -99,65 +99,6 @@ if [ -z "$LATEST_VERSION" ] || [ -z "$ASSET_URL" ]; then
     exit 1
 fi
 
-if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
-    echo "Already on $LATEST_VERSION."
-    exit 0
-fi
-
-# Two version shapes exist and only one of them is protected:
-#
-#   dev-<sha>        built locally by scripts/build.sh, published nowhere
-#   <date>-<sha>     published by CI from main, a real artifact
-#
-# Replacing a local build throws away whatever was being tested, which is
-# almost never what someone wants from a button on the printer. Rolling builds
-# are published artifacts and update normally.
-case "$CURRENT_VERSION" in
-    dev-*)
-        if [ "$FORCE" != true ]; then
-            echo "This is a development build ($CURRENT_VERSION), refusing to replace it"
-            echo "with release $LATEST_VERSION. Re-run with --force if that is what you want."
-            exit 0
-        fi
-        echo "Development build, but --force given."
-        ;;
-esac
-
-echo "Downloading $LATEST_VERSION from $ASSET_URL"
-rm -f "$TARBALL"
-if ! "$PY" -c "
-import shutil, sys, urllib.request
-with urllib.request.urlopen(sys.argv[1], timeout=180) as r, open(sys.argv[2], 'wb') as f:
-    shutil.copyfileobj(r, f)
-" "$ASSET_URL" "$TARBALL"; then
-    echo "Download failed, leaving the install alone."
-    rm -f "$TARBALL"
-    exit 1
-fi
-
-# Check the archive before unpacking over a working install. Upstream ran tar
-# unconditionally, outside the branch that did the download, so a failed fetch
-# still reached the extract step.
-if ! tar tzf "$TARBALL" > /dev/null 2>&1; then
-    echo "Downloaded file is not a valid archive, leaving the install alone."
-    rm -f "$TARBALL"
-    exit 1
-fi
-
-if ! tar tzf "$TARBALL" 2>/dev/null | grep -q 'guppyscreen/guppyscreen$'; then
-    echo "Archive does not contain guppyscreen/guppyscreen, leaving the install alone."
-    rm -f "$TARBALL"
-    exit 1
-fi
-
-echo "Installing $LATEST_VERSION"
-if ! tar xzf "$TARBALL" -C "$GUPPY_DIR/.."; then
-    echo "Extract failed. The install may be inconsistent, check $GUPPY_DIR."
-    rm -f "$TARBALL"
-    exit 1
-fi
-rm -f "$TARBALL"
-
 # The tarball carries the Klipper side of the install as well as the binary:
 # scripts/*.cfg are the guppy macros and k1_mods/*.py the klippy extras. Klipper
 # does not read them from here, though. installer.sh copies them into the
@@ -245,6 +186,73 @@ print(config)" 2>/dev/null)
         echo
     fi
 }
+
+if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+    echo "Already on $LATEST_VERSION."
+    # Still refresh the Klipper files. The script that runs an update is the one
+    # already on disk, so the release that first shipped refresh_klipper_files
+    # could not run it, and by the next run the version matches and we are here.
+    # Without this the refresh is unreachable on exactly the upgrade it exists
+    # for, and the configs stay stale until some later release happens to move
+    # the version on. Measured on the development printer, 2026-08-19.
+    refresh_klipper_files
+    exit 0
+fi
+
+# Two version shapes exist and only one of them is protected:
+#
+#   dev-<sha>        built locally by scripts/build.sh, published nowhere
+#   <date>-<sha>     published by CI from main, a real artifact
+#
+# Replacing a local build throws away whatever was being tested, which is
+# almost never what someone wants from a button on the printer. Rolling builds
+# are published artifacts and update normally.
+case "$CURRENT_VERSION" in
+    dev-*)
+        if [ "$FORCE" != true ]; then
+            echo "This is a development build ($CURRENT_VERSION), refusing to replace it"
+            echo "with release $LATEST_VERSION. Re-run with --force if that is what you want."
+            exit 0
+        fi
+        echo "Development build, but --force given."
+        ;;
+esac
+
+echo "Downloading $LATEST_VERSION from $ASSET_URL"
+rm -f "$TARBALL"
+if ! "$PY" -c "
+import shutil, sys, urllib.request
+with urllib.request.urlopen(sys.argv[1], timeout=180) as r, open(sys.argv[2], 'wb') as f:
+    shutil.copyfileobj(r, f)
+" "$ASSET_URL" "$TARBALL"; then
+    echo "Download failed, leaving the install alone."
+    rm -f "$TARBALL"
+    exit 1
+fi
+
+# Check the archive before unpacking over a working install. Upstream ran tar
+# unconditionally, outside the branch that did the download, so a failed fetch
+# still reached the extract step.
+if ! tar tzf "$TARBALL" > /dev/null 2>&1; then
+    echo "Downloaded file is not a valid archive, leaving the install alone."
+    rm -f "$TARBALL"
+    exit 1
+fi
+
+if ! tar tzf "$TARBALL" 2>/dev/null | grep -q 'guppyscreen/guppyscreen$'; then
+    echo "Archive does not contain guppyscreen/guppyscreen, leaving the install alone."
+    rm -f "$TARBALL"
+    exit 1
+fi
+
+echo "Installing $LATEST_VERSION"
+if ! tar xzf "$TARBALL" -C "$GUPPY_DIR/.."; then
+    echo "Extract failed. The install may be inconsistent, check $GUPPY_DIR."
+    rm -f "$TARBALL"
+    exit 1
+fi
+rm -f "$TARBALL"
+
 
 echo "Refreshing the Klipper macros and modules"
 refresh_klipper_files
