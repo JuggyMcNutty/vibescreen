@@ -311,9 +311,11 @@ The odd part is that `MainPanel::create_sensors`, `MainPanel::init`,
 `PowerPanel::create_devices` and every `consume` do take `lv_lock`, and it is
 the same mutex the main loop holds around `lv_timer_handler`. So the hole is
 somewhere the lock is not taken rather than the lock being wrong.
-`SettingPanel::enable_spoolman` is one confirmed hole, calling
+`SettingPanel::enable_spoolman` was one confirmed hole, calling
 `ButtonContainer::enable` with no lock, though that path needs a printer
-running spoolman and was not what crashed here.
+running spoolman and was not what crashed here. `MainPanel::enable_spoolman`
+takes the lock now, which closes that one; the crash above is a different path
+and is still open.
 
 Reproduce with `scripts/build.sh sim` against the fake, opening a panel a few
 seconds after start, six runs. It is not specific to any panel or to anything
@@ -325,6 +327,26 @@ This is the same disease as C1 and C9 and wants the same cure: dispatch onto a
 queue drained by the LVGL loop, so that no websocket callback ever touches a
 widget. Until then, every new websocket-thread path needs `lv_lock` and an
 audit of the ones already there.
+
+### C19. `WpaEvent` shares one control socket across two threads (open)
+
+Found while fixing the wifi panel, and left alone deliberately.
+
+`WpaEvent::send_command` (`src/wpa_event.cpp`) writes to a single
+`struct wpa_ctrl *conn` with nothing guarding it. Two threads reach it. The
+LVGL thread does, from `WifiPanel::foreground`, from selecting a row, and now
+from the Forget button. The libhv event loop thread does too, from
+`handle_wpa_event` calling `SCAN_RESULTS` and `LIST_NETWORKS` while handling an
+unsolicited event.
+
+`wpa_ctrl_request` writes a command and then reads the reply off the same
+datagram socket, so two overlapping calls can each take the other's answer. The
+window is small, which is presumably why nobody has noticed: a scan result
+arriving in the same moment as a button press.
+
+This is the same disease as C1 and C18 and wants the same cure, so it is not
+worth a local mutex that would have to come out again. Noted here rather than
+patched.
 
 ### C8. Rejected gcode is invisible to the user (fixed, `fc12faa`)
 
@@ -637,4 +659,5 @@ Remaining, roughly in order:
    crash on one startup in six, so it argues for doing this sooner than its
    place in this list suggests.
 
-M2, the four leaked singletons, is harmless and stays open.
+M2, the four leaked singletons, is harmless and stays open. C19, the shared wpa
+control socket, folds into item 5.
