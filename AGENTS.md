@@ -31,7 +31,7 @@ values.
 | File | What it is for |
 | --- | --- |
 | `docs/k1max-facts.md` | Real hardware, firmware, framebuffer and input values from the printer |
-| `docs/audit.md` | Known bugs in the inherited code, with severity and suggested order |
+| `docs/audit.md` | Known bugs, inherited and our own, with severity and suggested order |
 | `docs/upstream-issues.md` | Upstream's 63 open issues and 6 open PRs, triaged against our tree |
 | `DEVELOPMENT.md` | Toolchain, build targets and running the simulator |
 
@@ -52,7 +52,7 @@ Useful variants:
 scripts/build.sh mips zbolt         # Z-Bolt icon set instead of Material
 scripts/build.sh mips --small       # Ender 3 V3 KE / Nebula Pad sized panel
 scripts/build.sh mips --clean       # rebuild the vendored libs too
-PRINTER_HOST=192.168.1.202 scripts/build.sh sim   # point the sim at a printer
+PRINTER_HOST=192.168.1.202 scripts/build.sh sim   # point a *new* sim config at a printer
 ```
 
 Output is `build/bin/guppyscreen` for every target. Two stamp files track what
@@ -221,13 +221,15 @@ docs/                 ours
 screenshots/          referenced from README.md, ours plus some still upstream's
 ```
 
-Not in git: `build/` and `toolchains/`, both generated.
+Not in git: `build/` and `toolchains/`, both generated, plus `releases/`,
+release tarballs, a top level `guppyconfig.json`, the `.vendor-target` and
+`.build-flags` stamps, `__pycache__/` and stray `*.log`. See `.gitignore`.
 
 ### `lv_conf.h` is two configs, not one
 
 `lv_conf.h:14` opens `#ifndef SIMULATOR`, `:715` is the `#else`, `:1353` the
-`#endif`. The device build compiles lines 15 to 713 and the simulator 717 to
-1351, and the two are not kept in step.
+`#endif`. The device build compiles lines 15 to 714 and the simulator 716 to
+1352, and the two are not kept in step.
 
 The difference that bites is fonts. The printer has Montserrat 8, 10, 12, 14,
 16, 20 and 40 only; the simulator half enables every size from 8 to 48. So
@@ -248,6 +250,7 @@ sitting inside an `#if LV_MEM_CUSTOM == 0`.
 | `apply-patches.sh` | Applies `patches/` to submodules. Idempotent |
 | `build.sh` | Builds any target: `mips`, `arm` or `sim` |
 | `probe-printer.sh` | Read-only fact gathering from a printer over SSH |
+| `ci-apt-install.sh` | Bounded, mirror-swapping `apt-get` for CI. See above |
 
 ### The patches
 
@@ -376,9 +379,17 @@ confirmation is not governed by the emergency stop setting, which is about
 something else.
 
 Where a panel offers preset values, clamp them against the printer's own limits
-read from `/printer_state/configfile/settings/...` in `State`. `LimitsPanel::init`
-and `ExtruderPanel::init` are the two worked examples, both dispatched from
-`MainPanel::init`.
+read from `/printer_state/configfile/settings/...` in `State`.
+`KUtils::config_number` does that lookup, including the lowercasing Klipper
+applies to section names in `configfile.settings`. `ExtruderPanel::init`,
+dispatched from `MainPanel::init`, and `LimitsPanel::init`, dispatched one
+level down from `PrinterTunePanel::init`, are the two worked examples.
+
+`src/utils.h` carries the rest of the shared readers: `has_config_section`,
+`has_gcode_macro`, `is_homed`, `fan_pct_to_raw` and `fan_value_to_pct` for
+the minimum-speed mapping, `short_measure` for a number that must not turn
+into scientific notation, and `moonraker_api_key`. Look there before writing
+another local copy; `src/inputshaper_panel.cpp:48` is one that got away.
 
 ## Networking from the printer
 
@@ -390,7 +401,9 @@ line that does not understand `-s` or `-o`.
 Upstream worked around this by downloading a curl binary from a third party
 repo over `--no-check-certificate` and running it as root. Do not reintroduce
 that. **Python 3 is already installed for Klipper and reaches everything**, so
-`update.sh` and `installer.sh` use it for all fetching.
+`update.sh` and `installer.sh` use it for all fetching from the internet.
+`update.sh` still uses busybox `wget` for its one local Moonraker query,
+which is plain HTTP to 127.0.0.1 and fine.
 
 For plain HTTP to Moonraker on the printer, `wget -q -T <sec> -O -` is fine.
 
@@ -409,10 +422,21 @@ reaches an existing install only because `update.sh` now re-copies it, keeping
 one `.bak` of whatever it replaced and telling the user that Klipper needs a
 `FIRMWARE_RESTART`. It never restarts Klipper itself, because that ends a print.
 
+That refresh runs on the **already up to date** path as well as after an
+install, which is not an optimisation but the only way it ever runs at all:
+the `update.sh` that performs an upgrade is the copy already on disk, so the
+release that first shipped the refresh could not run it, and by the next run
+the version matches. It also skips a destination that is a symlink, because
+on a helper-script install `klippy/extras/gcode_shell_command.py` points into
+someone else's tree and `cp` would write through it. It no-ops entirely
+unless `<config>/GuppyScreen` exists, so a Debian install is left alone.
+
 This was found the hard way: the development printer was running a
 `_GUPPY_LOAD_MATERIAL` that extruded a hardcoded 120mm and ignored the
 `EXTRUDE_LEN` the panel sends, so the Extrude Length selector did nothing there
-while looking correct in the source.
+while looking correct in the source. That machine was finally refreshed on
+2026-08-19, two days after the fix was written, which is the measure of how
+long a `k1/` change can sit in the tree doing nothing.
 
 ## Never let an exception reach LVGL
 
@@ -451,9 +475,10 @@ triangulate it. `lv_canvas_draw_line` has no such problem.
 
 ## Testing UI changes without touching the printer
 
-The printer is read-only, and pressing Extrude against a live Moonraker really
-does heat the hotend. Use `tools/fake_moonraker.py` for anything that would
-otherwise command real hardware, and point the simulator at `127.0.0.1`:
+Pressing Extrude against a live Moonraker really does heat the hotend, and
+the development printer is someone's production machine. Use
+`tools/fake_moonraker.py` for anything that would otherwise command real
+hardware, and point the simulator at `127.0.0.1`:
 
 ```sh
 pip install websockets
@@ -550,12 +575,17 @@ idempotent.
 
 ## Threading model
 
-Two threads, and the boundary is where the bugs are.
+Three threads, and the boundary is where the bugs are.
 
 - **LVGL thread**: the main loop, all widget calls.
 - **libhv event loop thread**: `WebSocketClient::onmessage` in
   `src/websocket_client.cpp`, which drives every `NotifyConsumer::consume`, which
   is what updates `State`.
+- **The update worker**: `src/update_dialog.cpp:263` detaches a `std::thread`
+  to run `update.sh` under `sp::Popen`. It touches no widgets. Output goes into
+  a `Job` behind that job's own lock, and the LVGL thread drains it from an
+  `lv_timer`, which is the shape to copy if anything else ever needs to run a
+  subprocess without blocking the UI.
 
 LVGL is not thread safe. Panels take `lv_lock` around widget work.
 
@@ -594,4 +624,10 @@ The point is that a human or an AI picking this up in a year can read it.
 
 Any change that alters a build command, a script, the repo layout or the remote
 setup updates `AGENTS.md` **in the same commit**. A stale onboarding doc is worse
-than none, which is exactly the problem `DEVELOPMENT.md` has.
+than none.
+
+`DEVELOPMENT.md` is the standing example. Its toolchain half was rewritten in
+`5658e14`, but its testing half went on describing three fake Moonraker flags
+long after there were twelve, and never mentioned the wifi fake at all, until
+an audit on 2026-08-19 cut it back to a pointer at this file. Two copies of
+the same instructions is how that happens. Prefer a pointer.
