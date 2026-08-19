@@ -48,6 +48,41 @@ formerly Advanced Nozzle Wiper.
 Those two come from `tools/fake_moonraker.py`, so the curve and the figures are
 synthetic. A real run means shaking the printer for minutes per axis.
 
+**Fan sliders know where the fan actually starts turning.** A Creality fan
+does not move below a minimum duty cycle, and the slider used to write raw
+values straight through, so on a K1 Max the Side Fan did nothing at all below
+71 percent. The slider now maps its 0 to 100 the way the printer's own `M106`
+does, in both directions, so a fan set to 50 percent reads back as 50 percent.
+
+**The print status screen dismisses itself.** It used to stay up after a print
+finished, stuck at 99 percent because the progress was truncated rather than
+rounded.
+
+**The file list refreshes when a file is uploaded**, rather than waiting for
+someone to press Reload.
+
+**Belt calibration reports its failures.** It ran both sweeps back to back and
+recognised only success, so anything else left a spinner turning forever. It
+now runs one sweep at a time, which is also what stops it exhausting memory on
+a 209 MB machine, and says what went wrong.
+
+**Wifi is usable.** A wrong password can be corrected instead of leaving the
+screen saying Connecting forever, a saved network can be forgotten, and the
+four punctuation characters missing from the keyboard are back, all of which
+are legal in a WPA passphrase.
+
+**Spoolman can be turned off**, and when it fails it says so instead of
+disappearing.
+
+**The Moonraker API key is sent** where one is configured, so a secured
+Moonraker no longer refuses the connection in silence.
+
+**Smaller things.** A third temperature on the print status screen for a
+chamber sensor; pause asks for confirmation; a Z offset of 5.5e-17 renders as
+0.000 mm rather than in scientific notation; three digit temperatures stop
+wrapping onto two lines; the display sleep Never setting really is never; and
+Z+ carries the arrow that matches what Z+ does.
+
 **Underneath: lots of bug fixes and exception handlers.**
 
 The rest of the interface:
@@ -126,13 +161,19 @@ From the printer:
 /usr/data/guppyscreen/update.sh
 ```
 
-or press Update in the settings panel.
+or press Update Guppy in the settings panel.
 
 Releases are rolling and there is no separate stable track. Every push to
 `main` that changes something other than documentation publishes its own
 release, tagged by date and commit, so the
 [release list](https://github.com/JuggyMcNutty/vibescreen/releases) doubles as a
 build history. The updater always takes the newest.
+
+Updating also refreshes the Klipper macros this project ships, which live in
+the printer's own config tree rather than in the tarball. When any of them
+change the updater says so and asks for a `FIRMWARE_RESTART`, which it will not
+do for you, because that ends a print in progress. Run it when the printer is
+idle. Whatever it replaced is kept alongside as a `.bak`.
 
 Coming from the original guppyscreen, run the installer above instead. That
 project's updater points at its own releases and will not see these.
