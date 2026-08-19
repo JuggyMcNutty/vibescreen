@@ -39,6 +39,9 @@ way Moonraker does after an upload.
 
 --belts [normal|slow|fail|timeout|empty] answers the belts panel's half-axis
 sweeps and its analysis, ending the way the mode says.
+
+--api-key <key> refuses the websocket handshake unless X-Api-Key matches, the
+way Moonraker does with its authorization component enforcing one.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 """
 import asyncio, json, math, os, re, shlex, struct, sys, time, zlib
@@ -206,6 +209,10 @@ SHAPER_MODES = ("normal", "slow", "fail", "timeout")
 # Announce a new gcode file this many seconds after connect, so the file panel
 # can be watched noticing it without anyone pressing Reload.
 FILE_DROP_SECONDS = float(_arg_value("--drop-file", "0")) if "--drop-file" in sys.argv else 0
+
+# Require this key on the websocket handshake, the way Moonraker does when its
+# authorization component is enforcing one.
+API_KEY = _arg_value("--api-key", "") if "--api-key" in sys.argv else ""
 
 PRINT_MODES = ("complete", "cancelled", "error")
 PRINT_RUN = _mode_value("--print", "complete", PRINT_MODES)
@@ -790,6 +797,23 @@ async def handler(ws):
             task.cancel()
 
 
+def check_api_key(connection, request):
+    """Refuse the handshake unless X-Api-Key matches, the way Moonraker does.
+
+    Moonraker's authorization component answers an unauthenticated websocket
+    with 401 before it is ever upgraded. Guppy carried a moonraker_api_key in
+    its config that nothing read, so this is what that looked like from the
+    printer's side: the UI simply never connected.
+    """
+    if not API_KEY:
+        return None
+    if request.headers.get("X-Api-Key") == API_KEY:
+        return None
+    print(f"refusing handshake, X-Api-Key was "
+          f"{request.headers.get('X-Api-Key')!r}", flush=True)
+    return connection.respond(401, "Unauthorized\n")
+
+
 async def main():
     global SHAPER_LOCK
     # Built here rather than at import, because before Python 3.10 an
@@ -798,7 +822,8 @@ async def main():
     shaper = f", shaper {SHAPER}" if SHAPER else ""
     print(f"fake moonraker on 7125, extruder {TEMP}/{TARGET}, "
           f"mesh {MESH_SHAPE}{shaper}", flush=True)
-    async with websockets.serve(handler, "127.0.0.1", 7125):
+    async with websockets.serve(handler, "127.0.0.1", 7125,
+                                process_request=check_api_key):
         await asyncio.Future()
 
 asyncio.run(main())
