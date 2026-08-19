@@ -23,6 +23,7 @@ class WifiPanel {
   void handle_wpa_event(const std::string &events);
   void handle_kb_input(lv_event_t *e);
   void connect(const char *);
+  void hide_keyboard();
   bool find_current_network();
   void forget_network();
   void handle_forget_btn(lv_event_t *event);

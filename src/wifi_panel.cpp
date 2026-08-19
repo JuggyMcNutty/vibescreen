@@ -198,7 +198,15 @@ void WifiPanel::handle_callback(lv_event_t *e) {
       return;
     }
 
+    std::string previous = selected_network;
     selected_network = lv_table_get_cell_value(wifi_table, row, 0);
+
+    // Anything already typed belongs to the network it was typed for. Without
+    // this, half a password for one network stays in the box, and finishing it
+    // against the next one sends the two concatenated.
+    if (selected_network != previous) {
+      lv_textarea_set_text(password_input, "");
+    }
 
     // Offered for anything wpa_supplicant has a network block for, connected or
     // not, since a wrong password is exactly the case you need it for.
@@ -214,6 +222,7 @@ void WifiPanel::handle_callback(lv_event_t *e) {
 						selected_network,
 						ip).c_str());
       lv_obj_add_flag(password_input, LV_OBJ_FLAG_HIDDEN);
+      hide_keyboard();
 
     } else if (list_networks.count(selected_network)) {
       auto nid = list_networks.find(selected_network)->second;
@@ -222,6 +231,7 @@ void WifiPanel::handle_callback(lv_event_t *e) {
       lv_label_set_text(wifi_label,
 			fmt::format("Connecting to {} ...", selected_network).c_str());
       lv_obj_add_flag(password_input, LV_OBJ_FLAG_HIDDEN);
+      hide_keyboard();
     } else {
       lv_label_set_text(wifi_label, fmt::format("Enter password for {}", selected_network).c_str());
       lv_obj_clear_flag(password_input, LV_OBJ_FLAG_HIDDEN);
@@ -363,6 +373,16 @@ void WifiPanel::handle_wpa_event(const std::string &event) {
   }
 }
 
+// Put the keyboard away without going through the textarea's DEFOCUSED
+// handler, which also rewrites wifi_label back to "Please select your wifi
+// network". The callers below have just set that label to something they mean
+// to keep.
+void WifiPanel::hide_keyboard() {
+  lv_keyboard_set_textarea(kb, NULL);
+  lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_state(password_input, LV_STATE_FOCUSED);
+}
+
 void WifiPanel::handle_kb_input(lv_event_t *e)
 {
   const lv_event_code_t code = lv_event_get_code(e);
@@ -384,10 +404,9 @@ void WifiPanel::handle_kb_input(lv_event_t *e)
     // add network, set password, save wpa
     connect(password);
     lv_textarea_set_text(password_input, "");
-    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(wifi_label, fmt::format("Connecting to {} ...", selected_network).c_str());
-    lv_obj_clear_state(password_input, LV_STATE_FOCUSED);
     lv_obj_add_flag(password_input, LV_OBJ_FLAG_HIDDEN);
+    hide_keyboard();
   } else if (code == LV_EVENT_CLICKED) {
       lv_obj_t *target = lv_event_get_target(e);
       if (target != kb && target != password_input) {  
