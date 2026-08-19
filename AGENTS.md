@@ -422,6 +422,15 @@ reaches an existing install only because `update.sh` now re-copies it, keeping
 one `.bak` of whatever it replaced and telling the user that Klipper needs a
 `FIRMWARE_RESTART`. It never restarts Klipper itself, because that ends a print.
 
+`update.sh --check` answers "is there a newer release" and installs nothing,
+printing `status=`, `current=` and `latest=` on stdout. `UpdateCheck`
+(`src/update_check.cpp`) polls it so the UI can offer an update without this
+binary needing TLS, which it does not have: libhv is built `WITH_OPENSSL=no`.
+Adding a TLS stack and a trust store to fetch one version string is the wrong
+trade, and it would put a second definition of "newer" in the tree. If in-binary
+HTTPS is ever really needed, mbedTLS is roughly 400 KB static against OpenSSL's
+3 MB.
+
 That refresh runs on the **already up to date** path as well as after an
 install, which is not an optimisation but the only way it ever runs at all:
 the `update.sh` that performs an upgrade is the copy already on disk, so the

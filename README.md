@@ -76,6 +76,8 @@ chamber sensor; pause asks for confirmation; a Z offset of 5.5e-17 renders as
 wrapping onto two lines; the display sleep never setting really is never; and
 Z+ carries the arrow that matches what Z+ does.
 
+**It tells you when there is a new version.** A dot appears on the settings icon when a newer release is published, and Update Guppy becomes Update Available. Off, or on a different schedule, in System.
+
 **Underneath: lots of bug fixes and exception handlers.**
 
 The rest of the interface:
