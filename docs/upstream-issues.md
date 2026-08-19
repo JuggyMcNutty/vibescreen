@@ -26,7 +26,8 @@ the source, it says so. Those checks were read-only queries to Moonraker.
 ## Measured on the printer
 
 Several of these issues could not be settled from the source alone. These are
-the facts that settle them, taken from `192.168.1.202` on 2026-08-18.
+the facts that settle them, taken from `192.168.1.202` on 2026-08-18, and the
+power loss rows on 2026-08-19.
 
 | What | Value | Settles |
 | --- | --- | --- |
@@ -38,6 +39,9 @@ the facts that settle them, taken from `192.168.1.202` on 2026-08-18.
 | `temperature_sensor chamber_temp` | present | PR #141 |
 | `gcode_macro G28` | does not exist | #66 |
 | `printer.objects.list` | contains `calibrate_shaper_config`, not `resonance_tester` or `adxl345` | corrects `AGENTS.md` |
+| power loss recovery module | absent from `printer.objects.list` | #151, #100 |
+| power loss recovery macro | none. `RESUME` exists but only resumes a paused print | #151, #100 |
+| `save_variables` | holds `{"zoffset": {"z": 0}}` and nothing about an interrupted print | #151, #100 |
 
 One more, which is about deployment rather than the printer: the installed
 `_GUPPY_LOAD_MATERIAL` on that machine is
@@ -196,7 +200,7 @@ ignored and sends people round the recalibration loop.
 | Issue | Why |
 | --- | --- |
 | #106, non-ASCII filenames render as squares | Real, and a font job rather than a code job. Montserrat has no Cyrillic. `assets/dejavusans_mono_14.c` does cover Cyrillic, Greek, Hebrew and Arabic but only at 14px and monospaced, so a proper fix means generating font assets at the sizes the UI uses. Worth its own round |
-| #151, #100, power loss recovery | Belongs to Creality's firmware. Integration work well beyond a screen |
+| #151, #100, power loss recovery | Measured above: this machine's Klipper has no recovery module, no recovery macro, and `save_variables` holds only a z offset, so there is nothing for a screen button to call. The feature is a Klipper extras module rather than a panel. It has to persist the file offset, Z, E, coordinate mode, heater targets and fan speeds to eMMC at every layer, from inside the gcode path, and then on boot re-home without dragging the toolhead through the part still on the bed. Guppyscreen observes Moonraker, is not in the gcode path, and is the first thing to die when the board browns out. Testing it means cutting power mid print, repeatedly, and the only machine here is the one that prints. Creality's stock firmware does have recovery, but it lives in their closed userspace rather than in the Klipper this printer runs. Where a machine does provide a recovery macro, wiring a confirmed button to it is small and worth doing then |
 | #44, screen brightness | Nothing exists in the tree, and the K1 has no sysfs backlight, so it would need a jzfb ioctl. `consp`'s `601736d` on the FF5M is the reference for how that looks |
 | #48, #41, progress indicator on long actions | A genuine gap, and the input shaper panel's status line is now the idiom to copy, but it touches every panel and deserves a round of its own |
 | #31, HappyHare integration | No MMU hardware to test against |
