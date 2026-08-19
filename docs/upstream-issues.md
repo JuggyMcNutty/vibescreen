@@ -115,6 +115,7 @@ commit is named so the reasoning can be read back.
 | #80, #7 | Screen woke itself about every hour | `b1682b4` |
 | #107, #115 | Spoolman could not be turned off and its errors vanished | `ec3b9e3` |
 | #56 | No confirmation before pause | `b9e37de` |
+| #28 | Z+ carried the gap-closing arrow | `c7c8cd5` |
 
 Two of those deserve a footnote.
 
@@ -216,7 +217,7 @@ ignored and sends people round the recalibration loop.
 | --- | --- |
 | #72, LED will not turn off or dim on a K1 Max | `output_pin LED` has `scale: 1.0`, which is exactly what `src/led_panel.cpp:128-163` assumes. Measured. The panel and the hardware agree |
 | #66, Home All homes twice | There is no `gcode_macro G28` override on a K1 Max, so `G28 X Y Z` is native homing. Reported on a CR10-SE. Worth noting that `src/homing_panel.cpp:171` sends `G28 X Y Z` while the bed mesh fix in `66cf61b` settled on a bare `G28` |
-| #84, Y axis arrows opposite bed movement | Reported on an Ender 3 V3 KE. There is an Invert Z Icon setting and no Y equivalent, so a Y toggle would answer it, but it cannot be verified here |
+| #84, Y axis arrows opposite bed movement | Reported on an Ender 3 V3 KE. There is an Invert Z Arrows setting and no Y equivalent, so a Y toggle would answer it, but it cannot be verified here |
 
 ### No depth
 
@@ -227,7 +228,18 @@ one-line form, covered above), #89, #81, #64, #59, #58, #54, #41 (the general
 complaint), #39, #37, #28, #23, #7 (duplicate of #80), #6 (the ideas list,
 individual points covered above).
 
-#28, Z arrows reversed, deserves one word: it is a genuine disagreement rather
-than a bug. On a K1 the bed moves and on a KE the toolhead does, so "up" means
-opposite things. Upstream added the Invert Z Icon setting for exactly this, and
-it is in `src/sysinfo_panel.cpp:180`.
+#28, Z arrows reversed, was triaged here as a genuine disagreement rather than
+a bug, on the grounds that a K1 moves the bed and a KE moves the toolhead so
+"up" means opposite things. That was half right. Our own issue #1 turned up the
+other half: the icons draw an arrow above a plate, so the arrow is the nozzle
+and the plate is the bed, and the pair therefore says whether the gap opens or
+closes rather than which way any part travels. Read that way the old default
+was wrong everywhere, because it put the gap-closing arrow on the button
+labelled Z+, and you had to switch Invert Z Icon on to get a button that agreed
+with itself.
+
+The default is now the arrow that matches the gcode, and the setting is Invert
+Z Arrows under a new config key, `invert_z_arrows`. Anyone who had turned the
+old one on to get an up arrow on Z+ keeps one, since the old key is ignored and
+the new default gives them the same picture. The toggle still exists for people
+who would rather the arrow tracked the part they can see moving.
