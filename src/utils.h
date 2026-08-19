@@ -70,6 +70,20 @@ namespace KUtils {
   // Hex colour values out of theme files and the Spoolman API.
   uint32_t parse_hex(const std::string &s, uint32_t fallback);
 
+  // The configured Moonraker API key, or empty when there is none.
+  //
+  // guppyconfig.json has carried a moonraker_api_key field since upstream and
+  // nothing ever read it, so a printer with Moonraker's authorization component
+  // enforcing keys could not be talked to at all. Upstream #32.
+  std::string moonraker_api_key();
+
+  // GET a URL into a file, sending the API key when one is configured.
+  //
+  // Replaces hv::requests::downloadFile, which builds its own request and
+  // accepts no headers. Everything fetched this way is a thumbnail or a plot,
+  // so holding it in memory on the way to disk costs little.
+  size_t fetch_to_file(const std::string &url, const std::string &dest);
+
   // A number out of the live Klipper config, by section and key.
   //
   // Klipper lowercases section names in configfile.settings while

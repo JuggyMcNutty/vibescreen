@@ -9,6 +9,7 @@
 #include <cmath>
 #include <time.h>
 #include <sstream>
+#include <fstream>
 #include <iomanip>
 #include <sys/ioctl.h>
 #include <linux/if.h>
@@ -75,6 +76,42 @@ namespace KUtils {
 		   [](unsigned char c) { return std::tolower(c); });
 
     return settings.contains(want);
+  }
+
+  std::string moonraker_api_key() {
+    Config *conf = Config::get_instance();
+    auto &v = conf->get_json(conf->df() + "moonraker_api_key");
+    // The default is the boolean false rather than an empty string, which is
+    // what upstream wrote and what every existing config carries.
+    return v.is_string() ? v.template get<std::string>() : std::string();
+  }
+
+  size_t fetch_to_file(const std::string &url, const std::string &dest) {
+    http_headers headers = DefaultHeaders;
+    auto key = moonraker_api_key();
+    if (!key.empty()) {
+      headers["X-Api-Key"] = key;
+    }
+
+    auto resp = requests::get(url.c_str(), headers);
+    if (resp == NULL) {
+      spdlog::warn("no response fetching {}", url);
+      return 0;
+    }
+    if (resp->status_code != HTTP_STATUS_OK) {
+      spdlog::warn("fetching {} returned {}", url, (int)resp->status_code);
+      return 0;
+    }
+
+    std::ofstream out(dest, std::ios::binary | std::ios::trunc);
+    if (!out) {
+      spdlog::warn("cannot write {}", dest);
+      return 0;
+    }
+    out.write(resp->body.data(), resp->body.size());
+    out.close();
+
+    return resp->body.size();
   }
 
   std::string short_measure(double v, const char *unit) {
@@ -262,7 +299,7 @@ namespace KUtils {
 
 	// threadpool this
 	spdlog::debug("thumb url {}", thumb_url);
-	auto size = requests::downloadFile(thumb_url.c_str(), fullpath.c_str());
+	auto size = fetch_to_file(thumb_url, fullpath);
 	spdlog::trace("downloaded size {}", size);
       }
 
@@ -291,7 +328,7 @@ namespace KUtils {
 					HUrl::escape(fname));
     // threadpool this
     spdlog::debug("file url {}", file_url);
-    auto size = requests::downloadFile(file_url.c_str(), dest_fullpath.c_str());
+    auto size = fetch_to_file(file_url, dest_fullpath.string());
     spdlog::trace("downloaded file size {}", size);
 
     return dest_fullpath.string();

@@ -11,6 +11,7 @@
  */
 
 #include "websocket_client.h"
+#include "utils.h"
 #include "spdlog/spdlog.h"
 
 #include <algorithm>
@@ -129,7 +130,17 @@ int KWebSocketClient::connect(const char* url,
   reconn.delay_policy = 2;
   setReconnect(&reconn);
 
+  // Moonraker's authorization component rejects an anonymous websocket when
+  // force_logins or a trusted client list is in use, and this connection was
+  // always anonymous: guppyconfig.json has carried moonraker_api_key since
+  // upstream and nothing ever read it. Upstream #32.
   http_headers headers;
+  auto api_key = KUtils::moonraker_api_key();
+  if (!api_key.empty()) {
+    spdlog::debug("sending moonraker api key with the websocket handshake");
+    headers["X-Api-Key"] = api_key;
+  }
+
   return open(url, headers);
 };
 
