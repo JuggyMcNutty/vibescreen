@@ -1,8 +1,15 @@
 # Creality K1 Max target facts
 
 Captured 2026-08-16 from the development printer with `scripts/probe-printer.sh`.
-The probe itself only reads; the printer has since been updated to run our own
-builds, which is noted where it matters below.
+The probe itself only reads.
+
+**This is a snapshot, not a live view.** The machine has moved on since: it now
+runs release `2026.08.19-a5286cb8`, having gone through `c722ed54`, `4cdb21af`
+and `c9abd7f0`, and on 2026-08-19 the Klipper config tree under
+`/usr/data/printer_data/config/GuppyScreen/` was replaced for the first time
+since it was installed, so its macros are ours rather than whatever the first
+install left. Anything below that reads as a measurement is what was true on
+the day it was taken. Re-probe before relying on a number.
 
 Serial numbers, MAC addresses and the WiFi SSID are deliberately not recorded here.
 Re-run the probe if you need fresh values.
@@ -17,7 +24,7 @@ Re-run the probe if you need fresh values.
 | Firmware | `1.3.3.29`, board `CR4CU220812S11` | K1 Max |
 | Rootfs | Buildroot 2020.02.1, overlayfs, `/rom` 100% full | Only `/usr/data` (6.5G, 45% used) has room |
 | libc | glibc 2.29, loader `/lib/ld-linux-mipsn8.so.1` | We link static musl, so this does not constrain us |
-| RAM | 209 MB total, 118 MB free, 128 MB swap file | Tight. Watch allocation in long-running panels |
+| RAM | 209 MB total, 128 MB swap file. Free was 118 MB at probe time, which is a reading rather than a property | Tight. Watch allocation in long-running panels |
 | Framebuffer | `/dev/fb0`, `jzfb`, mode `480x800p-50` | Portrait panel |
 | fb virtual size | `480,1600` (double buffered), 32 bpp, stride 1920 | Matches `LV_COLOR_DEPTH 32` in `lv_conf.h:35` |
 | Touch | `goodix-ts` on `/dev/input/event0` | Matches `EVDEV_NAME` in `lv_drv_conf.h:452`. `goodix-pen` on event1 is unused |
@@ -59,7 +66,10 @@ wedged one does not, which is why the main loop aborts rather than continuing,
 see `docs/audit.md` C10.
 
 Other mods present in `/usr/data`: `fluidd`, `helper-script`, `moonraker`,
-`nginx`. Creality's `S99start_app` is gone from `/etc/init.d`, so whoever
+`nginx`. Also accumulating there are the `guppyscreen-backup-*.tar.gz`
+snapshots, one per deploy at about 4 MB each, five as of 2026-08-19. That is
+the only thing on this partition that grows on its own, and this partition is
+the only one with room, so prune them rather than letting them run. Creality's `S99start_app` is gone from `/etc/init.d`, so whoever
 installed guppyscreen answered yes to the "disable all Creality services"
 prompt. Some Creality services do still run: `cx_ai_middleware`, `webrtc`,
 `cam_app`, `mjpg_streamer`.
@@ -75,6 +85,29 @@ Only password auth is accepted: there is no `authorized_keys` on the machine,
 so `sshpass` or an interactive prompt is the way in. `scripts/probe-printer.sh`
 still takes `PRINTER_PASS` from the environment, so a printer with a changed
 password needs nothing else.
+
+## Klipper paths
+
+Where Klipper actually lives on this machine, which `update.sh` needs and
+hardcodes as its fallback when Moonraker does not answer:
+
+| What | Path |
+| --- | --- |
+| `klipper_path` | `/usr/share/klipper` |
+| `config_file` | `/usr/data/printer_data/config/printer.cfg` |
+| Our macros | `/usr/data/printer_data/config/GuppyScreen/` |
+| `save_variables` | `/usr/data/printer_data/config/Helper-Script/variables.cfg` |
+
+Both come from `/printer/info`, which is why `refresh_klipper_files` asks
+rather than guessing.
+
+**The klippy extras are symlinks here, not copies.**
+`klippy/extras/calibrate_shaper_config.py` points into
+`/usr/data/guppyscreen/k1_mods/` and `klippy/extras/gcode_shell_command.py`
+into `/usr/data/helper-script/files/gcode-shell-command/`. That is a
+helper-script install talking, and it matters because `cp` follows a symlink:
+refreshing the second one would write through it into helper-script's own tree.
+`update.sh` skips symlinked destinations for exactly this reason.
 
 ## Moonraker
 
