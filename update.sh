@@ -23,12 +23,29 @@ TARBALL=/tmp/guppyscreen-update.tar.gz
 REPO=${GUPPY_UPDATE_REPO:-JuggyMcNutty/vibescreen}
 
 FORCE=false
+# --check answers "is there a newer release" and installs nothing. The UI polls
+# it, because the binary has no TLS: libhv is built with WITH_OPENSSL=no, and
+# giving it a TLS stack and a trust store to fetch one version string is a poor
+# trade when the check already lives here and python3 is already required.
+CHECK_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
-        *) echo "usage: $(basename "$0") [--force]"; exit 1 ;;
+        --check) CHECK_ONLY=true ;;
+        *) echo "usage: $(basename "$0") [--force] [--check]"; exit 1 ;;
     esac
 done
+
+# --check is parsed by a machine, so it prints key=value on stdout and nothing
+# else. Every path through it prints a status, including the failures, so the
+# caller never has to tell "no update" apart from "never got an answer".
+check_result() {
+    [ "$CHECK_ONLY" = true ] || return 0
+    echo "status=$1"
+    echo "current=$CURRENT_VERSION"
+    echo "latest=$2"
+    exit 0
+}
 
 
 PY=$(command -v python3 || command -v python || true)
@@ -50,8 +67,8 @@ d=json.load(open(sys.argv[1]))
 print(d.get('asset_name','guppyscreen.tar.gz'))" "$VERSION_FILE" 2>/dev/null || echo guppyscreen.tar.gz)
 fi
 
-echo "Installed version: $CURRENT_VERSION"
-echo "Checking $REPO for a newer build"
+[ "$CHECK_ONLY" = true ] || echo "Installed version: $CURRENT_VERSION"
+[ "$CHECK_ONLY" = true ] || echo "Checking $REPO for a newer build"
 
 # Prints "<tag>\t<download url>" for the newest release, or exits 2 if it has no
 # asset for us.
@@ -84,9 +101,11 @@ sys.exit(2)
 RC=$?
 
 if [ $RC -eq 2 ]; then
+    check_result noasset ""
     echo "No release in $REPO publishes $ASSET_NAME, nothing to update to."
     exit 0
 elif [ $RC -ne 0 ]; then
+    check_result unreachable ""
     echo "Update check failed: $LATEST"
     exit 1
 fi
@@ -95,6 +114,7 @@ LATEST_VERSION=$(printf '%s' "$LATEST" | cut -f1)
 ASSET_URL=$(printf '%s' "$LATEST" | cut -f2)
 
 if [ -z "$LATEST_VERSION" ] || [ -z "$ASSET_URL" ]; then
+    check_result unreachable ""
     echo "Could not work out the latest release, leaving the install alone."
     exit 1
 fi
@@ -202,6 +222,7 @@ print(config)" 2>/dev/null)
 }
 
 if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+    check_result uptodate "$LATEST_VERSION"
     echo "Already on $LATEST_VERSION."
     # Still refresh the Klipper files. The script that runs an update is the one
     # already on disk, so the release that first shipped refresh_klipper_files
@@ -224,6 +245,7 @@ fi
 case "$CURRENT_VERSION" in
     dev-*)
         if [ "$FORCE" != true ]; then
+            check_result devbuild "$LATEST_VERSION"
             echo "This is a development build ($CURRENT_VERSION), refusing to replace it"
             echo "with release $LATEST_VERSION. Re-run with --force if that is what you want."
             exit 0
@@ -231,6 +253,9 @@ case "$CURRENT_VERSION" in
         echo "Development build, but --force given."
         ;;
 esac
+
+# Past every refusal, so this is a release that would really be installed.
+check_result available "$LATEST_VERSION"
 
 echo "Downloading $LATEST_VERSION from $ASSET_URL"
 rm -f "$TARBALL"
