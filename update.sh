@@ -168,12 +168,26 @@ print(config)" 2>/dev/null)
         [ -f "$f" ] && install_file "$f" "$config_dir/GuppyScreen/scripts/$(basename "$f")"
     done
 
-    # gcode_shell_command.py and calibrate_shaper_config.py are copied into
-    # klippy/extras by the installer. The other three modules there are
-    # symlinks back into $GUPPY_DIR and so are already current.
+    # installer.sh copies these two into klippy/extras, so on a stock install
+    # they are real files and want refreshing like everything else.
+    #
+    # On the development K1 Max they are both symlinks instead, which is what a
+    # helper-script install leaves behind: calibrate_shaper_config.py points
+    # back into our own k1_mods, and gcode_shell_command.py points into
+    # /usr/data/helper-script/. cp follows a symlink and writes through it, so
+    # refreshing the second one would replace helper-script's own file with
+    # ours, in their directory, while the .bak of their original lands over in
+    # klippy/extras where they would never look for it. Measured 2026-08-19:
+    # the two are byte-identical today, so nothing has been damaged, but that
+    # is luck rather than design.
+    #
+    # A symlink is someone else's file. Leave it alone and say so.
     for f in gcode_shell_command.py calibrate_shaper_config.py; do
-        [ -f "$klipper_path/klippy/extras/$f" ] &&
-            install_file "$GUPPY_DIR/k1_mods/$f" "$klipper_path/klippy/extras/$f"
+        dst="$klipper_path/klippy/extras/$f"
+        if [ -L "$dst" ]; then
+            continue
+        fi
+        [ -f "$dst" ] && install_file "$GUPPY_DIR/k1_mods/$f" "$dst"
     done
 
     if [ "$changed" -gt 0 ]; then
