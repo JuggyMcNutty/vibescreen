@@ -44,7 +44,7 @@ sweeps and its analysis, ending the way the mode says.
 way Moonraker does with its authorization component enforcing one.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 """
-import asyncio, json, math, os, re, shlex, struct, sys, time, zlib
+import asyncio, json, math, os, re, shlex, struct, sys, tempfile, time, zlib
 import websockets
 
 # The two temperatures are positional and optional, so they have to be read from
@@ -416,13 +416,131 @@ if SHAPER_CONFIG:
 
 
 # Enough of a gcodes root to populate the file browser and to answer the
-# metadata request the print status panel fires when a print starts. No
-# thumbnails: those are fetched over HTTP, which this does not serve.
+# metadata request the print status panel fires when a print starts.
 FILES = [
     {"path": "fake_benchy.gcode", "modified": time.time() - 60, "size": 2118400},
     {"path": "calibration/first_layer.gcode", "modified": time.time() - 86400,
      "size": 184320},
 ]
+
+# Every slicer worth using embeds preview images now, and the file browser and
+# the print status panel both draw one, so a fake without them exercises only
+# the path where there is nothing to show.
+#
+# guppyscreen reads them two different ways. Against a remote printer it
+# downloads over HTTP. Against 127.0.0.1 KUtils::is_running_local sends it
+# straight to the filesystem instead, at <gcodes root>/<relative_path>, so what
+# this has to provide is server.files.roots plus real files on disk. That is
+# also why the sizes below match what a K1 Max actually reports, 32, 96 and
+# 300 square: the panel picks the one closest to 300 times the width scale.
+GCODES_ROOT = os.environ.get("FAKE_GCODES_ROOT",
+                             os.path.join(tempfile.gettempdir(),
+                                          "guppy_fake_gcodes"))
+THUMB_SIZES = (32, 96, 300)
+
+
+def _boat_voxels():
+    """A hull tapering to a bow, a deck, a cabin and a chimney."""
+    beam = [2, 2, 2, 2, 2, 1, 1, 0]          # half-width, stern to bow
+    v = []
+    for x, b in enumerate(beam):
+        for y in range(2 - b, 3 + b):
+            for z in (0, 1, 2):
+                v.append((x, y, z))
+    for x in range(1, 4):                    # cabin
+        for y in range(1, 4):
+            for z in (3, 4, 5):
+                v.append((x, y, z))
+    for z in (6, 7):                         # chimney
+        v.append((2, 2, z))
+    return v
+
+
+def _thumbnail_png(size):
+    """Render the boat isometrically and return PNG bytes.
+
+    Written out by hand because the point of this file is to need nothing
+    installed but websockets. Supersampled four times and box filtered, which
+    is cheap at these sizes and saves the edges from looking chewed.
+    """
+    ss = size * 4
+    px = [[(0, 0, 0, 0)] * ss for _ in range(ss)]
+    tw, th, tz = ss * 0.072, ss * 0.041, ss * 0.062
+    ox, oy = ss * 0.47, ss * 0.34
+    base = (0xE8, 0x83, 0x4A)                # a filament orange
+
+    def fill(poly, shade):
+        colour = tuple(int(c * shade) for c in base) + (255,)
+        ys = [p[1] for p in poly]
+        for y in range(max(0, int(min(ys))), min(ss, int(max(ys)) + 1)):
+            xs = []
+            for i in range(len(poly)):
+                x1, y1 = poly[i]
+                x2, y2 = poly[(i + 1) % len(poly)]
+                if (y1 <= y < y2) or (y2 <= y < y1):
+                    xs.append(x1 + (y - y1) * (x2 - x1) / (y2 - y1))
+            xs.sort()
+            for i in range(0, len(xs) - 1, 2):
+                for x in range(max(0, int(xs[i])), min(ss, int(xs[i + 1]) + 1)):
+                    px[y][x] = colour
+
+    # Painter's algorithm: back to front is ascending x + y + z.
+    for (x, y, z) in sorted(_boat_voxels(), key=lambda v: v[0] + v[1] + v[2]):
+        cx = ox + (x - y) * tw
+        cy = oy + (x + y) * th - z * tz
+        fill([(cx, cy), (cx + tw, cy + th), (cx, cy + 2 * th),
+              (cx - tw, cy + th)], 1.0)                      # top
+        fill([(cx - tw, cy + th), (cx, cy + 2 * th),
+              (cx, cy + 2 * th + tz), (cx - tw, cy + th + tz)], 0.66)
+        fill([(cx + tw, cy + th), (cx, cy + 2 * th),
+              (cx, cy + 2 * th + tz), (cx + tw, cy + th + tz)], 0.45)
+
+    rows = []
+    for y in range(size):
+        row = bytearray(b"\x00")            # PNG filter: none
+        for x in range(size):
+            acc = [0, 0, 0, 0]
+            for dy in range(4):
+                for dx in range(4):
+                    p = px[y * 4 + dy][x * 4 + dx]
+                    for i in range(4):
+                        acc[i] += p[i]
+            row += bytes(a // 16 for a in acc)
+        rows.append(bytes(row))
+
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+            + chunk(b"IEND", b""))
+
+
+def thumbnails_for(path):
+    """The metadata thumbnails list for one gcode file.
+
+    relative_path is relative to the gcode file's own directory, which is what
+    Moonraker sends and what KUtils::get_thumbnail assumes when it joins.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return [{"width": n, "height": n, "size": n * n,
+             "relative_path": f".thumbs/{stem}-{n}x{n}.png"}
+            for n in THUMB_SIZES]
+
+
+def write_thumbnails():
+    """Put the preview images on disk where the local path will look."""
+    for f in FILES:
+        d = os.path.join(GCODES_ROOT, os.path.dirname(f["path"]), ".thumbs")
+        os.makedirs(d, exist_ok=True)
+        for thumb in thumbnails_for(f["path"]):
+            dest = os.path.join(GCODES_ROOT, os.path.dirname(f["path"]),
+                                thumb["relative_path"])
+            if not os.path.exists(dest):
+                with open(dest, "wb") as fh:
+                    fh.write(_thumbnail_png(thumb["width"]))
 
 
 def result_for(method, params):
@@ -445,6 +563,11 @@ def result_for(method, params):
         return {"namespace": params.get("namespace", ""), "value": {}}
     if method == "printer.gcode.help":
         return {}
+    if method == "server.files.roots":
+        # KUtils::get_root_path looks "gcodes" up here to build the local
+        # thumbnail path, so this has to name a directory that really exists.
+        return [{"name": "gcodes", "path": GCODES_ROOT, "permissions": "rw"},
+                {"name": "config", "path": GCODES_ROOT, "permissions": "rw"}]
     if method == "server.files.list":
         return FILES
     if method == "server.files.metadata":
@@ -453,7 +576,9 @@ def result_for(method, params):
                 return dict(f, estimated_time=int(PRINT_SECONDS),
                             layer_count=120, first_layer_height=0.2,
                             layer_height=0.2, object_height=24.0,
-                            filament_total=4210.0, thumbnails=[])
+                            filament_total=4210.0,
+                            filament_weight_total=12.56,
+                            thumbnails=thumbnails_for(f["path"]))
         return {}
     if method == "machine.system_info":
         return {"system_info": {"cpu_info": {"cpu_count": 2}}}
@@ -819,9 +944,11 @@ async def main():
     # Built here rather than at import, because before Python 3.10 an
     # asyncio.Lock binds to whatever loop is current when it is constructed.
     SHAPER_LOCK = asyncio.Lock()
+    write_thumbnails()
     shaper = f", shaper {SHAPER}" if SHAPER else ""
     print(f"fake moonraker on 7125, extruder {TEMP}/{TARGET}, "
           f"mesh {MESH_SHAPE}{shaper}", flush=True)
+    print(f"gcodes root {GCODES_ROOT}", flush=True)
     async with websockets.serve(handler, "127.0.0.1", 7125,
                                 process_request=check_api_key):
         await asyncio.Future()
