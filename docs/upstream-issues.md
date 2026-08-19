@@ -87,30 +87,51 @@ values without writing them to `printer.cfg`, which is a different operation.
 
 ## Issues, by verdict
 
-### Open, and being fixed in this round
+### Fixed in this round
 
-| Issue | What | Where in our tree |
+All of these were present when the triage was written and are fixed now. The
+commit is named so the reasoning can be read back.
+
+| Issue | What | Fixed by |
 | --- | --- | --- |
-| #33, #118 | K1 fan sliders are not scaled to the speed the fan starts at | `src/fan_panel.cpp:122-155`, `:41-57`, `:90-110` |
-| #94, #103, #47 | Print status never dismisses, sticks at 99 percent | `src/print_status_panel.cpp:312-322`, `:250-257`, `:393-400` |
-| #95 | File list does not refresh when a file is uploaded | `src/print_panel.cpp:142`, `:177-195` |
-| #104 | Belt calibration crashes Klipper, and its panel spins forever | `k1/scripts/guppy_cmd.cfg:48-56`, `src/belts_calibration_panel.cpp:182-204` |
-| #135 | Belt calibration warns twice on every run | `k1/scripts/graph_belts.py:297-307`, `:521-528` |
-| #90 | Load filament leaks relative extrusion mode | `k1/scripts/guppy_cmd.cfg:91-99` |
-| #132 | Extrude length has no effect on load | `update.sh`, see below |
-| #116 | Tiny Z offsets render in scientific notation | `src/finetune_panel.cpp:106,112,149,154` |
-| #116, #91, #41 | Three digit temperatures wrap onto two lines | `src/sensor_container.cpp:54,59,65` |
-| #32 | Moonraker API key is never sent | `src/websocket_client.cpp:132-133`, `src/utils.cpp:145,175` |
-| #156, #143 | No way to forget a saved wifi network | `src/wifi_panel.cpp:286-293` |
-| #143, #156 | A rejected wifi password never fails visibly | `src/wifi_panel.cpp:165-243` |
-| #146 | Four punctuation characters cannot be typed | `src/wifi_panel.cpp:39` |
-| #117 | No chamber temperature on the print status screen | `src/print_status_panel.cpp:76-102` |
-| #102 | Touch calibration ignores display rotation | `lv_touch_calibration/lv_tc.c:167-177` |
-| #80, #7 | Screen wakes itself about every hour | `src/guppyscreen.cpp:341-356` |
-| #107, #115, #59, #58 | Spoolman cannot be turned off and its errors vanish | `src/init_panel.cpp:74-84`, `src/spoolman_panel.cpp:93,115` |
-| #56 | No confirmation before pause | `src/print_status_panel.cpp:439-441` |
+| #33, #118 | Fan sliders ignored the speed the fan starts at | `4679274` |
+| #94, #103, #47 | Print status never dismissed, stuck at 99 percent | `6f355f8` |
+| #95 | File list did not refresh when a file was uploaded | `150073c` |
+| #104 | Belt calibration crashed Klipper, and its panel span forever | `745ab03` |
+| #135 | Belt calibration warned twice on every run | `c443f0b` |
+| #90 | Load filament leaked relative extrusion mode | `59993da` |
+| #132 | Extrude length had no effect on load | `87f1f56` |
+| #116 | Tiny Z offsets rendered in scientific notation | `775bf27` |
+| #116, #91, #41 | Three digit temperatures wrapped onto two lines | `28e6c87` |
+| #32 | Moonraker API key was never sent | `ca18c1d` |
+| #156, #143 | No way to forget a saved wifi network, and no failure state | `575fb1c` |
+| #146 | Four punctuation characters could not be typed | `568c43a` |
+| #117 | No chamber temperature on the print status screen | `9d25e81` |
+| #102 | Touch calibration's rotation compensation was wrong | `c48434a` |
+| #80, #7 | Screen woke itself about every hour | `b1682b4` |
+| #107, #115 | Spoolman could not be turned off and its errors vanished | `ec3b9e3` |
+| #56 | No confirmation before pause | `b9e37de` |
 
-Notes on the ones where the reading is not obvious.
+Two of those deserve a footnote.
+
+**#132 is a deployment fix, not a code fix.** The macro we ship has always
+honoured `EXTRUDE_LEN`. `installer.sh` copies the Klipper configs into the
+printer's own config tree and `update.sh` only replaced the binary, so whatever
+was installed first stayed there forever. That also gated #90, #104 and #135,
+since all three are changes under `k1/`.
+
+**#102 is unverified on hardware.** A K1 Max builds with `EVDEV_CALIBRATE`
+unset and `touch_calibrated` false, so none of that code runs here. The
+rotation algebra was checked by composing it against LVGL's own
+`indev_pointer_proc` for all four rotations, which is exact, but nobody has put
+a finger on a rotated calibrated panel with this build. Worth asking a KE or
+Nebula owner before believing it.
+
+#### What each of those actually was
+
+Written in the present tense, describing the code as it stood before the fix,
+because the diagnosis is the part worth keeping. Only the ones where the reading
+is not obvious from the issue text.
 
 **#33 and #118, the fans.** Creality defines the K1's fans as `[output_pin]`
 with `scale: 255`, and each has a minimum value below which it does not spin.
@@ -135,13 +156,6 @@ macro with only `M400` between them, which waits for moves and not for the
 accelerometer writer, so two full datasets are held at once on a machine with
 118 MB free.
 
-**#132, extrude length.** The macro we ship does honour `EXTRUDE_LEN`. The one
-installed on the printer does not, because `installer.sh` **copies**
-`scripts/*.cfg` into the Klipper config tree and `update.sh` only replaces the
-binary. Every `k1/` fix is therefore invisible to an existing install until
-`update.sh` re-copies them. That makes this the entry that gates #90, #104 and
-#135.
-
 **#80 and #7, the hourly wake.** `custom_tick_get` drives every LVGL tick from
 `gettimeofday`, so an NTP step moves the display sleep timer, every animation
 and the input shaper watchdog. It also computes `tv_sec * 1000000` in `time_t`,
@@ -152,18 +166,18 @@ live, but the wall clock dependence is real on every target and
 `CLOCK_MONOTONIC` removes both.
 
 **#102, touch calibration and rotation.** Upstream `44d11fc` added a rotation
-block to `lv_tc_transform_point`, but `lvgl/src/core/lv_indev.c:347-355` already
-rotates pointer input, and the affine is fit from raw driver points to logical
-post-rotation points, so it needs no rotation of its own. At 180 degrees the two
-cancel to within a pixel, which is why it looks like touch was not rotated at
-all. At 90 and 270 they do not cancel. The calibration preview goes through
-`lv_tc_transform_point` but never through `indev_pointer_proc`, so nothing
-cancels the surplus there and the cursor lands mirrored, which reads as the
-calibration having been ignored.
+block to `lv_tc_transform_point`. `lvgl/src/core/lv_indev.c:347-355` rotates
+pointer input too, and the affine is already fit from raw driver points to
+logical post-rotation points, so what belongs there is the *inverse* of LVGL's
+rotation in the driver's own resolutions. Upstream applied the rotation itself,
+in logical resolutions. Composed against `indev_pointer_proc`, 270 happens to
+agree, 180 is off by one pixel, and 90 puts the touch somewhere else entirely.
 
-Not reachable on our own hardware: a K1 Max builds with `EVDEV_CALIBRATE` unset
-and `touch_calibrated` false, so `src/main.cpp:106` installs the bare
-`evdev_read` and this code is bypassed. Affected users are on calibrated builds.
+The half users actually notice is the preview. It passes the transformed point
+to `lv_obj_set_pos`, which wants a screen coordinate, and gets the pre-rotation
+one with nothing to un-rotate it. So the cursor appears mirrored while the
+calibration underneath is correct, which reads as the calibration having been
+ignored and sends people round the recalibration loop.
 
 ### Fixed already by this fork
 

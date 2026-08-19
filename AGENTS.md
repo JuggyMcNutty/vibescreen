@@ -464,7 +464,32 @@ PRINTER_HOST=127.0.0.1 scripts/build.sh sim
 ```
 
 It records every `printer.gcode.script` it receives to `$GCODE_LOG`, which is
-how you check what a button actually sends.
+how you check what a button actually sends. That log is the only reliable way to
+confirm what a control emits, and it is how the fan slider's scaling was
+settled.
+
+Beyond the bed mesh and shaper flags it grows as panels need it:
+
+```sh
+python3 tools/fake_moonraker.py --print complete --print-seconds 120
+python3 tools/fake_moonraker.py --belts fail      # or slow, timeout, empty
+python3 tools/fake_moonraker.py --drop-file 20    # announce an upload
+python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshake
+```
+
+**The wifi panel does not go through Moonraker at all**, so the fake above
+cannot reach it: it opens wpa_supplicant's control socket and speaks its text
+protocol. `tools/fake_wpa_supplicant.py` is that socket. Point the
+`wpa_supplicant` key in `build/bin/guppyconfig.json` at the directory you give
+it:
+
+```sh
+python3 tools/fake_wpa_supplicant.py --dir /tmp/fake-wpa
+python3 tools/fake_wpa_supplicant.py --dir /tmp/fake-wpa --fail wrong-key
+```
+
+Start it before the simulator. The panel opens its control socket once, at
+startup, and does not retry.
 
 It serves a `bed_mesh` object too. `--mesh` picks the shape: `adaptive` is the
 real 3x3 read off the development printer, `full` a 6x6 saddle, then `bowl`,
