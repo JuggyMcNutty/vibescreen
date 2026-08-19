@@ -5,7 +5,7 @@ A touch UI for Klipper printers.
 This is a maintained fork of [guppyscreen](https://github.com/ballaswag/guppyscreen),
 which stopped receiving commits in July 2024.
 
-![Bed mesh drawn as a shaded surface](screenshots/bedmesh.png)
+
 
 ## What has changed since guppyscreen?
 
@@ -13,102 +13,128 @@ which stopped receiving commits in July 2024.
 ground plane with the bed's own coordinates, so the mesh can still be matched to
 the machine after dragging it round.
 
-| Flat heatmap | The probed points |
-| --- | --- |
+<img src="screenshots/bedmesh.png" title="" alt="Bed mesh drawn as a shaded surface" data-align="center">
+
+
+
+| Flat heatmap                                                | The probed points                                       |
+| ----------------------------------------------------------- | ------------------------------------------------------- |
 | ![Bed mesh as a flat heatmap](screenshots/bedmesh_flat.png) | ![The 36 probed points](screenshots/bedmesh_probed.png) |
 
 **The extruder panel was rewritten.** Its option lists are configurable, and
 clamped to the printer's own limits read from Klipper.
 
-**A refused command is no longer silent.**
+![Extruder panel with configurable option lists](screenshots/extrude_retract.png)
+
+
 
 **Update Guppy shows what it is doing.** It used to run the updater on the UI
 thread, so the screen froze for the length of the download and then said
 nothing either way. The update now runs in the background and its output
 appears as it arrives, ending on Update finished or Update failed.
 
-| Extruder options | A rejected command |
-| --- | --- |
-| ![Extruder panel with configurable option lists](screenshots/extrude_retract.png) | ![Dialog reading printer rejected the command](screenshots/gcode_rejected.png) |
+
+
+**A refused command is no longer silent.**
+
+| A rejected command                                                             |
+| ------------------------------------------------------------------------------ |
+| ![Dialog reading printer rejected the command](screenshots/gcode_rejected.png) |
+
+
 
 **Bed mesh Calibrate wipes the nozzle first.** When the printer has a
 `WIPE_NOZZLE` macro, Calibrate runs it before probing. On a K1, K1C, K1SE or
-K1 Max that macro comes from
-[ProWiper](https://www.printables.com/model/1023575-prowiper-for-creality-k1-series),
-formerly Advanced Nozzle Wiper.
+K1 Max that macro comes from [ProWiper](https://www.printables.com/model/1023575-prowiper-for-creality-k1-series).
+
+
 
 **Bed mesh Calibrate homes only when something is unhomed.**
 
+
+
 **The input shaper panel was rebuilt.**
 
-| Input shaper with graphs | Input shaper with numbers |
-| --- | --- |
-| ![Frequency response for one axis](screenshots/inputshaper.png) | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
+| Input shaper with graphs                                                              | Input shaper with numbers                                                                               |
+|:-------------------------------------------------------------------------------------:| ------------------------------------------------------------------------------------------------------- |
+| ![Frequency response for one axis](screenshots/inputshaper.png)*`Graph data is fake`* | ![Every shaper with its vibration, smoothing and max acceleration](screenshots/inputshaper_numbers.png) |
 
-Those two come from `tools/fake_moonraker.py`, so the curve and the figures are
-synthetic. A real run means shaking the printer for minutes per axis.
 
-**Fan sliders know where the fan actually starts turning.** A Creality fan
-does not move below a minimum duty cycle, and the slider used to write raw
-values straight through, so on a K1 Max the Side Fan did nothing at all below
-71 percent. The slider now maps its 0 to 100 the way the printer's own `M106`
+
+**Fan sliders know where the fan actually starts turning.** on a K1 Max the Side Fan did nothing at all below 71 percent. The slider now maps its 0 to 100 the way the printer's own `M106`
 does, in both directions, so a fan set to 50 percent reads back as 50 percent.
+
+
 
 **The print status screen dismisses itself.** It used to stay up after a print
 finished, stuck at 99 percent because the progress was truncated rather than
 rounded.
 
+
+
 **The file list refreshes when a file is uploaded**, rather than waiting for
 someone to press Reload.
+
+
 
 **Belt calibration reports its failures.** It ran both sweeps back to back and
 recognised only success, so anything else left a spinner turning forever. It
 now runs one sweep at a time, which is also what stops it exhausting memory on
-a 209 MB machine, and says what went wrong.
+a 256 MB machine, and says what went wrong.
+
+
 
 **Wifi is usable.** A wrong password can be corrected instead of leaving the
 screen saying Connecting forever, a saved network can be forgotten, and the
 four punctuation characters missing from the keyboard are back, all of which
 are legal in a WPA passphrase.
 
+
+
 **Spoolman can be turned off**, and when it fails it says so instead of
 disappearing.
+
+
 
 **The Moonraker API key is sent** where one is configured, so a secured
 Moonraker no longer refuses the connection in silence.
 
+
+
 **Smaller things.** A third temperature on the print status screen for a
 chamber sensor; pause asks for confirmation; a Z offset of 5.5e-17 renders as
 0.000 mm rather than in scientific notation; three digit temperatures stop
-wrapping onto two lines; the display sleep Never setting really is never; and
+wrapping onto two lines; the display sleep never setting really is never; and
 Z+ carries the arrow that matches what Z+ does.
+
+
 
 **Underneath: lots of bug fixes and exception handlers.**
 
 The rest of the interface:
 
-| Move | Tuning |
-| --- | --- |
+| Move                                | Tuning                                       |
+| ----------------------------------- | -------------------------------------------- |
 | ![Move panel](screenshots/move.png) | ![Tuning menu](screenshots/printer_tune.png) |
 
-| Files | WiFi |
-| --- | --- |
+| Files                                                          | WiFi                                                                 |
+| -------------------------------------------------------------- | -------------------------------------------------------------------- |
 | ![File browser with a sliced thumbnail](screenshots/files.png) | ![Picking a network and entering its password](screenshots/wifi.png) |
 
-| Fine tune | Limits |
-| --- | --- |
+| Fine tune                                                                    | Limits                                                      |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | ![Live z-offset, pressure advance, speed and flow](screenshots/finetune.png) | ![Velocity and acceleration limits](screenshots/limits.png) |
 
-| Macros | Console |
-| --- | --- |
+| Macros                                                | Console                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------ |
 | ![Macro list with parameters](screenshots/macros.png) | ![Console with the command palette](screenshots/console.png) |
 
-| Temperature | Fans |
-| --- | --- |
+| Temperature                                              | Fans                                      |
+| -------------------------------------------------------- | ----------------------------------------- |
 | ![Entering a target on the numpad](screenshots/temp.png) | ![Fan speed control](screenshots/fan.png) |
 
-| LED | Settings |
-| --- | --- |
+| LED                                            | Settings                                   |
+| ---------------------------------------------- | ------------------------------------------ |
 | ![LED brightness control](screenshots/led.png) | ![Settings menu](screenshots/settings.png) |
 
 ## Scope
@@ -123,8 +149,7 @@ We also build for:
 Whether they run is unknown. Treat them as a starting point rather than a
 supported target.
 
-Android is not supported. Upstream shipped an APK built from a separate branch
-and that has been removed.
+Android is not supported and has been removed.
 
 ## Installing
 
@@ -163,20 +188,21 @@ From the printer:
 
 or press Update Guppy in the settings panel.
 
+
+
+**Coming from the original guppyscreen?** 
+Run the installer above instead. That
+project's updater points at its own releases.
+
+
+
 Releases are rolling and there is no separate stable track. Every push to
-`main` that changes something other than documentation publishes its own
-release, tagged by date and commit, so the
-[release list](https://github.com/JuggyMcNutty/vibescreen/releases) doubles as a
-build history. The updater always takes the newest.
+`main` publishes its own
+release.
 
-Updating also refreshes the Klipper macros this project ships, which live in
-the printer's own config tree rather than in the tarball. When any of them
-change the updater says so and asks for a `FIRMWARE_RESTART`, which it will not
-do for you, because that ends a print in progress. Run it when the printer is
-idle. Whatever it replaced is kept alongside as a `.bak`.
+Updating also refreshes the Klipper macros this project ships.
 
-Coming from the original guppyscreen, run the installer above instead. That
-project's updater points at its own releases and will not see these.
+
 
 ## Uninstalling
 
