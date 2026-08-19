@@ -18,7 +18,7 @@ Status key: **open** means we have not fixed it yet. Fixed items name the commit
 
 ## What the previous developer knew
 
-There are 14 TODO/XXX markers in `src/`, and they are worth reading as a
+There are 13 TODO/XXX markers in our own `src/`, and they are worth reading as a
 handover note rather than as noise. They cluster in three places. No line
 numbers here on purpose: the marker text is exact, so `grep` finds them, and a
 line number is one commit away from pointing at something else.
@@ -52,7 +52,7 @@ two local bugs, they are two sightings of one structural problem. See C1.
 
 ### C1. `State` returns references out from under its own mutex (open)
 
-`src/state.cpp:61-70`
+`src/state.cpp:66-69`
 
 ```cpp
 json &State::get_data(const json::json_pointer& ptr) {
@@ -65,7 +65,7 @@ The guard is destroyed when the function returns, so the caller receives a raw
 reference into the shared `data` object and then reads it with no lock held.
 Meanwhile `State::set_data` runs `data[key].merge_patch(patch)` under the same
 lock, from a different thread: `consume()` is driven by libhv's
-`WebSocketClient::onmessage` (`src/websocket_client.cpp:40,66`), which runs on
+`WebSocketClient::onmessage` (`src/websocket_client.cpp:41,73`), which runs on
 the libhv event loop thread, not the LVGL thread.
 
 `merge_patch` can rehash and reallocate the underlying object, so a reader
@@ -77,7 +77,7 @@ Two further wrinkles:
 - `data[ptr]` on a `json` object **default-inserts a null** when the pointer is
   absent, so a nominal read mutates the map. Two concurrent reads of missing
   keys both write.
-- There are 44 `get_data(...)` call sites. The mutex is doing nothing useful for
+- There are 51 `get_data(...)` call sites. The mutex is doing nothing useful for
   any of the reference-returning ones. The value-returning accessors
   (`get_extruders`, `get_heaters`, and friends) are genuinely safe.
 
@@ -267,9 +267,14 @@ the Klipper the K1 ships.
 Every panel destructor calls `lv_obj_del` on its root container, and its widget
 members' destructors then call `lv_obj_del` on objects that root already
 deleted as children. `~BedMeshPanel` deletes `cont`, which takes
-`controls_cont` and every `ButtonContainer` under it with it, and then
-`~ButtonContainer` deletes `btn_cont` again. `Selector` and the panel-owned
-`lv_obj_t*` members have the same shape.
+`controls_cont` and every `Selector` under it with it, and then `~Selector`
+deletes `selector_cont` again (`src/selector.cpp:66-71`). `ImageLabel` and
+the panel-owned `lv_obj_t*` members have the same shape: 36 destructors
+still `lv_obj_del` a container their parent may already have taken.
+
+`~ButtonContainer` used to be the example here and no longer is: it is empty
+now (`src/button_container.cpp:72-73`). The pattern is unchanged, only the
+one instance that happened to be named.
 
 Nothing hits it today because the panels are members of `MainPanel` and
 `PrinterTunePanel` and live for the whole process, so no panel is ever
@@ -361,12 +366,16 @@ had not modelled, the panel showed nothing at all. The console panel saw the
 error, the panel that sent it did not.
 
 It now checks the reply and routes a rejection to the error handler
-(`src/websocket_client.cpp:217`). **That is a backstop, not a licence to send
+(`src/websocket_client.cpp:228`). **That is a backstop, not a licence to send
 speculatively.** Klipper abandons the rest of a script at the first command it
 refuses, so anything after the bad line silently never runs. Validate first;
 see the gcode section of `AGENTS.md`.
 
-### C9. Websocket client's shared state was unguarded across threads (fixed, `c042ae6`)
+### C9. Websocket client's shared state was unguarded across threads
+
+The container races are **fixed** in `c042ae6`. The handler lifetime hazard
+below them is **still open**. The two used to share a heading that said only
+"fixed", directly above a paragraph beginning "Still open".
 
 `callbacks` and `consumers` were plain `std::map` and `notify_consumers` a plain
 `std::vector`, all mutated from two threads with nothing between them. Panels
@@ -415,11 +424,12 @@ LVGL at all and calls `std::terminate`. x86-64 does emit them by default, so
 anything relying on unwinding would test green in the simulator and do nothing
 on the printer. Costs 64KB.
 
-**Residual**, recounted 2026-08-17: of 78 `add_event_cb` sites, 52 go through a
-guarded `&Class::_handler` static. 17 are inline lambdas and 4 are named
-callbacks (`GuppyScreen::handle_calibrated`, `scroll_begin_event`, `slider_cb`,
-`draw_part_event_cb`), none of them guarded. The remaining 5 pass a `cb` handed
-in by the caller, so they inherit whatever the caller did.
+**Residual**, recounted 2026-08-19: of 78 `add_event_cb` sites, 51 go through a
+guarded `&Class::_handler` static. 19 are inline lambdas, only 3 of which
+carry `KGuard::event`, and 4 are named callbacks
+(`GuppyScreen::handle_calibrated`, `scroll_begin_event`, `slider_cb`,
+`draw_part_event_cb`), none of them guarded. The remaining 4 pass a `cb`
+handed in by the caller, so they inherit whatever the caller did.
 
 The unguarded ones are mostly small UI-only bodies, but they are entry points.
 To recount: every `add_event_cb` whose callback argument is neither a lambda
@@ -450,7 +460,7 @@ Four problems in eleven lines:
    `ioctl(-1, ...)` and `close(-1)`.
 2. `strcpy` into `ifr.ifr_name`, which is `IFNAMSIZ` (16) bytes, with no length
    check. The name arrives from `get_wifi_interface()`
-   (`src/utils.cpp:176-187`), which returns a filename from the configurable
+   (`src/utils.cpp:382-393`), which returns a filename from the configurable
    `wpa_supplicant` directory, so it is config-influenced rather than fixed.
 3. `ioctl` result unchecked. If `SIOCGIFADDR` fails, `ifr.ifr_addr` is the
    zero-initialised value from `ifreq ifr{}` rather than a real address, and the
@@ -464,12 +474,12 @@ Not fixed in `pellcorp/grumpyscreen` either; they moved the identical code to
 
 ### C5. Unguarded numeric parsing elsewhere (partly fixed, lower severity)
 
-22 `std::sto*` call sites, none guarded. Beyond C2 and C3 the reachable ones are:
+14 `std::sto*` call sites, none guarded. Beyond C2 and C3 the reachable ones are:
 
-- `src/spoolman_panel.cpp:422` parses a spool colour from the Spoolman API
+- `src/spoolman_panel.cpp:437` parses a spool colour from the Spoolman API
   response. A non-hex colour from a third-party service aborts the UI.
   **Fixed in `0886341`.**
-- `src/wifi_panel.cpp:186` parses the signal level out of a wpa_supplicant
+- `src/wifi_panel.cpp:300` parses the signal level out of a wpa_supplicant
   `SCAN_RESULTS` line. Correctly guarded by `wifi_parts.size() == 5` first, and
   the field is always numeric in practice, so low risk.
 - `src/numpad.cpp:86` `std::stod` on textarea contents. Worth noting that this
@@ -483,7 +493,10 @@ The helpers now exist: `KUtils::parse_int`, `parse_double` and `parse_hex`
 trailing garbage that plain `std::stoi` accepts. Converted so far are C2, C3,
 the Spoolman swatch, the extruder speed and the input shaper. The remaining
 sites are the low risk ones listed above plus the TMC tune, finetune and print
-status parses, which all read numbers Klipper itself produced.
+status parses, which all read numbers Klipper itself produced, and four that
+read numbers something else produced: `src/spoolman_panel.cpp:371` and `:429`
+take a spool id straight from Spoolman, and `src/utils.cpp:259` and `:264`
+take thumbnail widths straight from Moonraker's metadata.
 
 Still wanted: a `try`/`catch` at the top level so an unexpected throw anywhere
 logs rather than vanishing.
@@ -533,8 +546,9 @@ only source change needed to build the tree with it.
 ### M1. Commented-out code left behind (open)
 
 Of the order of 90 lines across a couple of dozen files, concentrated in
-`src/numpad.cpp`, `src/extruder_panel.cpp`, `src/websocket_client.cpp`,
-`src/macro_item.cpp` and `src/image_label.cpp`. The exact count moves with
+`src/numpad.cpp`, `src/extruder_panel.cpp`, `src/image_label.cpp` and
+`src/macro_item.cpp`. `src/websocket_client.cpp` was on that list and has
+since been cleared out by the fixes that went through it. The exact count moves with
 every commit and depends on how you decide what counts, so it is not worth
 pinning here. Git remembers; these should go. Low risk, do it in one sweep per
 file so the diffs stay reviewable.
@@ -542,7 +556,7 @@ file so the diffs stay reviewable.
 ### M2. Four leaked singletons (open, cosmetic)
 
 `Config`, `GuppyScreen`, `ThemeConfig` and `State` are each `instance = new ...`
-with no matching `delete` (`src/config.cpp:17`, `src/guppyscreen.cpp:39`,
+with no matching `delete` (`src/config.cpp:17`, `src/guppyscreen.cpp:41`,
 `src/theme.cpp:17`, `src/state.cpp:40`). They live for the whole process, so
 nothing leaks in practice. Only worth touching if we ever want a clean shutdown
 path or to run the UI under a leak checker.
@@ -564,12 +578,13 @@ and for the Debian target. Worked around today by generating a config in
 
 ### M5. Home panel sensor rows overlap and clip (fixed)
 
-Visible in `screenshots/home.png`, captured against the development K1 Max on
-2026-08-16. That machine reports two extra temperature sensors beyond the
-extruder and bed, and the third row draws as `Temperature Fan 20Chamber Fan`:
-one sensor's value sits on top of the next sensor's name. A fourth row is
-started below it and clipped by the temperature chart, so only its colour bar
-shows.
+`screenshots/home.png` is kept as the evidence, captured against the
+development K1 Max on 2026-08-16, before the fix. **It is deliberately not
+retaken**, and it is the one screenshot in that directory the README does not
+use. That machine reported two extra temperature sensors beyond the extruder
+and bed, and the third row drew as `Temperature Fan 20Chamber Fan`: one
+sensor's value sat on top of the next sensor's name. A fourth row was started
+below it and clipped by the temperature chart, so only its colour bar showed.
 
 Two things combine. `SensorContainer` gives the name label no width bound and
 aligns it out-right of the icon (`src/sensor_container.cpp:51`), while the
@@ -594,6 +609,45 @@ alone.
 way `FanPanel` and `LedPanel` already did, rather than running rows off the
 bottom. Driven in the simulator with the five sensors the development K1 Max
 reports.
+
+### M6. LVGL's tick came from the wall clock (fixed, `b1682b4`)
+
+`custom_tick_get` used `gettimeofday`, so every LVGL timer, the display sleep
+timer and the input shaper watchdog moved whenever NTP stepped the clock. It
+also computed `tv_sec * 1000000` in `time_t`, which overflows on any target
+with a 32 bit one and produces a 71.6 minute sawtooth. That is the exact period
+in the "wakes up about every hour" reports upstream, #80 and #7.
+
+Latent rather than live for us: the Bootlin musl toolchain has a 64 bit
+`time_t`, so the overflow needs 292 000 years rather than 71 minutes. The clock
+stepping half was real on any target. Now `clock_gettime(CLOCK_MONOTONIC)`
+(`src/guppyscreen.cpp:366-376`), which removes both.
+
+### M7. Small measurements rendered in scientific notation (fixed, `775bf27`)
+
+`fmt`'s `{:.5}` with no presentation type is `%g`, which switches to an
+exponent below 1e-4. A `homing_origin[2]` of 5.55e-17, which is ordinary
+residue from two opposite `Z_ADJUST` calls and means zero, printed as
+`5.5511e-17 mm` on the fine tune and print status panels.
+
+`KUtils::short_measure` (`src/utils.cpp:117`) fixes the precision and snaps
+anything under half a micron to zero. Six call sites. grumpyscreen's `1d7e0d3`
+treats the symptom by string matching `e-` in the formatted output; this does
+not.
+
+### M8. The Moonraker API key was never sent (fixed, `ca18c1d`)
+
+`moonraker_api_key` was written by the config, by the printer select panel and
+by the Debian default config, and read nowhere. The websocket opened with an
+empty header set, so against a Moonraker with `authorization` configured the
+UI simply never connected, with nothing on screen to say why. Upstream #32.
+
+Now `src/websocket_client.cpp:141` sets `X-Api-Key` from
+`KUtils::moonraker_api_key` (`src/utils.cpp:81`), and the two HTTP fetches go
+through `KUtils::fetch_to_file`, which carries the same header. Spoolman rides
+the websocket via `server.spoolman.proxy`, so it is covered by the same change.
+`tools/fake_moonraker.py --api-key` refuses an anonymous handshake, which is
+how this is driven.
 
 ---
 
