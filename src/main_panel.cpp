@@ -154,7 +154,44 @@ void MainPanel::create_panel() {
   lv_obj_set_style_pad_all(setting_tab, 0, 0);
 
   create_main(main_tab);
-  
+
+  // Settings is the last tab, so the badge rides the bottom of the strip. It is
+  // a plain dot rather than a new glyph because the rail's icons come out of a
+  // generated Material Design subset, and adding one would mean regenerating
+  // the font.
+  update_badge = lv_obj_create(tab_btns);
+  lv_obj_remove_style_all(update_badge);
+  lv_obj_set_size(update_badge, 14, 14);
+  lv_obj_set_style_radius(update_badge, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(update_badge, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(update_badge, lv_palette_main(LV_PALETTE_ORANGE), 0);
+  lv_obj_clear_flag(update_badge, LV_OBJ_FLAG_CLICKABLE);
+  // Sit on the settings icon rather than in the corner of the strip. The tab
+  // buttons are one btnmatrix, so there is no per-button object to attach to;
+  // the last of the five cells is measured instead. Layout has to be forced
+  // first, or the strip still reports zero height here.
+  lv_obj_update_layout(tabview);
+  const lv_coord_t cell_h = lv_obj_get_height(tab_btns) / 5;
+  lv_obj_align(update_badge, LV_ALIGN_BOTTOM_RIGHT, -4, -(cell_h / 2) - 6);
+  lv_obj_add_flag(update_badge, LV_OBJ_FLAG_HIDDEN);
+
+  UpdateCheck::set_listener([this]() { this->refresh_update_badge(); });
+  UpdateCheck::start();
+  refresh_update_badge();
+}
+
+// Called from UpdateCheck on the LVGL thread, so no lock of its own.
+void MainPanel::refresh_update_badge() {
+  if (update_badge == NULL) {
+    return;
+  }
+  if (UpdateCheck::update_available()) {
+    lv_obj_clear_flag(update_badge, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(update_badge);
+  } else {
+    lv_obj_add_flag(update_badge, LV_OBJ_FLAG_HIDDEN);
+  }
+  setting_panel.refresh_update_notice();
 }
 
 void MainPanel::handle_homing_cb(lv_event_t *event) {

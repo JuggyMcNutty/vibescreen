@@ -1,6 +1,7 @@
 #include "sysinfo_panel.h"
 #include "utils.h"
 #include "config.h"
+#include "update_check.h"
 #include "theme.h"
 #include "spdlog/spdlog.h"
 #include "guppyscreen.h"
@@ -57,6 +58,25 @@ static std::map<std::string, int32_t> sleep_label_to_sec = {
   {"5 Hours", 18000} // 5 hour
 };
 
+// How often to ask GitHub whether there is a newer release. Hourly is the
+// floor: the check spawns update.sh, and there is nothing to gain from asking
+// more often than releases appear.
+static std::map<int32_t, uint32_t> update_hours_to_dd_idx = {
+  {1, 0},
+  {6, 1},
+  {12, 2},
+  {24, 3},
+  {168, 4}
+};
+
+static std::map<std::string, int32_t> update_label_to_hours = {
+  {"Hourly", 1},
+  {"6 Hours", 6},
+  {"12 Hours", 12},
+  {"Daily", 24},
+  {"Weekly", 168}
+};
+
 SysInfoPanel::SysInfoPanel()
   : cont(lv_obj_create(lv_scr_act()))
   , left_cont(lv_obj_create(cont))
@@ -79,6 +99,12 @@ SysInfoPanel::SysInfoPanel()
     // Z axis icons
   , z_icon_toggle_cont(lv_obj_create(left_cont))
   , z_icon_toggle(lv_switch_create(z_icon_toggle_cont))
+
+    // update checking
+  , update_check_cont(lv_obj_create(left_cont))
+  , update_check_toggle(lv_switch_create(update_check_cont))
+  , update_interval_cont(lv_obj_create(left_cont))
+  , update_interval_dd(lv_dropdown_create(update_interval_cont))
 
   // log level
   , theme_cont(lv_obj_create(left_cont))
@@ -199,6 +225,53 @@ SysInfoPanel::SysInfoPanel()
   lv_obj_add_event_cb(z_icon_toggle, &SysInfoPanel::_handle_callback,
 		      LV_EVENT_VALUE_CHANGED, this);
 
+  /* Update checking */
+  lv_obj_set_size(update_check_cont, LV_PCT(100), LV_SIZE_CONTENT);
+  lv_obj_set_style_pad_all(update_check_cont, 0, 0);
+
+  l = lv_label_create(update_check_cont);
+  lv_label_set_text(l, "Check for Updates");
+  lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_align(update_check_toggle, LV_ALIGN_RIGHT_MID, 0, 0);
+
+  v = conf->get_json("/update_check_enabled");
+  // Default on. Absent means a config written before this existed.
+  if (v.is_null() || v.template get<bool>()) {
+    lv_obj_add_state(update_check_toggle, LV_STATE_CHECKED);
+  } else {
+    lv_obj_clear_state(update_check_toggle, LV_STATE_CHECKED);
+  }
+
+  lv_obj_add_event_cb(update_check_toggle, &SysInfoPanel::_handle_callback,
+		      LV_EVENT_VALUE_CHANGED, this);
+
+  lv_obj_set_size(update_interval_cont, LV_PCT(100), LV_SIZE_CONTENT);
+  lv_obj_set_style_pad_all(update_interval_cont, 0, 0);
+
+  l = lv_label_create(update_interval_cont);
+  lv_label_set_text(l, "Check Every");
+  lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_align(update_interval_dd, LV_ALIGN_RIGHT_MID, 0, 0);
+  lv_dropdown_set_options(update_interval_dd,
+			  "Hourly\n"
+			  "6 Hours\n"
+			  "12 Hours\n"
+			  "Daily\n"
+			  "Weekly");
+
+  v = conf->get_json("/update_check_interval_hours");
+  if (v.is_number()) {
+    const auto &el = update_hours_to_dd_idx.find(v.template get<int32_t>());
+    if (el != update_hours_to_dd_idx.end()) {
+      lv_dropdown_set_selected(update_interval_dd, el->second);
+    }
+  } else {
+    lv_dropdown_set_selected(update_interval_dd, update_hours_to_dd_idx[24]);
+  }
+
+  lv_obj_add_event_cb(update_interval_dd, &SysInfoPanel::_handle_callback,
+		      LV_EVENT_VALUE_CHANGED, this);
+
   // theme dropdown
   lv_obj_set_size(theme_cont, LV_PCT(100), LV_SIZE_CONTENT);
   lv_obj_set_style_pad_all(theme_cont, 0, 0);
@@ -290,6 +363,24 @@ void SysInfoPanel::handle_callback(lv_event_t *e)
       {
         conf->set<int32_t>("/display_sleep_sec", el->second);
         conf->save();
+      }
+    }
+    else if (obj == update_check_toggle) {
+      bool enabled = lv_obj_has_state(update_check_toggle, LV_STATE_CHECKED);
+      conf->set<bool>("/update_check_enabled", enabled);
+      conf->save();
+      // Takes effect now rather than at the next poll, so switching it off
+      // also clears a notice already on screen.
+      UpdateCheck::reconfigure();
+    }
+    else if (obj == update_interval_dd) {
+      char buf[64];
+      lv_dropdown_get_selected_str(update_interval_dd, buf, sizeof(buf));
+      const auto &el = update_label_to_hours.find(std::string(buf));
+      if (el != update_label_to_hours.end()) {
+        conf->set<int32_t>("/update_check_interval_hours", el->second);
+        conf->save();
+        UpdateCheck::reconfigure();
       }
     }
     else if (obj == z_icon_toggle) {

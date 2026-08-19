@@ -42,6 +42,12 @@ class SysInfoPanel {
   lv_obj_t *z_icon_toggle_cont;
   lv_obj_t *z_icon_toggle;
 
+  lv_obj_t *update_check_cont;
+  lv_obj_t *update_check_toggle;
+
+  lv_obj_t *update_interval_cont;
+  lv_obj_t *update_interval_dd;
+
   lv_obj_t *theme_cont;
   lv_obj_t *theme_dd;
   uint32_t theme;

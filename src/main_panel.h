@@ -19,6 +19,7 @@
 #include "setting_panel.h"
 #include "print_status_panel.h"
 #include "spoolman_panel.h"
+#include "update_check.h"
 #include "lvgl/lvgl.h"
 
 #include <mutex>
@@ -95,6 +96,7 @@ class MainPanel : public NotifyConsumer {
 
  private:
   void create_main(lv_obj_t *parent);
+  void refresh_update_badge();
   KWebSocketClient &ws;
   HomingPanel homing_panel;
   FanPanel fan_panel;
@@ -118,6 +120,11 @@ class MainPanel : public NotifyConsumer {
   SpoolmanPanel &spoolman_panel;
   
   lv_style_t style;
+
+  // A dot over the settings icon in the rail, shown when UpdateCheck finds a
+  // newer release. Settings is the last tab, so it anchors to the bottom of the
+  // tab strip.
+  lv_obj_t *update_badge;
 
   lv_obj_t *temp_cont;
   lv_obj_t *temp_chart;

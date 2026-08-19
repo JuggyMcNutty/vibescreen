@@ -22,6 +22,10 @@ class SettingPanel {
   lv_obj_t *get_container();
   void enable_spoolman();
 
+  // Renames the Update Guppy button when UpdateCheck has an offer, so the
+  // rail badge has somewhere to lead. LVGL thread.
+  void refresh_update_notice();
+
   void handle_callback(lv_event_t *event);
 
   static void _handle_callback(lv_event_t *event) {

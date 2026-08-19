@@ -1,6 +1,7 @@
 #include "setting_panel.h"
 #include "config.h"
 #include "update_dialog.h"
+#include "update_check.h"
 #include "spdlog/spdlog.h"
 #include "subprocess.hpp"
 
@@ -113,6 +114,14 @@ void SettingPanel::handle_callback(lv_event_t *event) {
       spdlog::trace("setting printers pressed");
       printer_select_panel.foreground();
     }
+  }
+}
+
+void SettingPanel::refresh_update_notice() {
+  if (UpdateCheck::update_available()) {
+    guppy_update_btn.set_label("Update Available");
+  } else {
+    guppy_update_btn.set_label("Update Guppy");
   }
 }
 

@@ -103,6 +103,8 @@ void Config::init(std::string config_path, const std::string thumbdir) {
         {"thumbnail_path", thumbdir},
         {"wpa_supplicant", "/var/run/wpa_supplicant"},
         {"display_sleep_sec", 600},
+        {"update_check_enabled", true},
+        {"update_check_interval_hours", 24},
         {"default_printer", "k1"},
         {"printers", {{"k1", {
                                  {"moonraker_api_key", false},
@@ -116,6 +118,23 @@ void Config::init(std::string config_path, const std::string thumbdir) {
         }
     };
   }
+
+  // Keys introduced after a config was first written are missing from it, and
+  // get_json inserts a null when it reads a pointer that is not there, which
+  // the next save() then writes out. Seed them with their defaults instead, so
+  // an existing config gains the new options rather than a row of nulls, and
+  // so the file lists what can be configured.
+  auto seed = [this](const std::string &ptr, const json &value) {
+    auto pointer = json::json_pointer(ptr);
+    // A null counts as absent: that is exactly what a previous read of a
+    // missing key left behind, and null is not a meaningful value for any of
+    // these.
+    if (!data.contains(pointer) || data[pointer].is_null()) {
+      data[pointer] = value;
+    }
+  };
+  seed("/update_check_enabled", true);
+  seed("/update_check_interval_hours", 24);
 
   data["config_path"] = config_path;
 

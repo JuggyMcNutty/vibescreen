@@ -30,6 +30,7 @@ class ButtonContainer {
   void hide();
 
   void set_image(const void *img);
+  void set_label(const char *text);
 
   void handle_callback(lv_event_t *event);
 
