@@ -204,8 +204,8 @@ XBurst2 is MIPS32r2, so never emit MIPS r6 instructions.
 
 ```
 src/                  the application, all ours to maintain
-lvgl/                 submodule, v8.3.11
-lv_drivers/           submodule, v8.3.0
+lvgl/                 submodule, release/v8.4 head, see below
+lv_drivers/           submodule, v8.3.0, upstream is dead
 libhv/                submodule, websocket and http client
 spdlog/               submodule, logging
 wpa_supplicant/       vendored hostap copy, built only for libwpa_client.a
@@ -224,6 +224,32 @@ screenshots/          referenced from README.md, ours plus some still upstream's
 Not in git: `build/` and `toolchains/`, both generated, plus `releases/`,
 release tarballs, a top level `guppyconfig.json`, the `.vendor-target` and
 `.build-flags` stamps, `__pycache__/` and stray `*.log`. See `.gitignore`.
+
+### Which LVGL we are on, and why not v9
+
+Pinned to `b0c4cb36b` on LVGL's `release/v8.4` branch, dated 2026-04-13. Not a
+tag: v8.4.0 was released in March 2024 and the branch has taken 41 fixes since,
+including a font `load_cmaps_tables` overflow, an `sjpg` double free and a
+`lv_disp` that loaded a screen from the wrong display. A submodule records a
+SHA either way, so a branch head is no less reproducible than a tag.
+
+We were on v8.3.11, from December 2023, until 2026-08-20. Moving needed nothing
+but the pin: `patches/0003-lvgl-dpi-text-scale.patch` applies with its context
+unchanged, and no public function we call was removed. The two symbols the
+header diff appears to drop, `lv_obj_remove_style` and `lv_snapshot_take_to_buf`,
+are both still there with rewrapped prototypes.
+
+**v9 is a project, not a bump.** It deletes `lv_canvas_draw_polygon`, which is
+what `MeshView` draws the bed with, replaces `lv_drivers` with drivers built
+into LVGL itself, and rewrites `lv_conf.h`. It does ship `src/lv_api_map_v8.h`,
+which absorbs most of the renames, so the cost is not the 2634 LVGL calls in
+`src/` that a raw count suggests. It is the canvas work, the driver swap and
+the config. Worth doing eventually, since the drivers moving in-tree would
+retire a dead submodule and most of patch 0001, but it wants its own planning
+pass.
+
+`lv_drivers` stays where it is. Its last substantive change was years ago and
+its current tip is a README edit.
 
 ### `lv_conf.h` is two configs, not one
 
