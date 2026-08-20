@@ -590,11 +590,20 @@ Three threads, and the boundary is where the bugs are.
 - **libhv event loop thread**: `WebSocketClient::onmessage` in
   `src/websocket_client.cpp`, which drives every `NotifyConsumer::consume`, which
   is what updates `State`.
-- **The update worker**: `src/update_dialog.cpp:263` detaches a `std::thread`
-  to run `update.sh` under `sp::Popen`. It touches no widgets. Output goes into
-  a `Job` behind that job's own lock, and the LVGL thread drains it from an
-  `lv_timer`, which is the shape to copy if anything else ever needs to run a
-  subprocess without blocking the UI.
+- **Subprocess workers**: two, both detaching a `std::thread` to run
+  `update.sh` under `sp::Popen`. `src/update_dialog.cpp:263` runs the update
+  itself; `src/update_check.cpp:233` runs `--check` on a poll. Neither touches a
+  widget. Each writes into a struct behind its own lock that the LVGL thread
+  drains from an `lv_timer`, which is the shape to copy if anything else needs
+  to run a subprocess without blocking the UI.
+
+  Both also show what that shape has to include: a way to end other than
+  success. The checker abandons a run that has said nothing for three minutes,
+  because otherwise one wedged process leaves the feature silently dead.
+
+Every `lv_timer` callback in the tree is wrapped in `KGuard::event`, for the
+reason below: an exception escaping one unwinds through `lv_timer_handler` and
+out of the main loop.
 
 LVGL is not thread safe. Panels take `lv_lock` around widget work.
 

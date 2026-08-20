@@ -1,6 +1,7 @@
 #include "update_check.h"
 
 #include "config.h"
+#include "event_guard.h"
 #include "subprocess.hpp"
 
 #include "spdlog/spdlog.h"
@@ -122,7 +123,7 @@ void set_available(bool now_available, const std::string &version) {
   }
 }
 
-void collect_cb(lv_timer_t *timer) {
+void collect(lv_timer_t *timer) {
   auto check = in_flight;
   if (!check) {
     lv_timer_del(timer);
@@ -163,8 +164,15 @@ void collect_cb(lv_timer_t *timer) {
   set_available(status == "available", status == "available" ? latest : "");
 }
 
+// Both timer callbacks are guarded, like every other lv_timer in the tree: an
+// exception escaping one unwinds through lv_timer_handler and out of the main
+// loop, which is what event_guard.h exists to stop.
+void collect_cb(lv_timer_t *timer) {
+  KGuard::event("UpdateCheck::collect_cb", [&] { collect(timer); });
+}
+
 void poll_cb(lv_timer_t *) {
-  UpdateCheck::check_now();
+  KGuard::event("UpdateCheck::poll_cb", [] { UpdateCheck::check_now(); });
 }
 
 int32_t interval_hours() {
