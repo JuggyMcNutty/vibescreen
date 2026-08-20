@@ -447,6 +447,28 @@ lock is released, which is required to avoid deadlock, so a panel destroyed on
 the LVGL thread between the copy and the call is a use-after-free. That was
 already the case before, and the honest fix is architectural, see below.
 
+There is a reproducible instance of it on the simulator's exit path, found
+2026-08-20. Closing the window or sending `SIGTERM` prints
+
+```
+pure virtual method called
+terminate called without an active exception
+```
+
+We install no signal handler, so the default action should kill the process
+outright and run nothing. SDL installs one, and `lv_drivers/sdl/sdl.c:296`
+calls `exit(0)` from its quit filter, which runs static destructors while the
+libhv event loop thread and `WpaEvent`'s own thread are both still live. A
+consumer whose vtable has already been torn down then takes a `consume()` call,
+which is exactly the lifetime hazard above, and a `std::thread` still joinable
+at its own destruction is the second line.
+
+Simulator only: the fbdev and evdev path has no quit filter, and on the printer
+`supervise-daemon` kills the process rather than asking it to leave. Recorded
+because it is a way to watch the hazard happen on demand rather than waiting
+for it, and because a clean shutdown wants the websocket thread stopped before
+anything it dispatches into is destroyed.
+
 ### C10. Exceptions could not be contained outside LVGL (fixed, `5afb5b8`)
 
 Worth recording in full because two reasonable-looking fixes were built and
