@@ -1,4 +1,5 @@
 #include "selector.h"
+#include "widget_handle.h"
 #include "spdlog/spdlog.h"
 
 #include <limits>
@@ -22,6 +23,7 @@ Selector::Selector(lv_obj_t *parent,
   , btnm(lv_btnmatrix_create(cont))
   , selector_idx(default_idx)
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_set_size(cont, LV_PCT(width_pct), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

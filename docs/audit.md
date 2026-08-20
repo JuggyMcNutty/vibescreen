@@ -284,7 +284,7 @@ Defaults now come from `[input_shaper]` read through `configfile`. The
 `input_shaper` object cannot answer for itself: it reports an empty status on
 the Klipper the K1 ships.
 
-### C11. Panel destructors double-delete their own widgets (open, latent)
+### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget
 members' destructors then call `lv_obj_del` on objects that root already
@@ -303,11 +303,24 @@ Nothing hits it today because the panels are members of `MainPanel` and
 destroyed. It becomes real the moment anything is torn down, which is exactly
 what the multi-printer switch in `PrinterSelectPanel` would want to do.
 
-`MeshView` avoids it by nulling its handle from an `LV_EVENT_DELETE` callback
-(`src/mesh_view.h`), which is the cheap fix and works whichever order the two
-deletes happen in. The same pattern applied to `ButtonContainer`, `Selector`
-and `ImageLabel` would close it off, but that is a sweep of its own rather than
-something to fold into an unrelated change.
+`MeshView` avoided it by nulling its handle from an `LV_EVENT_DELETE` callback
+(`src/mesh_view.h`), which works whichever order the two deletes happen in.
+That is now `KWidget::null_on_delete` in `src/widget_handle.h`, called from the
+constructor of all seventeen classes that delete a container they did not
+create at screen level.
+
+One thing the shared version has to do that `MeshView`'s did not: check that
+the event target is the container itself. `LV_EVENT_DELETE` from a child
+carrying `LV_OBJ_FLAG_EVENT_BUBBLE`, which `ButtonContainer` sets on its
+button, arrives at the parent's callback too. Nulling on that would leave the
+container alive with nothing left to delete it, turning a double free into a
+leak.
+
+Still latent in the sense that nothing tears a panel down, so the fix cannot be
+demonstrated failing first. What is live is the destructor path itself:
+`FanPanel` and `LedPanel` clear and rebuild their `SliderContainer`s, and
+`MacrosPanel` its `MacroItem`s, on every refresh. Both were driven in the
+simulator and both still draw.
 
 ### C18. Startup crashes about one time in six, in the connect callback (open)
 
@@ -836,14 +849,12 @@ have to be undone to get there.
 
 ## Suggested order
 
-Done: C1, C2, C3, C4, C6, C8, C9, C10, C12 to C20, B1 to B6, M1, M3, M4, M5,
-and the `KUtils` parse helpers.
+Done: everything except C7 and M2. C1 to C6, C8 to C20, B1 to B6, M1, M3 to
+M8, and the `KUtils` parse helpers.
 
-Remaining, roughly in order:
+Remaining:
 
-1. C11, the panel destructor double-delete. Latent until something tears a
-   panel down, and a mechanical sweep once someone wants multi-printer
-   switching to actually work.
-2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+1. C7, the non-blocking heat change. Behavioural, wants its own discussion, and
+   the only correctness finding left open.
 
 M2, the four leaked singletons, is harmless and stays open.

@@ -1,4 +1,5 @@
 #include "image_label.h"
+#include "widget_handle.h"
 #include <cstring>
 #include <cstdio>
 
@@ -11,6 +12,7 @@ ImageLabel::ImageLabel(lv_obj_t *parent,
   , image(lv_img_create(cont))
   , label(lv_label_create(cont))
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_size(cont, LV_PCT(width_pct), LV_PCT(height_pct));
   lv_obj_set_style_border_width(cont, 2, 0);

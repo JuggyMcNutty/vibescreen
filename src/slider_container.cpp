@@ -1,4 +1,5 @@
 #include "slider_container.h"
+#include "widget_handle.h"
 #include "spdlog/spdlog.h"
 
 SliderContainer::SliderContainer(lv_obj_t *parent,
@@ -72,6 +73,7 @@ SliderContainer::SliderContainer(lv_obj_t *parent,
   , max_btn(control_cont, max_btn_img, max_text, max_cb, max_cb_user_data)
   , unit(u)
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_border_side(cont, LV_BORDER_SIDE_BOTTOM, 0);

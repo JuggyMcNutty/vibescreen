@@ -1,4 +1,5 @@
 #include "spinbox_selector.h"
+#include "widget_handle.h"
 #include "event_guard.h"
 
 SpinBoxSelector::SpinBoxSelector(lv_obj_t *parent,
@@ -12,6 +13,7 @@ SpinBoxSelector::SpinBoxSelector(lv_obj_t *parent,
   , sb(lv_spinbox_create(sb_cont))
   , cb(update_cb)
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_set_size(cont, LV_PCT(70), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN_REVERSE);
   lv_obj_set_style_border_side(cont, LV_BORDER_SIDE_BOTTOM, 0);

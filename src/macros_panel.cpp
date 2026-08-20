@@ -1,4 +1,5 @@
 #include "macros_panel.h"
+#include "widget_handle.h"
 #include "state.h"
 #include "utils.h"
 #include "spdlog/spdlog.h"
@@ -12,6 +13,7 @@ MacrosPanel::MacrosPanel(KWebSocketClient &c, std::mutex &l, lv_obj_t *parent)
   , top_cont(lv_obj_create(cont))
   , kb(lv_keyboard_create(cont))
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
   lv_obj_set_style_pad_all(cont, 0, 0);
   

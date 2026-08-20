@@ -1,4 +1,5 @@
 #include "tmc_tune_panel.h"
+#include "widget_handle.h"
 #include "state.h"
 #include "spdlog/spdlog.h"
 
@@ -42,6 +43,7 @@ AutoTmcContainer::AutoTmcContainer(const std::list<std::string> &motors,
   , configured_sensorless_thrs(sgthrs)
   , sg_range(sg_min_max)
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_set_size(cont, LV_PCT(100), LV_SIZE_CONTENT);
   lv_obj_set_style_border_side(cont, LV_BORDER_SIDE_BOTTOM, 0);
   lv_obj_set_style_border_width(cont, 2, 0);
@@ -190,6 +192,7 @@ TmcTunePanel::TmcTunePanel(KWebSocketClient &c)
     }
   }, this)
 {
+  KWidget::null_on_delete(&cont);
   motor_parser._delim = ":";
   lv_obj_move_background(cont);
   lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));

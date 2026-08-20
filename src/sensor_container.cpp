@@ -1,4 +1,5 @@
 #include "sensor_container.h"
+#include "widget_handle.h"
 #include "spdlog/spdlog.h"
 
 #include <string>
@@ -29,6 +30,7 @@ SensorContainer::SensorContainer(KWebSocketClient &c,
   , series(chart_series)
   , last_updated_ts(std::time(nullptr))
 {
+  KWidget::null_on_delete(&sensor_cont);
     lv_obj_clear_flag(sensor_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_border_color(sensor_cont, color, LV_PART_MAIN);
     lv_obj_set_style_border_side(sensor_cont, LV_BORDER_SIDE_LEFT, LV_PART_MAIN);

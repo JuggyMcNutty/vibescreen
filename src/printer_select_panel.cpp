@@ -1,4 +1,5 @@
 #include "printer_select_panel.h"
+#include "widget_handle.h"
 #include "guppyscreen.h"
 #include "config.h"
 #include "utils.h"
@@ -22,6 +23,7 @@ PrinterSelectContainer::PrinterSelectContainer(PrinterSelectPanel &ps,
   , cont(lv_obj_create(parent))
   , name(pname)
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_set_size(cont, LV_PCT(100), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW);
   lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);  
@@ -148,6 +150,7 @@ PrinterSelectPanel::PrinterSelectPanel()
   }, this)
   , kb(lv_keyboard_create(cont))
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_move_background(cont);
   lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
   lv_obj_set_style_pad_all(cont, 0, 0);  

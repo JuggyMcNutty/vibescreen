@@ -1,4 +1,5 @@
 #include "setting_panel.h"
+#include "widget_handle.h"
 #include "config.h"
 #include "update_dialog.h"
 #include "update_check.h"
@@ -42,6 +43,7 @@ SettingPanel::SettingPanel(KWebSocketClient &c, std::mutex &l, lv_obj_t *parent,
   , guppy_update_btn(cont, &update_img, "Update Guppy", &SettingPanel::_handle_callback, this)
   , printer_select_btn(cont, &print, "Printers", &SettingPanel::_handle_callback, this)
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
 

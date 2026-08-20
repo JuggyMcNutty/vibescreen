@@ -1,4 +1,5 @@
 #include "printertune_panel.h"
+#include "widget_handle.h"
 #include "state.h"
 #include "spdlog/spdlog.h"
 
@@ -47,6 +48,7 @@ PrinterTunePanel::PrinterTunePanel(KWebSocketClient &c, std::mutex &l, lv_obj_t 
   , power_devices_btn(cont, &print, "Power Devices", &PrinterTunePanel::_handle_callback, this)
 #endif
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_move_background(cont);
 
   lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);

@@ -1,4 +1,5 @@
 #include "file_panel.h"
+#include "widget_handle.h"
 #include "config.h"
 #include "state.h"
 #include "utils.h"
@@ -20,6 +21,7 @@ FilePanel::FilePanel(lv_obj_t *parent)
   , fname_label(lv_label_create(file_cont))
   , detail_label(lv_label_create(file_cont))
 {
+  KWidget::null_on_delete(&file_cont);
   lv_obj_set_size(file_cont, LV_PCT(100), LV_PCT(100));
   lv_obj_clear_flag(file_cont, LV_OBJ_FLAG_SCROLLABLE);  
   lv_obj_align(file_cont, LV_ALIGN_CENTER, 0, 0);

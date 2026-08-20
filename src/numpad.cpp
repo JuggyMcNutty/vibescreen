@@ -1,4 +1,5 @@
 #include "numpad.h"
+#include "widget_handle.h"
 #include "spdlog/spdlog.h"
 
 #include <string>
@@ -9,6 +10,7 @@ Numpad::Numpad(lv_obj_t *parent)
   , kb(lv_keyboard_create(edit_cont))
   , ready_cb([](double v){})
 {
+  KWidget::null_on_delete(&edit_cont);
   spdlog::trace("creating numpad on main_cont");
   lv_obj_add_flag(edit_cont, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(edit_cont, LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_CLICKABLE);

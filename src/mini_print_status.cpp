@@ -1,4 +1,5 @@
 #include "mini_print_status.h"
+#include "widget_handle.h"
 #include "spdlog/spdlog.h"
 
 MiniPrintStatus::MiniPrintStatus(lv_obj_t *parent,
@@ -11,6 +12,7 @@ MiniPrintStatus::MiniPrintStatus(lv_obj_t *parent,
   , status("n/a")
   , eta("...")
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_add_flag(cont, LV_OBJ_FLAG_HIDDEN);
   lv_color_t cur_bg = lv_obj_get_style_bg_color(cont, 0);
   lv_color_t mixed = lv_color_mix(lv_palette_main(LV_PALETTE_GREY),

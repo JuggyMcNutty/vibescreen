@@ -1,4 +1,5 @@
 #include "macro_item.h"
+#include "widget_handle.h"
 #include "spdlog/spdlog.h"
 
 MacroItem::MacroItem(KWebSocketClient &c,
@@ -18,6 +19,7 @@ MacroItem::MacroItem(KWebSocketClient &c,
   , hidden(hide)
   , always_visible(false)
 {
+  KWidget::null_on_delete(&cont);
   if (hidden) {
     lv_obj_add_flag(cont, LV_OBJ_FLAG_HIDDEN);
   }

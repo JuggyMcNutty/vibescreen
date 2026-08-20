@@ -1,4 +1,5 @@
 #include "tmc_status_container.h"
+#include "widget_handle.h"
 #include "spdlog/spdlog.h"
 
 TmcStatusContainer::TmcStatusContainer(KWebSocketClient &c,
@@ -57,6 +58,7 @@ TmcStatusContainer::TmcStatusContainer(KWebSocketClient &c,
 	       update_tmc_value(n, "hend", v);
 	     })
 {
+  KWidget::null_on_delete(&cont);
   lv_obj_set_size(cont, LV_PCT(100), LV_SIZE_CONTENT);
   lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   
