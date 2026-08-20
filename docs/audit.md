@@ -353,7 +353,7 @@ This is the same disease as C1 and C18 and wants the same cure, so it is not
 worth a local mutex that would have to come out again. Noted here rather than
 patched.
 
-### C20. Reading a missing config key writes it back as null (open, partly mitigated)
+### C20. Reading a missing config key writes it back as null (fixed)
 
 `Config::get_json` is one line:
 
@@ -381,18 +381,28 @@ a default, which is also why it went unnoticed. It stops being harmless the day
 a caller distinguishes null from absent, or a config is read by something
 stricter than we are.
 
-**Mitigated, not fixed** (`9bbe3ec`): `Config::init` now seeds
-`update_check_enabled` and `update_check_interval_hours` with their defaults
-when they are missing, treating an existing null as missing so a polluted config
-repairs itself. That covers the two keys added with it and nothing else.
+`9bbe3ec` mitigated it for two keys by seeding them in `Config::init`.
 
-The real fix is a non-mutating read. `get_json` returns `json&`, and callers
-take that reference, so it cannot simply become a `contains()` check returning a
-value without looking at all 37 sites. Either add a `get_json_or(ptr, default)`
-that does not touch `data` and move readers onto it, or seed every documented
-default at load and treat a missing key as a bug rather than a case to handle.
-The second is more work up front and leaves the config self-describing, which is
-worth something on a machine where editing it by hand is the only way in.
+The fix turned out to be much smaller than this entry assumed. It proposed
+either a new `get_json_or` with 37 call sites to move, or seeding every
+documented default at load. Neither was needed. Of the 39 `get_json` sites,
+only seven bind the returned reference, and all seven read it. So `get_json`
+now returns `const json&`, and returns a shared empty json rather than
+`data[ptr]` when the key is absent. Changing the return type to const is what
+makes that safe to assert rather than hope: the compiler rejects any caller
+that would write through it, and none did.
+
+The `get<T>` template had the same defect and is fixed the same way, falling
+back to a null json so behaviour is unchanged for every caller: `get<json>` on
+a missing key still yields null, everything else still throws on it.
+
+`Config::init`'s seeding block stays. It is doing a different job, giving new
+installs sensible values rather than protecting reads.
+
+Driven in the simulator on 2026-08-20: with `invert_z_arrows` absent, the
+system panel rendered its toggle from that key and then a settings change wrote
+the config. The key was not inserted and the file came back with no null values
+anywhere in it.
 
 ### C8. Rejected gcode is invisible to the user (fixed, `fc12faa`)
 
@@ -748,21 +758,20 @@ have to be undone to get there.
 
 ## Suggested order
 
-Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, B1 to B6, M3, M4, M5, and the
-`KUtils` parse helpers.
+Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, C20, B1 to B6, M3, M4, M5, and
+the `KUtils` parse helpers.
 
 Remaining, roughly in order:
 
-1. C20, config reads inserting nulls. Mechanical and independent of the rest.
-2. M1, the commented-out code. Pure churn, best done as its own quiet
+1. M1, the commented-out code. Pure churn, best done as its own quiet
    pass when nothing else is in flight.
-3. C1, C18, C19 and the C9 lifetime hazard, as the message-queue change above.
+2. C1, C18, C19 and the C9 lifetime hazard, as the message-queue change above.
    The largest piece of work left and the one that retires the most. C18 is a
    crash on one startup in six, which is why it comes before the rest rather
    than last.
-4. C11, the panel destructor double-delete. Latent until something tears a
+3. C11, the panel destructor double-delete. Latent until something tears a
    panel down, and a mechanical sweep once someone wants multi-printer
    switching to actually work.
-5. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+4. C7, the non-blocking heat change. Behavioural, wants its own discussion.
 
 M2, the four leaked singletons, is harmless and stays open.

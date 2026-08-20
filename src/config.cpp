@@ -245,8 +245,11 @@ std::string Config::get_path() {
     return path;
 }
 
-json &Config::get_json(const std::string &json_path) {
-  return data[json::json_pointer(json_path)];
+const json &Config::get_json(const std::string &json_path) {
+  // See the note on get<T> in the header: operator[] would insert a null here.
+  static const json absent;
+  auto ptr = json::json_pointer(json_path);
+  return data.contains(ptr) ? data.at(ptr) : absent;
 }
 
 void Config::save() {

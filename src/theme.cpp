@@ -36,8 +36,11 @@ void ThemeConfig::init(const std::string config_path) {
   o << std::setw(2) << data << std::endl;
 }
 
-json &ThemeConfig::get_json(const std::string &json_path) {
-  return data[json::json_pointer(json_path)];
+const json &ThemeConfig::get_json(const std::string &json_path) {
+  // See the note on get<T> in the header: operator[] would insert a null here.
+  static const json absent;
+  auto ptr = json::json_pointer(json_path);
+  return data.contains(ptr) ? data.at(ptr) : absent;
 }
 
 void ThemeConfig::save() {

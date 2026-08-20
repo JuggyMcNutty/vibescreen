@@ -33,7 +33,7 @@ namespace {
     labels.clear();
 
     Config *conf = Config::get_instance();
-    json &configured = conf->get_json(conf->df() + config_key);
+    const json &configured = conf->get_json(conf->df() + config_key);
 
     if (configured.is_array()) {
       for (const auto &el : configured) {
