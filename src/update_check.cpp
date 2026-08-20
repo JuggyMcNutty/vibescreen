@@ -39,6 +39,14 @@ std::function<void()> listener;
 
 const uint32_t COLLECT_MS = 500;
 
+// update.sh gives GitHub a 30 second timeout, so a check that has said nothing
+// after three minutes is not going to. Without this, one wedged run would leave
+// in_flight set forever, and check_now() would decline every later poll: the
+// notice would simply stop updating with nothing to say why. This is the same
+// failure the belts panel had before 745ab03.
+const uint32_t ABANDON_MS = 3 * 60 * 1000;
+uint32_t waited_ms = 0;
+
 std::string script_path() {
   try {
     const fs::path path = fs::canonical("/proc/self/exe").parent_path() / "update.sh";
@@ -127,6 +135,16 @@ void collect_cb(lv_timer_t *timer) {
   {
     std::lock_guard<std::mutex> guard(check->lock);
     if (!check->done) {
+      waited_ms += COLLECT_MS;
+      if (waited_ms >= ABANDON_MS) {
+        spdlog::warn("update check did not answer in {} seconds, abandoning it",
+                     ABANDON_MS / 1000);
+        // The detached thread still owns its own reference to the Check, so it
+        // is safe to let it finish writing into something nobody reads.
+        in_flight = nullptr;
+        lv_timer_del(timer);
+        collect_timer = nullptr;
+      }
       return;
     }
     status = check->status;
@@ -174,6 +192,14 @@ void UpdateCheck::reconfigure() {
   }
 
   if (!check_enabled()) {
+    // Drop any check already running with it. Otherwise switching the setting
+    // off while one is in flight lets its result land a moment later and put
+    // the notice back, which reads as the setting not working.
+    in_flight = nullptr;
+    if (collect_timer != nullptr) {
+      lv_timer_del(collect_timer);
+      collect_timer = nullptr;
+    }
     set_available(false, "");
     spdlog::debug("update check disabled");
     return;
@@ -203,6 +229,7 @@ void UpdateCheck::check_now() {
 
   auto check = std::make_shared<Check>();
   in_flight = check;
+  waited_ms = 0;
   std::thread(run_check, check, script).detach();
 
   if (collect_timer == nullptr) {
