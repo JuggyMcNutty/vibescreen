@@ -205,7 +205,7 @@ ignored and sends people round the recalibration loop.
 | #52, cross compile fails | `9e6d564` capped sub-make parallelism, `5658e14` rewrote the toolchain docs. Audit B1 and B5 |
 | #110, static linking fails for x86_64 | `4eabfc7`, only link statically when cross compiling. Audit B3 |
 | #161, #117 temperature half, #6, #132 lengths | `ff6dfad` made the lists configurable and clamped them against the printer's own limits, `a937708` widened the defaults to 320C and 200mm |
-| #51, layer counts not updating | Upstream `e21b163` and `9c52e8a` removed the monotonic guard. The residual noted here, `reset()` leaving `current_file` set so the previous file's layer count showed until the metadata reply landed, was closed by `6f355f8` |
+| #51, layer counts not updating | Upstream `e21b163` and `9c52e8a` removed the monotonic guard, and `6f355f8` closed the residual where `reset()` left `current_file` set so the previous file's count showed until the metadata landed. A third cause was still live until `83bcdc2`: `consume()` called `update_layers` unguarded, so every temperature delta, arriving about once a second and carrying no `print_stats.info`, overwrote the reported layer with the estimate. This row said the issue was closed while the counter was still stuck |
 | #158, #119, Android | Android was removed from this fork in `b827111` |
 | #114, #81, input shaper problems | Largely addressed by the input shaper round, `cf4f60b` through `ad40b2a`. Audit C13 to C17 |
 | #155, #108, USB access | `installer.sh:152` symlinks `/tmp/udisk` into the gcodes root, so a stick appears as a folder in the file browser |
