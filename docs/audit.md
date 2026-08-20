@@ -465,16 +465,30 @@ LVGL at all and calls `std::terminate`. x86-64 does emit them by default, so
 anything relying on unwinding would test green in the simulator and do nothing
 on the printer. Costs 64KB.
 
-**Residual**, recounted 2026-08-19: of 78 `add_event_cb` sites, 51 go through a
-guarded `&Class::_handler` static. 19 are inline lambdas, only 3 of which
-carry `KGuard::event`, and 4 are named callbacks
-(`GuppyScreen::handle_calibrated`, `scroll_begin_event`, `slider_cb`,
-`draw_part_event_cb`), none of them guarded. The remaining 4 pass a `cb`
-handed in by the caller, so they inherit whatever the caller did.
+**The residual is closed.** Every `add_event_cb` callback in the tree now
+either carries `KGuard::event` or is a `cb` handed in by the caller, and both
+of those callers pass a guarded `&Class::_handler`.
 
-The unguarded ones are mostly small UI-only bodies, but they are entry points.
-To recount: every `add_event_cb` whose callback argument is neither a lambda
-nor `&Class::_name`.
+Two things this file got wrong, found while doing it.
+
+`slider_cb` was listed as an unguarded named callback. It is a parameter of
+`SliderContainer`'s constructor, not a function, and the only two callers pass
+`&FanPanel::_handle_fan_update_*` and `&LedPanel::_handle_led_update_generic`,
+which are guarded. Nothing to fix there.
+
+The two callbacks in `lv_touch_calibration/lv_tc_screen.c` were dismissed as
+calling nothing that throws. The accept button reaches `lv_tc_save_coeff`,
+which calls our registered `GuppyScreen::save_calibration_coeff`, which opens a
+file and serialises json. That can throw, and it would unwind through two C
+frames into LVGL. `KGuard::event` is a C++ template so it cannot go in that C
+file; the guard is on `save_calibration_coeff` instead, which is the boundary
+the exception would have to cross. The two C callbacks carry a comment saying
+so, since an unguarded LVGL entry point otherwise reads as an oversight.
+
+To recount if it ever needs recounting: every `add_event_cb` whose callback is
+neither `&Class::_name` nor a lambda opening with `KGuard::event`. The one
+deliberate exception is `ButtonContainer`'s prompt confirm, which puts the
+guard inside the lambda so `lv_msgbox_close` still runs on a throw.
 
 ### C4. `interface_ip` ignores every error it can hit (fixed, `4027abe`)
 
@@ -739,22 +753,16 @@ Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, B1 to B6, M3, M4, M5, and the
 
 Remaining, roughly in order:
 
-1. Guard the residual inline lambdas and named callbacks noted in C10, so
-   exception containment is complete rather than nearly complete. Two of them
-   went with C13 to C17, the pair behind `ButtonContainer`'s prompt, because
-   that prompt gained a second caller.
-2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
-3. C11, the panel destructor double-delete. Latent until something tears a
+1. C20, config reads inserting nulls. Mechanical and independent of the rest.
+2. M1, the commented-out code. Pure churn, best done as its own quiet
+   pass when nothing else is in flight.
+3. C1, C18, C19 and the C9 lifetime hazard, as the message-queue change above.
+   The largest piece of work left and the one that retires the most. C18 is a
+   crash on one startup in six, which is why it comes before the rest rather
+   than last.
+4. C11, the panel destructor double-delete. Latent until something tears a
    panel down, and a mechanical sweep once someone wants multi-printer
    switching to actually work.
-4. M1, the commented-out code. Pure churn, best done as its own quiet
-   pass when nothing else is in flight.
-5. C1, C18 and the C9 lifetime hazard, as the message-queue change above. The
-   largest piece of work left and the one that retires the most. C18 is a
-   crash on one startup in six, so it argues for doing this sooner than its
-   place in this list suggests.
+5. C7, the non-blocking heat change. Behavioural, wants its own discussion.
 
-M2, the four leaked singletons, is harmless and stays open. C19, the shared wpa
-control socket, folds into item 5. C20, config reads inserting nulls, is
-mechanical and independent of everything above, so it can go in whenever
-somebody has the appetite for touching 37 call sites.
+M2, the four leaked singletons, is harmless and stays open.

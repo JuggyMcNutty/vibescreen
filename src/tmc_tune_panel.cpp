@@ -90,10 +90,12 @@ AutoTmcContainer::AutoTmcContainer(const std::list<std::string> &motors,
   lv_obj_align_to(btn, sensorless_threshold, LV_ALIGN_OUT_RIGHT_MID, 5, 0);
   lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_PLUS, 0);
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_SHORT_CLICKED || code  == LV_EVENT_LONG_PRESSED_REPEAT) {
-      lv_spinbox_increment((lv_obj_t*)e->user_data);
-    }
+    KGuard::event("TmcTunePanel sensorless increment", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      if(code == LV_EVENT_SHORT_CLICKED || code  == LV_EVENT_LONG_PRESSED_REPEAT) {
+        lv_spinbox_increment((lv_obj_t*)e->user_data);
+      }
+    });
   }, LV_EVENT_ALL, sensorless_threshold);
 
   btn = lv_btn_create(spinbox_cont);
@@ -101,10 +103,12 @@ AutoTmcContainer::AutoTmcContainer(const std::list<std::string> &motors,
   lv_obj_align_to(btn, sensorless_threshold, LV_ALIGN_OUT_LEFT_MID, -5, 0);
   lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_MINUS, 0);
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_SHORT_CLICKED || code  == LV_EVENT_LONG_PRESSED_REPEAT) {
-      lv_spinbox_decrement((lv_obj_t*)e->user_data);
-    }
+    KGuard::event("TmcTunePanel sensorless decrement", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      if(code == LV_EVENT_SHORT_CLICKED || code  == LV_EVENT_LONG_PRESSED_REPEAT) {
+        lv_spinbox_decrement((lv_obj_t*)e->user_data);
+      }
+    });
   }, LV_EVENT_ALL, sensorless_threshold);
 
 

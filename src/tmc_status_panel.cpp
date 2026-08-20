@@ -35,16 +35,18 @@ TmcStatusPanel::TmcStatusPanel(KWebSocketClient &c,
   lv_obj_clear_state(toggle, LV_STATE_CHECKED);
 
   lv_obj_add_event_cb(toggle, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    lv_obj_t * obj = lv_event_get_target(e);
-    if(code == LV_EVENT_VALUE_CHANGED) {
-      TmcStatusPanel *p = (TmcStatusPanel*)e->user_data;      
-      if (lv_obj_has_state(obj, LV_STATE_CHECKED)) {
-	p->ws.gcode_script("_GUPPY_LOAD_MODULE SECTION=tmcstatus");
-      } else {
-	p->ws.gcode_script("_GUPPY_UNLOAD_MODULE SECTION=tmcstatus");
+    KGuard::event("TmcStatusPanel module toggle", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      lv_obj_t * obj = lv_event_get_target(e);
+      if(code == LV_EVENT_VALUE_CHANGED) {
+        TmcStatusPanel *p = (TmcStatusPanel*)e->user_data;
+        if (lv_obj_has_state(obj, LV_STATE_CHECKED)) {
+          p->ws.gcode_script("_GUPPY_LOAD_MODULE SECTION=tmcstatus");
+        } else {
+          p->ws.gcode_script("_GUPPY_UNLOAD_MODULE SECTION=tmcstatus");
+        }
       }
-    }
+    });
   }, LV_EVENT_VALUE_CHANGED, this);
 
   lv_obj_add_flag(back_btn.get_container(), LV_OBJ_FLAG_FLOATING);  

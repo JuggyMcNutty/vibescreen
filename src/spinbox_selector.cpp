@@ -1,4 +1,5 @@
 #include "spinbox_selector.h"
+#include "event_guard.h"
 
 SpinBoxSelector::SpinBoxSelector(lv_obj_t *parent,
 				 const std::string &name,
@@ -46,19 +47,21 @@ SpinBoxSelector::SpinBoxSelector(lv_obj_t *parent,
   
   lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_PLUS, 0);
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    SpinBoxSelector *panel = (SpinBoxSelector*)e->user_data;
-    if(code == LV_EVENT_LONG_PRESSED_REPEAT) {
-      lv_spinbox_increment(panel->sb);
-    }
-
-    if (code == LV_EVENT_RELEASED) {
-      lv_spinbox_increment(panel->sb);
-      if (panel->cb) {
-	panel->cb(lv_spinbox_get_value(panel->sb));
+    KGuard::event("SpinBoxSelector increment", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      SpinBoxSelector *panel = (SpinBoxSelector*)e->user_data;
+      if(code == LV_EVENT_LONG_PRESSED_REPEAT) {
+        lv_spinbox_increment(panel->sb);
       }
-    }
-      
+
+      if (code == LV_EVENT_RELEASED) {
+        lv_spinbox_increment(panel->sb);
+        if (panel->cb) {
+          panel->cb(lv_spinbox_get_value(panel->sb));
+        }
+      }
+
+    });
   }, LV_EVENT_ALL, this);
 
   btn = lv_btn_create(sb_cont);
@@ -67,18 +70,20 @@ SpinBoxSelector::SpinBoxSelector(lv_obj_t *parent,
 
   lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_MINUS, 0);
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    SpinBoxSelector *panel = (SpinBoxSelector*)e->user_data;    
-    if(code == LV_EVENT_LONG_PRESSED_REPEAT) {
-      lv_spinbox_decrement(panel->sb);
-    }
-
-    if (code == LV_EVENT_RELEASED) {
-      lv_spinbox_decrement(panel->sb);
-      if (panel->cb) {
-	panel->cb(lv_spinbox_get_value(panel->sb));
+    KGuard::event("SpinBoxSelector decrement", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      SpinBoxSelector *panel = (SpinBoxSelector*)e->user_data;
+      if(code == LV_EVENT_LONG_PRESSED_REPEAT) {
+        lv_spinbox_decrement(panel->sb);
       }
-    }
+
+      if (code == LV_EVENT_RELEASED) {
+        lv_spinbox_decrement(panel->sb);
+        if (panel->cb) {
+          panel->cb(lv_spinbox_get_value(panel->sb));
+        }
+      }
+    });
   }, LV_EVENT_ALL, this);
 }
 

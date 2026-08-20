@@ -38,34 +38,38 @@ PrinterSelectContainer::PrinterSelectContainer(PrinterSelectPanel &ps,
   lv_obj_center(l);
 
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_CLICKED) {
-      PrinterSelectContainer *p = (PrinterSelectContainer*)e->user_data;
-      lv_obj_t *msgbox = p->prompt(fmt::format("Guppy Screen will restart. Do you want to switch to {}?",
-					       p->name));
-      lv_obj_add_event_cb(msgbox, [](lv_event_t *e) {
-	lv_obj_t *obj = lv_obj_get_parent(lv_event_get_target(e));
-	uint32_t clicked_btn = lv_msgbox_get_active_btn(obj);
-	if(clicked_btn == 0) {
-	  
-	  
-	  Config *conf = Config::get_instance();
-	  conf->set<std::string>("/default_printer", ((PrinterSelectContainer*)e->user_data)->name);
-	  conf->save();
-		  
-	  auto init_script = conf->get<std::string>("/guppy_init_script");
-	  const fs::path script(init_script);
-	  if (fs::exists(script)) {
-	    sp::call({init_script, "restart"});
-	  }
+    KGuard::event("PrinterSelectPanel switch prompt", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      if (code == LV_EVENT_CLICKED) {
+        PrinterSelectContainer *p = (PrinterSelectContainer*)e->user_data;
+        lv_obj_t *msgbox = p->prompt(fmt::format("Guppy Screen will restart. Do you want to switch to {}?",
+                                                 p->name));
+        lv_obj_add_event_cb(msgbox, [](lv_event_t *e) {
+          KGuard::event("PrinterSelectPanel switch confirm", [&] {
+            lv_obj_t *obj = lv_obj_get_parent(lv_event_get_target(e));
+            uint32_t clicked_btn = lv_msgbox_get_active_btn(obj);
+            if(clicked_btn == 0) {
 
-	}
-	
-	lv_msgbox_close(obj);
 
-      }, LV_EVENT_VALUE_CHANGED, p);
+              Config *conf = Config::get_instance();
+              conf->set<std::string>("/default_printer", ((PrinterSelectContainer*)e->user_data)->name);
+              conf->save();
 
-    }
+              auto init_script = conf->get<std::string>("/guppy_init_script");
+              const fs::path script(init_script);
+              if (fs::exists(script)) {
+                sp::call({init_script, "restart"});
+              }
+
+            }
+
+            lv_msgbox_close(obj);
+
+          });
+        }, LV_EVENT_VALUE_CHANGED, p);
+
+      }
+    });
   }, LV_EVENT_CLICKED, this);
   
 
@@ -75,22 +79,26 @@ PrinterSelectContainer::PrinterSelectContainer(PrinterSelectPanel &ps,
   lv_obj_center(l);
 
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_CLICKED) {
-      PrinterSelectContainer *p = (PrinterSelectContainer*)e->user_data;
-      lv_obj_t *msgbox = p->prompt(fmt::format("Are you sure you want to delete {}?", p->name));
-      lv_obj_add_event_cb(msgbox, [](lv_event_t *e) {
-	lv_obj_t *obj = lv_obj_get_parent(lv_event_get_target(e));
-	uint32_t clicked_btn = lv_msgbox_get_active_btn(obj);
-	if(clicked_btn == 0) {
-	  auto *p = (PrinterSelectContainer*)e->user_data;
-	  p->printer_select_panel.remove_printer(p->name);
-	}
-	
-	lv_msgbox_close(obj);
+    KGuard::event("PrinterSelectPanel delete prompt", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      if (code == LV_EVENT_CLICKED) {
+        PrinterSelectContainer *p = (PrinterSelectContainer*)e->user_data;
+        lv_obj_t *msgbox = p->prompt(fmt::format("Are you sure you want to delete {}?", p->name));
+        lv_obj_add_event_cb(msgbox, [](lv_event_t *e) {
+          KGuard::event("PrinterSelectPanel delete confirm", [&] {
+            lv_obj_t *obj = lv_obj_get_parent(lv_event_get_target(e));
+            uint32_t clicked_btn = lv_msgbox_get_active_btn(obj);
+            if(clicked_btn == 0) {
+              auto *p = (PrinterSelectContainer*)e->user_data;
+              p->printer_select_panel.remove_printer(p->name);
+            }
 
-      }, LV_EVENT_VALUE_CHANGED, p);
-    }
+            lv_msgbox_close(obj);
+
+          });
+        }, LV_EVENT_VALUE_CHANGED, p);
+      }
+    });
   }, LV_EVENT_CLICKED, this);
 }
 
@@ -166,8 +174,10 @@ PrinterSelectPanel::PrinterSelectPanel()
 				 "0123456789"
 				 " -_");
   lv_obj_add_event_cb(printer_name, [](lv_event_t *e) {
-    PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
-    p->handle_input(e);
+    KGuard::event("PrinterSelectPanel name input", [&] {
+      PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
+      p->handle_input(e);
+    });
   }, LV_EVENT_ALL, this);
 
   lv_textarea_set_placeholder_text(moonraker_ip, "Moonraker IP Address");
@@ -175,8 +185,10 @@ PrinterSelectPanel::PrinterSelectPanel()
   lv_textarea_set_one_line(moonraker_ip, true);
   lv_textarea_set_accepted_chars(moonraker_ip, "0123456789abcdef.:");
   lv_obj_add_event_cb(moonraker_ip, [](lv_event_t *e) {
-    PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
-    p->handle_input(e);
+    KGuard::event("PrinterSelectPanel host input", [&] {
+      PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
+      p->handle_input(e);
+    });
   }, LV_EVENT_ALL, this);
 
   lv_textarea_set_text(moonraker_port, "7125");
@@ -185,8 +197,10 @@ PrinterSelectPanel::PrinterSelectPanel()
   lv_textarea_set_max_length(moonraker_port, 5);
   lv_textarea_set_accepted_chars(moonraker_port, "0123456789");
   lv_obj_add_event_cb(moonraker_port, [](lv_event_t *e) {
-    PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
-    p->handle_input(e);
+    KGuard::event("PrinterSelectPanel port input", [&] {
+      PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
+      p->handle_input(e);
+    });
   }, LV_EVENT_ALL, this);
 
   lv_obj_t *btn = lv_btn_create(left);
@@ -196,57 +210,59 @@ PrinterSelectPanel::PrinterSelectPanel()
 
   // lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_PLUS, 0);
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_CLICKED) {
-      PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
-      Config *conf = Config::get_instance();
+    KGuard::event("PrinterSelectPanel add printer", [&] {
+      lv_event_code_t code = lv_event_get_code(e);
+      if (code == LV_EVENT_CLICKED) {
+        PrinterSelectPanel *p = (PrinterSelectPanel*)e->user_data;
+        Config *conf = Config::get_instance();
 
-      auto pname = std::string(lv_textarea_get_text(p->printer_name));
-      auto ip = std::string(lv_textarea_get_text(p->moonraker_ip));
+        auto pname = std::string(lv_textarea_get_text(p->printer_name));
+        auto ip = std::string(lv_textarea_get_text(p->moonraker_ip));
 
-      // lv_textarea_get_text never returns NULL for a non-password textarea,
-      // it returns "" for an empty field, so the old NULL check never fired
-      // and std::stoi("") threw instead of falling back to 7125. The field
-      // only accepts digits, so empty is the one bad input that reaches here.
-      const char *mp = lv_textarea_get_text(p->moonraker_port);
-      auto port = KUtils::parse_int(mp != NULL ? mp : "", 7125);
+        // lv_textarea_get_text never returns NULL for a non-password textarea,
+        // it returns "" for an empty field, so the old NULL check never fired
+        // and std::stoi("") threw instead of falling back to 7125. The field
+        // only accepts digits, so empty is the one bad input that reaches here.
+        const char *mp = lv_textarea_get_text(p->moonraker_port);
+        auto port = KUtils::parse_int(mp != NULL ? mp : "", 7125);
 
-      json new_printer = {
-	      {"moonraker_api_key", false},
-	      {"moonraker_host", ip},
-	      {"moonraker_port", port},
-	      {"monitored_sensors", {} },
-	      {"fans", {} },
-	      {"default_macros", {
-		  // Defined in the guppy_cmd.cfg we install. LOAD_MATERIAL and
-		  // UNLOAD_MATERIAL were the old defaults and nothing in the tree
-		  // has ever defined either, so a newly added printer's Load and
-		  // Unload buttons sent a command Klipper does not have.
-		  {"load_filament", "_GUPPY_LOAD_MATERIAL"},
-		  {"unload_filament", "_GUPPY_QUIT_MATERIAL"},
-		  { "cooldown", "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0\nSET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0"}
-		}
-	      }
-      };
+        json new_printer = {
+                {"moonraker_api_key", false},
+                {"moonraker_host", ip},
+                {"moonraker_port", port},
+                {"monitored_sensors", {} },
+                {"fans", {} },
+                {"default_macros", {
+                   // Defined in the guppy_cmd.cfg we install. LOAD_MATERIAL and
+                   // UNLOAD_MATERIAL were the old defaults and nothing in the tree
+                   // has ever defined either, so a newly added printer's Load and
+                   // Unload buttons sent a command Klipper does not have.
+                   {"load_filament", "_GUPPY_LOAD_MATERIAL"},
+                   {"unload_filament", "_GUPPY_QUIT_MATERIAL"},
+                   { "cooldown", "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0\nSET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0"}
+                 }
+                }
+        };
 
-      auto printers = conf->get<json>("/printers");
-      printers[pname] = new_printer;
-      conf->set<json>("/printers", printers);
-      conf->save();
-
-      p->add_printer(pname, ip, port);
-
-      lv_obj_add_flag(p->kb, LV_OBJ_FLAG_HIDDEN);
-
-      if (conf->get_json("/default_printer").is_null()) {
-        // connect to the one and only added printer
-        conf->set<std::string>("/default_printer", pname);
+        auto printers = conf->get<json>("/printers");
+        printers[pname] = new_printer;
+        conf->set<json>("/printers", printers);
         conf->save();
-        conf->init(conf->get<std::string>("/config_path"), conf->get<std::string>("/thumbnail_path"));
-        std::string ws_url = fmt::format("ws://{}:{}/websocket", ip, port);
-        GuppyScreen::get()->connect_ws(ws_url);
+
+        p->add_printer(pname, ip, port);
+
+        lv_obj_add_flag(p->kb, LV_OBJ_FLAG_HIDDEN);
+
+        if (conf->get_json("/default_printer").is_null()) {
+          // connect to the one and only added printer
+          conf->set<std::string>("/default_printer", pname);
+          conf->save();
+          conf->init(conf->get<std::string>("/config_path"), conf->get<std::string>("/thumbnail_path"));
+          std::string ws_url = fmt::format("ws://{}:{}/websocket", ip, port);
+          GuppyScreen::get()->connect_ws(ws_url);
+        }
       }
-    }
+    });
   }, LV_EVENT_CLICKED, this);
 
   lv_obj_set_flex_grow(right, 1);

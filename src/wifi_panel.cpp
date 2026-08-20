@@ -50,16 +50,18 @@ static const lv_btnmatrix_ctrl_t kb_ctrl_spec_map[] = {
 
 static void draw_part_event_cb(lv_event_t * e)
 {
-  lv_obj_t * obj = lv_event_get_target(e);
-  lv_obj_draw_part_dsc_t * dsc = lv_event_get_draw_part_dsc(e);
-  if(dsc->part == LV_PART_ITEMS) {
-    uint32_t row = dsc->id /  lv_table_get_col_cnt(obj);
-    uint32_t col = dsc->id - row * lv_table_get_col_cnt(obj);
+  KGuard::event("WifiPanel draw_part_event_cb", [&] {
+    lv_obj_t * obj = lv_event_get_target(e);
+    lv_obj_draw_part_dsc_t * dsc = lv_event_get_draw_part_dsc(e);
+    if(dsc->part == LV_PART_ITEMS) {
+      uint32_t row = dsc->id /  lv_table_get_col_cnt(obj);
+      uint32_t col = dsc->id - row * lv_table_get_col_cnt(obj);
 
-    if(col == 1) {
-      dsc->label_dsc->align = LV_TEXT_ALIGN_RIGHT;
+      if(col == 1) {
+        dsc->label_dsc->align = LV_TEXT_ALIGN_RIGHT;
+      }
     }
-  }
+  });
 }
 
 WifiPanel::WifiPanel(std::mutex &l)

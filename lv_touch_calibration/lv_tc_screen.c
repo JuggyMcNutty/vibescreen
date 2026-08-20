@@ -288,6 +288,11 @@ static void lv_tc_screen_ready(lv_obj_t *screenObj) {
 }
 
 
+//These two are LVGL entry points and so would normally carry KGuard::event,
+//but this file is C and that guard is a C++ template. Nothing here throws: the
+//bodies reach only C, and the one piece of C++ behind them,
+//GuppyScreen::save_calibration_coeff via lv_tc_save_coeff, carries the guard
+//itself. Keep it that way rather than adding a C shim.
 static void lv_tc_screen_recalibrate_btn_click_cb(lv_event_t *event) {
     lv_tc_screen_start(event->user_data);
 }

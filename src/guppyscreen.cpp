@@ -276,12 +276,16 @@ void GuppyScreen::show_error(const std::string &message) {
   // Async, or the delete happens with lv_btnmatrix_event still on the stack
   // and still using the button matrix that closing frees.
   lv_obj_add_event_cb(error_box, [](lv_event_t *e) {
-    lv_msgbox_close_async(lv_obj_get_parent(lv_event_get_target(e)));
+    KGuard::event("GuppyScreen error box dismissed", [&] {
+      lv_msgbox_close_async(lv_obj_get_parent(lv_event_get_target(e)));
+    });
   }, LV_EVENT_VALUE_CHANGED, NULL);
 
   // Clear the handle however it goes away, so the next error can open a new one.
   lv_obj_add_event_cb(error_box, [](lv_event_t *) {
-    GuppyScreen::error_box = NULL;
+    KGuard::event("GuppyScreen error box deleted", [&] {
+      GuppyScreen::error_box = NULL;
+    });
   }, LV_EVENT_DELETE, NULL);
 }
 
@@ -317,16 +321,23 @@ void GuppyScreen::new_theme_apply_cb(lv_theme_t *th, lv_obj_t *obj) {
 }
 
 void GuppyScreen::handle_calibrated(lv_event_t *event) {
-  spdlog::info("finished calibration");
-  lv_obj_t *main_screen = (lv_obj_t *)event->user_data;
-  lv_disp_load_scr(main_screen);
+  KGuard::event("GuppyScreen::handle_calibrated", [&] {
+    spdlog::info("finished calibration");
+    lv_obj_t *main_screen = (lv_obj_t *)event->user_data;
+    lv_disp_load_scr(main_screen);
+  });
 }
 
 void GuppyScreen::save_calibration_coeff(lv_tc_coeff_t coeff) {
-  Config *conf = Config::get_instance();
-  conf->set<std::vector<float>>("/touch_calibration_coeff",
-                                {coeff.a, coeff.b, coeff.c, coeff.d, coeff.e, coeff.f});
-  conf->save();
+  // Reached from lv_tc_screen.c's accept button, through two C frames. Writing
+  // the config opens a file and serialises json, either of which can throw, and
+  // an exception unwinding from here would pass through that C and into LVGL.
+  KGuard::event("GuppyScreen::save_calibration_coeff", [&] {
+    Config *conf = Config::get_instance();
+    conf->set<std::vector<float>>("/touch_calibration_coeff",
+                                  {coeff.a, coeff.b, coeff.c, coeff.d, coeff.e, coeff.f});
+    conf->save();
+  });
 }
 
 void GuppyScreen::refresh_theme() {
