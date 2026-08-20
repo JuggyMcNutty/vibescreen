@@ -88,6 +88,8 @@ class PrintStatusPanel : public NotifyConsumer {
   int extruder_target;
   int heater_bed_target;
   json current_file;
+  // The last print_stats.info that actually carried layer numbers.
+  json last_layer_info;
   // What print_stats last named, so that a repeated notification for the same
   // file is not mistaken for the start of a new print.
   std::string current_filename;

@@ -204,6 +204,7 @@ void PrintStatusPanel::reset() {
   // new one arrived.
   layers.update_label("0 / 0");
   current_file = json();
+  last_layer_info = json();
 
   auto v = State::get_instance()
     ->get_data("/printer_state/configfile/config/extruder/filament_diameter"_json_pointer);
@@ -519,9 +520,23 @@ void PrintStatusPanel::consume(json &j) {
     }
   }
 
-  // layers
+  // Klipper reports the layer in print_stats.info, but only in the deltas that
+  // carry print_stats. Temperature updates arrive far more often and carry
+  // none, and this used to hand update_layers a null on every one of those,
+  // which sent it down the estimate path and wrote that over the reported
+  // value. The counter therefore sat at whatever the estimate produced, which
+  // on the simulator is 0, and flickered on a real printer.
+  //
+  // The call stays unconditional, because the estimate is what a Klipper too
+  // old to report info has to fall back on, and it is driven by print_duration
+  // and gcode_position, which arrive in deltas of their own. What changes is
+  // that the last reported info is remembered and passed back in, so a delta
+  // that says nothing about layers can no longer lose them.
   v = j["/params/0/print_stats/info"_json_pointer];
-  update_layers(v);
+  if (!v.is_null()) {
+    last_layer_info = v;
+  }
+  update_layers(last_layer_info);
 }
 
 void PrintStatusPanel::handle_callback(lv_event_t *event) {
