@@ -834,18 +834,30 @@ directory, and a Python Klipper simulator for local testing.
 
 ---
 
-## Where this should end up
+## Where this ended up
 
-C1 and the C9 lifetime hazard are the same problem wearing two hats: dispatch
-happens on the libhv thread, so shared state needs locking that cannot be made
-both correct and deadlock-free while handlers run under it.
+C1, C18, C19 and the C9 lifetime hazard were one problem wearing four hats:
+dispatch happened on a thread that did not own the widgets, so shared state
+needed locking that could not be made both correct and deadlock-free while
+handlers ran under it.
 
-If `onmessage` instead pushed messages onto a queue that the LVGL loop drained,
-every handler would run on one thread. `State` could return references safely,
-the websocket client would not need a mutex at all, and a panel could not be
-destroyed mid-dispatch. That is the shape C1 should be solved in. Solving C1
-locally, by copying json out of `State` at every one of its 44 call sites, would
-have to be undone to get there.
+`onmessage` pushes onto a queue now and the LVGL loop drains it, and
+`WpaEvent` does the same through an `lv_timer`. Every handler runs on one
+thread, `State` returns references safely, and a panel cannot be destroyed
+mid-dispatch. None of the local fixes those entries proposed were needed, which
+is the argument for having waited: copying json out of `State` at each of its
+51 call sites would all have had to come back out.
+
+Two things the queues have to keep doing, which are easy to lose in a later
+refactor. Connection events go through the queue, not just messages, because
+`onopen` runs on the libhv thread and that is the path that built widgets from
+it. And each drain takes only what is queued at entry, because handlers send
+requests whose replies land back on the same queue.
+
+The mutexes stayed. `cb_lock` and `State`'s lock guard nothing against a second
+thread any more, but they cost an uncontended acquisition and the alternative
+is a public accessor with no protection at all the day something is dispatched
+from elsewhere again.
 
 ## Suggested order
 
