@@ -50,15 +50,18 @@ void MacrosPanel::populate() {
   auto &config_json = State::get_instance()
     ->get_data("/printer_state/configfile/config"_json_pointer);
 
-  // TODO: this is a race condition
   auto &macro_settings = State::get_instance()->get_data("/guppysettings/macros/settings"_json_pointer);
 
   if (!config_json.is_null()) {
     auto macros = KUtils::parse_macros(config_json);
 
     for (auto const & [k, v] : macros) {
-      auto hidden_json = macro_settings[json::json_pointer(fmt::format("/{}/hidden", k))];
-      bool hidden = !hidden_json.is_null() ? hidden_json.template get<bool>() : false;
+      // contains rather than operator[], which inserts a null for a macro
+      // nobody has hidden and so writes to State just by reading it.
+      const auto hidden_ptr = json::json_pointer(fmt::format("/{}/hidden", k));
+      bool hidden = macro_settings.contains(hidden_ptr)
+	&& !macro_settings.at(hidden_ptr).is_null()
+	&& macro_settings.at(hidden_ptr).template get<bool>();
       macro_items.push_back(std::make_shared<MacroItem>(ws, top_cont, k, v, kb, hidden));
     }
   }

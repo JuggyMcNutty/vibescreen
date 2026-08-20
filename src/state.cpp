@@ -55,14 +55,17 @@ void State::set_data(const std::string &key, json &j, const std::string &json_pa
   }
 }
 
-json &State::get_data() {
+const json &State::get_data() {
   std::lock_guard<std::mutex> guard(lock);
   return data;
 }
 
-json &State::get_data(const json::json_pointer& ptr) {
+const json &State::get_data(const json::json_pointer& ptr) {
   std::lock_guard<std::mutex> guard(lock);
-  return data[ptr];
+  // operator[] would default-insert a null for a pointer that is not there, so
+  // a read of a key the printer has not reported yet would grow the state.
+  static const json absent;
+  return data.contains(ptr) ? data.at(ptr) : absent;
 }
 
 void State::consume(json &j) {

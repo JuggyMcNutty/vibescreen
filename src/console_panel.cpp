@@ -186,7 +186,6 @@ void ConsolePanel::handle_select_macro(lv_event_t *e) {
 void ConsolePanel::handle_macros(json &j) {
   uint32_t index = 0;
 
-  // TODO: this is a race condition
   auto &db_history = State::get_instance()->get_data("/console/commandHistory"_json_pointer);
 
   if (!db_history.is_null()) {

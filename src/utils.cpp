@@ -451,7 +451,7 @@ namespace KUtils {
     return s / 1024 / 1024;
   }
 
-  std::map<std::string, std::map<std::string, std::string>> parse_macros(json &m) {
+  std::map<std::string, std::map<std::string, std::string>> parse_macros(const json &m) {
     std::map<std::string, std::map<std::string, std::string>> macros;
 
     std::regex param_regex(R"(params\.(\w+)(.*))", std::regex_constants::icase);
@@ -460,8 +460,12 @@ namespace KUtils {
     for (auto &el : m.items()) {
       std::string key = el.key();
       if (key.rfind("gcode_macro ", 0) == 0) {
-        auto &gcode = el.value()["/gcode"_json_pointer];
-        if (!gcode.is_null()) {
+        // contains and at, not operator[]. On a non-const json operator[]
+        // would insert a null "gcode" into the caller's state, and on a const
+        // one it asserts rather than inserting, which with NDEBUG is a read
+        // off the end of the map.
+        if (el.value().contains("gcode") && !el.value().at("gcode").is_null()) {
+          const json &gcode = el.value().at("gcode");
           auto macro_split = split(el.key(), ' ');
           if (macro_split.size() > 1 && macro_split[1].rfind("_", 0) != 0) {
             std::string macro_name = macro_split[1];

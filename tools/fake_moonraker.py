@@ -356,7 +356,21 @@ STATUS = {
         # where settings has it typed. Panels reading the wrong one of the two
         # is a recurring mistake, so both are served with their real shapes.
         "config": {"extruder": {"filament_diameter": "1.75"},
-                   "input_shaper": {k: str(v) for k, v in INPUT_SHAPER.items()}},
+                   "input_shaper": {k: str(v) for k, v in INPUT_SHAPER.items()},
+                   # The macros panel lists gcode_macro sections that have a
+                   # gcode body, and builds a text field per params.X it finds
+                   # in one. Without at least one here the panel comes up empty
+                   # and nothing about it can be checked locally.
+                   "gcode_macro CLEAN_NOZZLE": {
+                       "gcode": "G28\nG1 X10 Y10 F6000",
+                   },
+                   "gcode_macro PARK": {
+                       "gcode": ("{% set x = params.X|default(10) %}\n"
+                                 "{% set y = params.Y|default(10) %}\n"
+                                 "G1 X{x} Y{y} F6000"),
+                   },
+                   # Leading underscore, so the panel should hide it.
+                   "gcode_macro _GUPPY_INTERNAL": {"gcode": "M117 internal"}},
     },
     "toolhead": {"max_velocity": 800.0, "max_accel": 20000.0,
                  "homed_axes": "xyz", "position": [0, 0, 0, 0]},

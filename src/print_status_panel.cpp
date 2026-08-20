@@ -268,7 +268,7 @@ void PrintStatusPanel::init(json &fans, json &sensors) {
 
   reset();
   populate();
-  json &pstat_state = State::get_instance()
+  const json &pstat_state = State::get_instance()
     ->get_data("/printer_state/print_stats/state"_json_pointer);
   if (!pstat_state.is_null()) {
     auto pstatus = pstat_state.template get<std::string>();
@@ -284,7 +284,7 @@ void PrintStatusPanel::init(json &fans, json &sensors) {
 
 void PrintStatusPanel::populate() {
   State* s = State::get_instance();
-  json& printfile = s->get_data("/printer_state/print_stats/filename"_json_pointer);
+  const json &printfile = s->get_data("/printer_state/print_stats/filename"_json_pointer);
   if (!printfile.is_null()) {
     const std::string fname = printfile.template get<std::string>();
     if (fname.length() > 0) {
@@ -332,7 +332,7 @@ void PrintStatusPanel::handle_metadata(const std::string &gcode_file, json &j) {
     estimated_time_s = static_cast<uint32_t>(eta.template get<float>());
     spdlog::trace("updated eta {}", estimated_time_s);        
 
-    json &v = State::get_instance()->get_data("/printer_state/print_stats/print_duration"_json_pointer);
+    const json &v = State::get_instance()->get_data("/printer_state/print_stats/print_duration"_json_pointer);
     if (!v.is_null()) {
       uint32_t passed = static_cast<uint32_t>(v.template get<float>());
       spdlog::trace("updated time progress in handle metadata, passed {}", passed);

@@ -20,8 +20,12 @@ class State : public NotifyConsumer {
 
   void reset();
   void set_data(const std::string &key, json &j, const std::string &json_path);
-  json &get_data();
-  json &get_data(const json::json_pointer &ptr);
+  // Const because callers hold the reference after the lock is released. That
+  // was the use-after-free in docs/audit.md C1 while dispatch ran on libhv's
+  // thread; now that every caller and set_data itself are on the LVGL thread
+  // the reference is stable, and const keeps it a read.
+  const json &get_data();
+  const json &get_data(const json::json_pointer &ptr);
 
   void consume(json &j);
 

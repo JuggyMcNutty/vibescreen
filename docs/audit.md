@@ -50,7 +50,7 @@ two local bugs, they are two sightings of one structural problem. See C1.
 
 ## Correctness
 
-### C1. `State` returns references out from under its own mutex (open)
+### C1. `State` returns references out from under its own mutex (fixed)
 
 `src/state.cpp:66-69`
 
@@ -81,10 +81,32 @@ Two further wrinkles:
   any of the reference-returning ones. The value-returning accessors
   (`get_extruders`, `get_heaters`, and friends) are genuinely safe.
 
-This is the root cause the previous developer marked twice and never fixed. Any
-fix has to change the accessor contract, either returning a copy, or taking a
-callback invoked under the lock, or handing back a lock-owning wrapper. It is
-the largest single piece of work in this audit and should be its own change.
+This is the root cause the previous developer marked twice and never fixed.
+
+Fixed by moving dispatch rather than by changing the accessor. With `consume()`
+and every `get_data` caller on the LVGL thread, the reference cannot be
+invalidated under a reader, and none of the three options this entry proposed
+was needed. Both `// TODO: this is a race condition` markers are gone with it.
+
+The default-insert was a separate bug and is fixed on its own terms:
+`get_data` returns `const json&` now and answers a missing pointer with a
+shared empty json instead of `data[ptr]`. Making it const is what proves no
+caller was writing through it, and the compiler found the five that bound a
+mutable reference. All five turned out to be reads.
+
+It found two real ones on the way. `MacrosPanel` read a macro's hidden flag
+with `operator[]`, so listing macros wrote a null into `State` for every macro
+nobody had hidden. And `KUtils::parse_macros` did the same with `/gcode`,
+inserting into whatever it was handed. Both use `contains` and `at` now.
+
+Worth knowing for anything similar: `operator[]` with a `json_pointer` on a
+**const** json does not insert, it asserts, and with `NDEBUG` that assert is
+gone and it dereferences `end()`. So const does not make `operator[]` safe, it
+makes it worse. `contains` then `at` is the only correct pair.
+
+`State`'s mutex stays. It guards nothing against a second thread any more, but
+it costs an uncontended lock and the alternative is a public accessor with no
+protection at all if something is ever dispatched from elsewhere again.
 
 ### C2. Empty Moonraker port field terminates the process (fixed, `bdbfa03`)
 
