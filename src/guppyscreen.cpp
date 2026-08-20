@@ -16,7 +16,6 @@
 
 GuppyScreen *GuppyScreen::instance = NULL;
 lv_style_t GuppyScreen::style_container;
-lv_style_t GuppyScreen::style_imgbtn_default;
 lv_style_t GuppyScreen::style_imgbtn_pressed;
 lv_style_t GuppyScreen::style_imgbtn_disabled;
 lv_theme_t GuppyScreen::th_new;
@@ -103,10 +102,6 @@ GuppyScreen *GuppyScreen::init(std::function<void(lv_color_t, lv_color_t)> hal_i
   lv_style_init(&style_container);
   lv_style_set_border_width(&style_container, 0);
   lv_style_set_radius(&style_container, 0);
-
-//  lv_style_init(&style_imgbtn_default);
-//  lv_style_set_img_recolor_opa(&style_imgbtn_default, LV_OPA_100);
-//  lv_style_set_img_recolor(&style_imgbtn_default, lv_color_black());
 
   lv_style_init(&style_imgbtn_pressed);
   lv_style_set_img_recolor_opa(&style_imgbtn_pressed, LV_OPA_100);
@@ -225,7 +220,6 @@ void GuppyScreen::loop() {
           spdlog::debug("putting display to sleeping");
           fbdev_blank();
           lv_obj_move_foreground(screen_saver);
-          // spdlog::debug("screen saver foreground");
           is_sleeping = true;
         }
       } else {
@@ -314,7 +308,6 @@ void GuppyScreen::new_theme_apply_cb(lv_theme_t *th, lv_obj_t *obj) {
   }
 
   if (lv_obj_check_type(obj, &lv_imgbtn_class)) {
-//    lv_obj_add_style(obj, &style_imgbtn_default, LV_STATE_DEFAULT);
     lv_obj_add_style(obj, &style_imgbtn_pressed, LV_STATE_PRESSED);
     lv_obj_add_style(obj, &style_imgbtn_disabled, LV_STATE_DISABLED);
   }

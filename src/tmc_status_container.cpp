@@ -125,7 +125,6 @@ TmcStatusContainer::~TmcStatusContainer()
 }
 
 void TmcStatusContainer::update(json &stepper) {
-  // spdlog::debug("tmc stepper {}", stepper.dump());
   if (!stepper.is_null()) {
     auto v = stepper["/i_rms"_json_pointer];
     if (!v.is_null()) {

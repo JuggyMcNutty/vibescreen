@@ -159,7 +159,6 @@ BedMeshPanel::BedMeshPanel(KWebSocketClient &c, std::mutex &l)
   lv_textarea_set_one_line(input, true);
   lv_obj_set_width(input, LV_PCT(100));
   
-  // lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_flex_flow(msgbox, LV_FLEX_FLOW_ROW_WRAP);
   lv_obj_set_flex_align(msgbox, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_row(msgbox, 25, 0);
@@ -495,7 +494,6 @@ void BedMeshPanel::handle_profile_action(lv_event_t *e) {
       ws.gcode_script(fmt::format("BED_MESH_PROFILE LOAD=\"{}\"", profile_name));
 
       // // populate profile info
-      // refresh_profile_info(profile_name);
     } else if (col == 0) {
       // display mesh info and refresh bed mesh matrix
     }

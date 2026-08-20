@@ -66,7 +66,6 @@ BeltsCalibrationPanel::BeltsCalibrationPanel(KWebSocketClient &c, std::mutex &l)
   lv_obj_set_size(graph_cont, LV_PCT(50), LV_PCT(50));
 
   lv_img_set_zoom(graph, 100);
-  // lv_img_set_src(graph, "A:/home/balla/Downloads/belts_calibration.png");
   lv_obj_center(graph);
 
   lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);

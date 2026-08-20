@@ -99,7 +99,6 @@ void TmcStatusPanel::consume(json &j) {
     for (auto &el : tmc_status.items()) {
       const auto &s = metrics.find(el.key());
       if (s != metrics.end()) {
-	// spdlog::debug("tmc stepper found {}", el.key());
 
 	s->second->update(el.value());
       } else {

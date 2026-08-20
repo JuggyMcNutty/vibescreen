@@ -34,10 +34,6 @@ SensorContainer::SensorContainer(KWebSocketClient &c,
     lv_obj_set_style_border_side(sensor_cont, LV_BORDER_SIDE_LEFT, LV_PART_MAIN);
     lv_obj_set_style_border_width(sensor_cont, 5, LV_PART_MAIN);
 
-    // auto cont_width = (double)lv_disp_get_physical_hor_res(NULL) * 0.4125;
-    // cont_width = cont_width > 330 ? 330 : cont_width;
-    // auto cont_height = (double)lv_disp_get_physical_ver_res(NULL) * 0.125;
-    // cont_height = cont_height > 60 ? 60 : cont_height;
 
     auto width_scale = (double)lv_disp_get_physical_hor_res(NULL) / 800.0;
     auto height_scale = (double)lv_disp_get_physical_ver_res(NULL) / 480.0;

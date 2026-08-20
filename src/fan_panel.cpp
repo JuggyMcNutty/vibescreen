@@ -75,7 +75,6 @@ void FanPanel::create_fans(json &f) {
     auto fptr = std::make_shared<SliderContainer>(fans_cont, display_name.c_str(), &cancel, "Off",
 						  &fan_on, "Max", fan_cb, this);
     fans.insert({key, fptr});
-    // lv_obj_set_grid_cell(fptr->get_container(), LV_GRID_ALIGN_CENTER, 0, 1, LV_GRID_ALIGN_CENTER, rowidx++, 1);
   }
 
   if (fans.size() > 3) {

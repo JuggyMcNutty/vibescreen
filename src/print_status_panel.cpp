@@ -131,8 +131,6 @@ PrintStatusPanel::PrintStatusPanel(KWebSocketClient &websocket_client,
 
   lv_obj_set_style_pad_all(pbar_cont, 0, 0);
   lv_obj_set_size(pbar_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-  // lv_obj_set_style_border_width(pbar_cont, 2, 0);
-  // lv_obj_set_style_border_width(thumbnail_cont, 2, 0);
 
   auto bar_width = (double)lv_disp_get_physical_hor_res(NULL) * 0.35;
   auto hscale = (double)lv_disp_get_physical_ver_res(NULL) / 480.0;
@@ -170,7 +168,6 @@ PrintStatusPanel::~PrintStatusPanel() {
 }
 
 void PrintStatusPanel::foreground() {
-  // populate();
   lv_obj_move_foreground(status_cont);
 }
 

@@ -630,15 +630,30 @@ only source change needed to build the tree with it.
 
 ## Maintainability
 
-### M1. Commented-out code left behind (open)
+### M1. Commented-out code left behind (fixed)
 
-Of the order of 90 lines across a couple of dozen files, concentrated in
+Was of the order of 90 lines across a couple of dozen files, concentrated in
 `src/numpad.cpp`, `src/extruder_panel.cpp`, `src/image_label.cpp` and
-`src/macro_item.cpp`. `src/websocket_client.cpp` was on that list and has
-since been cleared out by the fixes that went through it. The exact count moves with
-every commit and depends on how you decide what counts, so it is not worth
-pinning here. Git remembers; these should go. Low risk, do it in one sweep per
-file so the diffs stay reviewable.
+`src/macro_item.cpp`. Gone in two commits, the four worst files and then the
+rest.
+
+Explanatory comments stayed, including the ones that read like code. The test
+applied was whether the line documents the code around it or is a copy of code
+that used to run. `// input validation, e.g. range` in `src/numpad.cpp` is
+still there and still an unkept promise, and the `// XXX:` markers listed at
+the top of this file are untouched.
+
+Two things fell out of it. `style_imgbtn_default` in `GuppyScreen` was declared
+and defined but only ever initialised and applied from commented-out lines, so
+it went with them, and `main.cpp`'s `mouse_indev` had no reader once the
+commented cursor block was removed.
+
+Worth recording the near miss: deleting by line number took two live lines with
+it, `data[key].merge_patch(patch)` in `State::set_data` and
+`lv_indev_set_group(enc_indev, g)` in `hal_init`. Both were caught by reading
+the diff rather than by the build, which compiled clean without them. A sweep
+like this wants the diff checked for lines that are not comments, not just a
+green build.
 
 ### M2. Four leaked singletons (open, cosmetic)
 
@@ -780,20 +795,18 @@ have to be undone to get there.
 
 ## Suggested order
 
-Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, C20, B1 to B6, M3, M4, M5, and
-the `KUtils` parse helpers.
+Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, C20, B1 to B6, M1, M3, M4, M5,
+and the `KUtils` parse helpers.
 
 Remaining, roughly in order:
 
-1. M1, the commented-out code. Pure churn, best done as its own quiet
-   pass when nothing else is in flight.
-2. C1, C18, C19 and the C9 lifetime hazard, as the message-queue change above.
+1. C1, C18, C19 and the C9 lifetime hazard, as the message-queue change above.
    The largest piece of work left and the one that retires the most. C18 is a
    crash on one startup in six, which is why it comes before the rest rather
    than last.
-3. C11, the panel destructor double-delete. Latent until something tears a
+2. C11, the panel destructor double-delete. Latent until something tears a
    panel down, and a mechanical sweep once someone wants multi-printer
    switching to actually work.
-4. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+3. C7, the non-blocking heat change. Behavioural, wants its own discussion.
 
 M2, the four leaked singletons, is harmless and stays open.

@@ -374,8 +374,6 @@ void PrintPanel::handle_print_callback(lv_event_t *event) {
 	&& pstat_state.template get<std::string>() != "paused") {
       spdlog::debug("printer ready to print. print file {}", cur_file->full_path);
 	
-      // ws.send_jsonrpc("printer.gcode.script",
-      // 		    json::parse(R"({"script":"PRINT_PREPARE_CLEAR"})"));
 
       json fname_input = {{"filename", cur_file->full_path }};
       ws.send_jsonrpc("printer.print.start", fname_input);

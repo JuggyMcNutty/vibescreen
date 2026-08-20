@@ -10,7 +10,6 @@ class NotifyConsumer {
   NotifyConsumer(std::mutex &lv_lock);
   ~NotifyConsumer();
   virtual void consume(nlohmann::json &data) = 0;
-  // virtual void consume(std::string &str) = 0;
  protected:
   std::mutex &lv_lock;
 };

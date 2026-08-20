@@ -158,7 +158,6 @@ PrinterSelectPanel::PrinterSelectPanel()
   lv_obj_set_width(top, LV_PCT(100));
   lv_obj_set_style_pad_all(top, 0, 0);
 
-  // lv_obj_set_style_border_width(left, 2, 0);
   lv_obj_set_style_border_width(right, 2, 0);
 
   lv_obj_set_size(left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -208,7 +207,6 @@ PrinterSelectPanel::PrinterSelectPanel()
   lv_label_set_text(l, LV_SYMBOL_PLUS " Printer");
   lv_obj_center(l);
 
-  // lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_PLUS, 0);
   lv_obj_add_event_cb(btn, [](lv_event_t *e) {
     KGuard::event("PrinterSelectPanel add printer", [&] {
       lv_event_code_t code = lv_event_get_code(e);

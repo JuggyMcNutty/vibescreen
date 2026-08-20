@@ -24,7 +24,6 @@ PromptPanel::PromptPanel(KWebSocketClient &websocket_client, std::mutex &lock, l
 {
     lv_obj_set_style_pad_all(prompt_cont, 0, 0);
     
-    // lv_obj_clear_flag(promptpanel_cont, LV_OBJ_FLAG_SCROLLABLE);
 
     static lv_coord_t grid_main_row_dsc_detail[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     // header, flex, buttons
@@ -238,7 +237,6 @@ void PromptPanel::handle_macro_response(json &j) {
                 lv_obj_t *textfield = lv_label_create(flex);
                 lv_obj_set_width(textfield, lv_pct(96));
                 lv_obj_set_height(textfield, 40);
-                // lv_obj_set_style_min_height(textfield, 32, 0);
                 lv_label_set_long_mode(textfield, LV_LABEL_LONG_WRAP);
                 lv_obj_set_flex_grow(textfield, 1);
                 lv_obj_set_style_outline_pad(textfield, 0, 0);
@@ -270,7 +268,6 @@ void PromptPanel::handle_macro_response(json &j) {
                 lv_obj_set_style_border_color(button_group_cont, lv_palette_main(LV_PALETTE_PINK), LV_PART_MAIN | LV_STATE_DEFAULT);
                 lv_obj_set_style_bg_color(button_group_cont, lv_palette_lighten(LV_PALETTE_PINK, 2), LV_PART_MAIN | LV_STATE_DEFAULT);
 #endif
-                // lv_obj_set_style_min_height(button_group_cont, lv_pct(5), 0);
             } else if (command.find("prompt_button_group_end") == 0) {
                 // does nothing since start creates a new one
                 spdlog::debug("Button group ended");
@@ -318,7 +315,6 @@ void PromptPanel::handle_macro_response(json &j) {
                     lv_label_set_text(label, prompt_footer_button.c_str());
                     lv_label_set_text(command, prompt_button_command.c_str());
                     lv_obj_set_style_pad_all(btn, 2, 0);
-                    // lv_obj_set_style_max_width(label, lv_pct(45), 0);
                     lv_obj_center(label);
 
                     if (!prompt_button_type.compare("secondary")) {

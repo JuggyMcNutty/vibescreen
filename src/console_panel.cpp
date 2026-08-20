@@ -67,7 +67,6 @@ ConsolePanel::ConsolePanel(KWebSocketClient &websocket_client, std::mutex &lock,
   lv_obj_add_flag(label, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(label, &ConsolePanel::_handle_clear_input, LV_EVENT_CLICKED, this);
 
-  // ws.register_gcode_resp([this](json& d) { this->handle_macro_response(d); });
   ws.register_method_callback("notify_gcode_response",
 			      "ConsolePanel",
 			      [this](json& d) { this->handle_macro_response(d); });

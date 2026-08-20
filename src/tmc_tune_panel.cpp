@@ -71,7 +71,6 @@ AutoTmcContainer::AutoTmcContainer(const std::list<std::string> &motors,
   lv_dropdown_set_selected(tuning_goal_dd, goal_idx);
 
   lv_obj_set_style_pad_all(spinbox_cont, 0, 0);
-  // lv_obj_set_style_border_width(spinbox_cont, 2, 0);
   lv_obj_center(sensorless_threshold);
 
   lv_obj_set_size(spinbox_cont, LV_PCT(40), LV_SIZE_CONTENT);

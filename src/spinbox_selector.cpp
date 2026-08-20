@@ -30,7 +30,6 @@ SpinBoxSelector::SpinBoxSelector(lv_obj_t *parent,
   lv_obj_center(sb);
 
   lv_obj_set_size(sb, LV_PCT(40), LV_SIZE_CONTENT);
-  // lv_obj_set_style_pad_all(sb, 4, 0);
   lv_spinbox_set_range(sb, min, max);
   lv_spinbox_set_value(sb, value);
   lv_spinbox_set_step(sb, 1);

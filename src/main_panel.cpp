@@ -147,7 +147,6 @@ void MainPanel::create_panel() {
   lv_obj_set_style_border_side(tab_btns, 0, LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_style_text_font(tab_btns, &materialdesign_font_40, LV_STATE_DEFAULT);
 
-  // lv_obj_set_style_text_font(lv_scr_act(), LV_FONT_DEFAULT, 0);
 
   lv_obj_set_style_pad_all(main_tab, 0, 0);
   lv_obj_set_style_pad_all(macros_tab, 0, 0);

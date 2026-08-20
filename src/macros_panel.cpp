@@ -56,22 +56,10 @@ void MacrosPanel::populate() {
   if (!config_json.is_null()) {
     auto macros = KUtils::parse_macros(config_json);
 
-    // uint32_t i = 0;
-    // lv_color_t cur_bg = lv_obj_get_style_bg_color(cont, 0);
-    // lv_color_t mixed = lv_color_mix(lv_palette_main(LV_PALETTE_GREY),
-    // 				    cur_bg, LV_OPA_10);
-
     for (auto const & [k, v] : macros) {
       auto hidden_json = macro_settings[json::json_pointer(fmt::format("/{}/hidden", k))];
       bool hidden = !hidden_json.is_null() ? hidden_json.template get<bool>() : false;
       macro_items.push_back(std::make_shared<MacroItem>(ws, top_cont, k, v, kb, hidden));
-      
-      // if (i % 2 == 0) {
-      // 	macro_items.push_back(std::make_shared<MacroItem>(ws, top_cont, k, v, kb, mixed, hidden));
-      // } else {
-      // 	macro_items.push_back(std::make_shared<MacroItem>(ws, top_cont, k, v, kb, cur_bg, hidden));
-      // }
-      // i++;
     }
   }
 }

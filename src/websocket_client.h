@@ -25,8 +25,6 @@ class KWebSocketClient : public hv::WebSocketClient {
   void register_notify_update(NotifyConsumer *consumer);
   void unregister_notify_update(NotifyConsumer *consumer);
 
-  // void register_gcode_resp(std::function<void(json&)> cb);
-
   int send_jsonrpc(const std::string &method, std::function<void(json&)> cb);
   int send_jsonrpc(const std::string &method, const json &params, std::function<void(json&)> cb);  
   int send_jsonrpc(const std::string &method, const json &params, NotifyConsumer *consumer);  
@@ -66,7 +64,6 @@ class KWebSocketClient : public hv::WebSocketClient {
   std::map<uint64_t, std::function<void(json&)>> callbacks;
   std::map<uint64_t, NotifyConsumer*> consumers;
   std::vector<NotifyConsumer*> notify_consumers;
-  // std::vector<std::function<void(json&)>> gcode_resp_cbs;
 
   // method_name : { <unique-name-cb-handler> :handler-cb }
   std::map<std::string, std::map<std::string, std::function<void(json&)>>> method_resp_cbs;
