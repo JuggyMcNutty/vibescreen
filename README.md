@@ -49,7 +49,10 @@ K1 Max that macro comes from [ProWiper](https://www.printables.com/model/1023575
 
 **The print status screen dismisses itself.** It used to stay up after a print
 finished, stuck at 99 percent because the progress was truncated rather than
-rounded.
+rounded. The layer counter also works now: it was being reset by every
+temperature update.
+
+![Print status with the model preview, layer count and chamber temperature](screenshots/print_status.png)
 
 **The file list refreshes when a file is uploaded**, rather than waiting for
 someone to press Reload.
