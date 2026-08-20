@@ -23,12 +23,8 @@ MacroItem::MacroItem(KWebSocketClient &c,
   }
 
   lv_obj_set_size(cont, LV_PCT(100), LV_SIZE_CONTENT);
-  // lv_obj_set_style_bg_color(cont, bg_color, 0);  
-  // lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
 
   lv_obj_set_size(top_cont, LV_PCT(100), LV_SIZE_CONTENT);
-  // lv_obj_set_style_bg_color(top_cont, bg_color, 0);  
-  // lv_obj_set_style_bg_opa(top_cont, LV_OPA_COVER, 0);
   lv_obj_set_style_pad_all(top_cont, 0, 0);
   
   lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW_WRAP);
@@ -70,8 +66,6 @@ MacroItem::MacroItem(KWebSocketClient &c,
 
   if (!m_params.empty()) {
     lv_obj_t *params_cont = lv_obj_create(cont);
-    // lv_obj_set_style_bg_color(params_cont, bg_color, 0);  
-    // lv_obj_set_style_bg_opa(params_cont, LV_OPA_COVER, 0);
     
     lv_obj_set_size(params_cont, LV_PCT(70), LV_SIZE_CONTENT);
 
