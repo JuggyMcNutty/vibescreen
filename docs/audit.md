@@ -353,6 +353,47 @@ This is the same disease as C1 and C18 and wants the same cure, so it is not
 worth a local mutex that would have to come out again. Noted here rather than
 patched.
 
+### C20. Reading a missing config key writes it back as null (open, partly mitigated)
+
+`Config::get_json` is one line:
+
+```cpp
+return data[json::json_pointer(json_path)];
+```
+
+`nlohmann::json::operator[]` inserts a default-constructed null for a pointer
+that is not there, so **reading an absent option mutates the config**, and the
+next `Config::save()` writes that null to disk. Any setting saved afterwards
+carries the nulls with it.
+
+Found on 2026-08-19 while adding the update check: the config came back with
+`"update_check_interval_hours": null` after a run in which nothing had set it.
+
+There are 37 `get_json` call sites outside `config.cpp`, and every one that
+reads an optional key can do this: `/invert_z_arrows`, `/prompt_emergency_stop`,
+`/touch_calibrated`, `/touch_calibration_coeff`, `/display_rotate`, `/theme`,
+`/primary_color`, `/secondary_color`, and the per-printer keys reached through
+`conf->df()`. It is not new. It has been quietly seeding nulls into people's
+config files for as long as those keys have been optional.
+
+Harmless so far, because every caller treats null as "not set" and falls back to
+a default, which is also why it went unnoticed. It stops being harmless the day
+a caller distinguishes null from absent, or a config is read by something
+stricter than we are.
+
+**Mitigated, not fixed** (`9bbe3ec`): `Config::init` now seeds
+`update_check_enabled` and `update_check_interval_hours` with their defaults
+when they are missing, treating an existing null as missing so a polluted config
+repairs itself. That covers the two keys added with it and nothing else.
+
+The real fix is a non-mutating read. `get_json` returns `json&`, and callers
+take that reference, so it cannot simply become a `contains()` check returning a
+value without looking at all 37 sites. Either add a `get_json_or(ptr, default)`
+that does not touch `data` and move readers onto it, or seed every documented
+default at load and treat a missing key as a bug rather than a case to handle.
+The second is more work up front and leaves the config self-describing, which is
+worth something on a machine where editing it by hand is the only way in.
+
 ### C8. Rejected gcode is invisible to the user (fixed, `fc12faa`)
 
 `KWebSocketClient::gcode_script` used to fire and forget: it logged the
@@ -714,4 +755,6 @@ Remaining, roughly in order:
    place in this list suggests.
 
 M2, the four leaked singletons, is harmless and stays open. C19, the shared wpa
-control socket, folds into item 5.
+control socket, folds into item 5. C20, config reads inserting nulls, is
+mechanical and independent of everything above, so it can go in whenever
+somebody has the appetite for touching 37 call sites.
