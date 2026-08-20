@@ -506,10 +506,17 @@ Beyond the bed mesh and shaper flags it grows as panels need it:
 
 ```sh
 python3 tools/fake_moonraker.py --print complete --print-seconds 120
+python3 tools/fake_moonraker.py --layer-info none # the K1 Max's shape, see below
 python3 tools/fake_moonraker.py --belts fail      # or slow, timeout, empty
 python3 tools/fake_moonraker.py --drop-file 20    # announce an upload
 python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshake
 ```
+
+`--layer-info none` is worth knowing about. By default the fake reports layer
+numbers in `print_stats.info`, and our K1 Max never does, because no file on it
+calls `SET_PRINT_STATS_INFO`. So the default exercises the one path that printer
+never takes, and the layer counter there runs entirely on the estimate from file
+metadata and Z. Measured 2026-08-20, detail in `docs/k1max-facts.md`.
 
 **The wifi panel does not go through Moonraker at all**, so the fake above
 cannot reach it: it opens wpa_supplicant's control socket and speaks its text

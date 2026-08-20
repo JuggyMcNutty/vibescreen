@@ -32,7 +32,13 @@ the config sections the panel checks before offering to calibrate.
 Received gcode is appended to $GCODE_LOG, default /tmp/guppy_gcode_received.txt.
 
 --print [complete|cancelled|error] walks a print from standby to that ending,
-over --print-seconds seconds, default 30.
+over --print-seconds seconds, default 30. It reports a rising Z as it goes, so
+the layer counter's estimate path has something to read.
+
+--layer-info [report|none] decides whether print_stats.info carries layer
+numbers. none is the development K1 Max: OrcaSlicer's profile for it emits no
+SET_PRINT_STATS_INFO, so info stays {total_layer: null, current_layer: null} for
+the whole print and the panel has only the estimate to work from.
 
 --drop-file <seconds> announces a new gcode file that long after connect, the
 way Moonraker does after an upload.
@@ -217,6 +223,19 @@ API_KEY = _arg_value("--api-key", "") if "--api-key" in sys.argv else ""
 PRINT_MODES = ("complete", "cancelled", "error")
 PRINT_RUN = _mode_value("--print", "complete", PRINT_MODES)
 PRINT_SECONDS = float(_arg_value("--print-seconds", "30"))
+
+# Whether print_stats.info carries layer numbers. See --layer-info above.
+LAYER_INFO_MODES = ("report", "none")
+LAYER_INFO = _mode_value("--layer-info", "report", LAYER_INFO_MODES) or "report"
+
+# The shape of the print, shared between the metadata reply and the deltas so
+# the reported layer and the estimated one describe the same object. The panel
+# derives its estimate from these, so a mismatch here would look like a bug in
+# the panel.
+LAYER_COUNT = 120
+LAYER_HEIGHT = 0.2
+FIRST_LAYER_HEIGHT = 0.2
+OBJECT_HEIGHT = FIRST_LAYER_HEIGHT + LAYER_HEIGHT * (LAYER_COUNT - 1)
 
 BELTS_MODES = ("normal", "slow", "fail", "timeout", "empty")
 BELTS = _mode_value("--belts", "normal", BELTS_MODES)
@@ -574,8 +593,10 @@ def result_for(method, params):
         for f in FILES:
             if f["path"] == params.get("filename"):
                 return dict(f, estimated_time=int(PRINT_SECONDS),
-                            layer_count=120, first_layer_height=0.2,
-                            layer_height=0.2, object_height=24.0,
+                            layer_count=LAYER_COUNT,
+                            first_layer_height=FIRST_LAYER_HEIGHT,
+                            layer_height=LAYER_HEIGHT,
+                            object_height=OBJECT_HEIGHT,
                             filament_total=4210.0,
                             filament_weight_total=12.56,
                             thumbnails=thumbnails_for(f["path"]))
@@ -813,6 +834,12 @@ async def run_print(ws):
     it, and print_stats.state goes to complete while it is still short. A panel
     that only trusts progress therefore stops at 99 and never dismisses, which
     is upstream #94 and #103.
+
+    Layers have two sources and this drives both. print_stats.info is the
+    reported one, and --layer-info none withholds it the way the development K1
+    Max does. gcode_move.gcode_position is what the estimate is computed from,
+    and it rises here rather than sitting at 0, because a static Z made the
+    estimate return 0 and hid whichever of the two paths was being taken.
     """
     async def push(delta):
         await ws.send(json.dumps({"jsonrpc": "2.0", "method": "notify_status_update",
@@ -820,12 +847,19 @@ async def run_print(ws):
 
     await asyncio.sleep(3.0)
     name = "fake_benchy.gcode"
+    # Klipper always carries the info key; what varies is whether anything ever
+    # filled it in. A machine whose slicer emits no SET_PRINT_STATS_INFO reports
+    # the key with null members for the whole print, which is not the same as
+    # the key being absent and a panel can tell them apart.
+    info = ({"total_layer": LAYER_COUNT, "current_layer": 0} if LAYER_INFO == "report"
+            else {"total_layer": None, "current_layer": None})
     STATUS["print_stats"].update({"state": "printing", "filename": name,
-                                  "print_duration": 0.0,
-                                  "info": {"total_layer": 120, "current_layer": 0}})
+                                  "print_duration": 0.0, "info": info})
     STATUS["virtual_sdcard"].update({"is_active": True, "progress": 0.0})
+    STATUS["gcode_move"]["gcode_position"] = [0, 0, 0.0, 0]
     await push({"print_stats": STATUS["print_stats"],
-                "virtual_sdcard": STATUS["virtual_sdcard"]})
+                "virtual_sdcard": STATUS["virtual_sdcard"],
+                "gcode_move": {"gcode_position": STATUS["gcode_move"]["gcode_position"]}})
     print(f"fake print started, {PRINT_RUN} in {PRINT_SECONDS:.0f}s", flush=True)
 
     steps = 40
@@ -836,8 +870,19 @@ async def run_print(ws):
         progress = 0.994 * i / steps
         STATUS["virtual_sdcard"]["progress"] = progress
         STATUS["print_stats"]["print_duration"] = PRINT_SECONDS * i / steps
-        STATUS["print_stats"]["info"]["current_layer"] = int(120 * i / steps)
+
+        # Layer 1 is at first_layer_height and each one after adds a layer
+        # height, which is the relation the panel inverts to estimate the layer
+        # from Z. Layer 0 means nothing has been laid down yet.
+        layer = max(1, round(LAYER_COUNT * i / steps))
+        STATUS["gcode_move"]["gcode_position"][2] = (
+            FIRST_LAYER_HEIGHT + LAYER_HEIGHT * (layer - 1))
+        if LAYER_INFO == "report":
+            STATUS["print_stats"]["info"]["current_layer"] = layer
+
         await push({"virtual_sdcard": {"progress": progress},
+                    "gcode_move": {
+                        "gcode_position": STATUS["gcode_move"]["gcode_position"]},
                     "print_stats": {
                         "print_duration": STATUS["print_stats"]["print_duration"],
                         "info": STATUS["print_stats"]["info"]}})
