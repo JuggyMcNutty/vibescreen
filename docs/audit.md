@@ -25,8 +25,6 @@ line number is one commit away from pointing at something else.
 
 | File | Marker |
 | --- | --- |
-| `src/console_panel.cpp` | `// TODO: this is a race condition` |
-| `src/macros_panel.cpp` | `// TODO: this is a race condition` |
 | `src/websocket_client.cpp` | `// XXX: get rid of consumers and use function ptrs for callback` |
 | `src/websocket_client.cpp` | `// XXX: check success, remove callback if send is unsuccessfull` |
 | `src/wpa_event.cpp` | `// XXX: replace callback?`, `// TODO: retries` |
@@ -37,14 +35,16 @@ line number is one commit away from pointing at something else.
 | `src/spoolman_panel.cpp` | `// TODO: calculate color distance` |
 | `src/tree.h` | `// XXX: fix my index` |
 
-It was 15 when this was written, and 13 now. `fc12faa` retired one of the two
+It was 15 when this was written and 11 now. `fc12faa` retired one of the two
 "check success" markers by actually checking the reply, and the survivor now
 says "callback" where it used to say "consumer". The `setting_panel.cpp`
 threadpool marker went with the update dialog, which runs `update.sh` on its own
 thread.
 
-The two "this is a race condition" notes are the interesting ones. They are not
-two local bugs, they are two sightings of one structural problem. See C1.
+The two "this is a race condition" notes were the interesting ones. They were
+not two local bugs but two sightings of one structural problem, and both went
+with C1: dispatch runs on the LVGL thread now, so there is no second thread for
+either of them to race with.
 
 ---
 

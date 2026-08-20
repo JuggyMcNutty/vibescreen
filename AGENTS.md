@@ -641,11 +641,15 @@ Four threads, and the boundary is where the bugs are.
   success. The checker abandons a run that has said nothing for three minutes,
   because otherwise one wedged process leaves the feature silently dead.
 
-Every `lv_timer` callback in the tree is wrapped in `KGuard::event`, for the
-reason below: an exception escaping one unwinds through `lv_timer_handler` and
-out of the main loop.
+Every `lv_timer` callback in the tree contains its exceptions with
+`KGuard::event`, for the reason below: an exception escaping one unwinds
+through `lv_timer_handler` and out of the main loop. `WifiPanel::_drain_wpa` is
+the one that guards inside rather than at the trampoline, per wpa callback, so
+one bad event does not cost the rest of the batch.
 
-LVGL is not thread safe. Panels take `lv_lock` around widget work.
+LVGL is not thread safe. Panels take `lv_lock` around widget work, **except
+inside an `lv_timer` callback**, where the main loop is already holding it and
+taking it again deadlocks on a non-recursive mutex.
 
 `KWebSocketClient` has a `cb_lock` covering its handler maps. **Never invoke a
 handler while holding it.** `InputShaperPanel` calls back into `gcode_script`
