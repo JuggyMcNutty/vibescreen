@@ -591,8 +591,8 @@ Three threads, and the boundary is where the bugs are.
   `src/websocket_client.cpp`, which drives every `NotifyConsumer::consume`, which
   is what updates `State`.
 - **Subprocess workers**: two, both detaching a `std::thread` to run
-  `update.sh` under `sp::Popen`. `src/update_dialog.cpp:263` runs the update
-  itself; `src/update_check.cpp:233` runs `--check` on a poll. Neither touches a
+  `update.sh` under `sp::Popen`. `UpdateDialog::show` runs the update itself;
+  `UpdateCheck::check_now` runs `--check` on a poll. Neither touches a
   widget. Each writes into a struct behind its own lock that the LVGL thread
   drains from an `lv_timer`, which is the shape to copy if anything else needs
   to run a subprocess without blocking the UI.
