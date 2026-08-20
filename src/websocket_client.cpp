@@ -12,9 +12,11 @@
 
 #include "websocket_client.h"
 #include "utils.h"
+#include "event_guard.h"
 #include "spdlog/spdlog.h"
 
 #include <algorithm>
+#include <utility>
 
 using namespace hv;
 using json = nlohmann::json;
@@ -28,96 +30,88 @@ KWebSocketClient::KWebSocketClient(EventLoopPtr loop)
 KWebSocketClient::~KWebSocketClient() {
 }
 
+void KWebSocketClient::push(Event ev) {
+  std::lock_guard<std::mutex> guard(queue_lock);
+
+  if (queue.size() >= queue_max) {
+    queue.pop_front();
+    if (!queue_dropped) {
+      queue_dropped = true;
+      spdlog::error("websocket queue full at {}, dropping the oldest. the ui "
+		    "thread is not draining", queue_max);
+    }
+  }
+
+  queue.push_back(std::move(ev));
+}
+
+void KWebSocketClient::drain() {
+  // Take everything queued so far and no more. Handlers send requests whose
+  // replies arrive back on this queue, so draining until it is empty would keep
+  // going for as long as the printer keeps answering.
+  std::deque<Event> batch;
+  {
+    std::lock_guard<std::mutex> guard(queue_lock);
+    batch.swap(queue);
+    queue_dropped = false;
+  }
+
+  for (auto &ev : batch) {
+    // Contain exceptions per event, which is what the try around onmessage used
+    // to do. Nothing between us and the handler is LVGL, so unlike KGuard's
+    // usual job this is not about protecting LVGL's state, only about one bad
+    // message not taking the process down with it.
+    KGuard::event("websocket dispatch", [&] {
+      switch (ev.kind) {
+      case Event::Connected:
+	if (on_connected) {
+	  on_connected();
+	}
+	break;
+      case Event::Disconnected:
+	if (on_disconnected) {
+	  on_disconnected();
+	}
+	break;
+      case Event::Message:
+	dispatch(ev.payload);
+	break;
+      }
+    });
+  }
+}
+
 int KWebSocketClient::connect(const char* url,
 			      std::function<void()> connected,
 			      std::function<void()> disconnected) {
   spdlog::debug("websocket connecting");
-  // set callbacks
-  onopen = [this, connected]() {
+
+  on_connected = connected;
+  on_disconnected = disconnected;
+
+  // Every one of these runs on libhv's event loop thread. None of them does
+  // more than queue, because everything downstream of them touches widgets and
+  // LVGL is owned by the main thread. drain() picks them up from there.
+  onopen = [this]() {
     const HttpResponsePtr& resp = getHttpResponse();
     spdlog::debug("onopen {}", resp->body.c_str());
-    connected();
+    push({Event::Connected, json()});
   };
-  onmessage = [this, connected, disconnected](const std::string &msg) {
-    // This runs on libhv's event loop thread, not the LVGL thread. Nothing
-    // above us catches, so an escaping exception here would take the process
-    // down, and json::parse throws on anything malformed.
+
+  onmessage = [this](const std::string &msg) {
+    // Parsing happens here rather than in drain so a malformed message is
+    // dropped where it arrives. json::parse throws on anything malformed and
+    // nothing above us on this thread catches.
     try {
-      json j = json::parse(msg);
-
-      if (j.contains("id")) {
-        uint64_t rpc_id = j["id"].template get<uint64_t>();
-
-        // Take the handlers out under the lock, then release before invoking.
-        // See the note on cb_lock in the header for why this matters.
-        NotifyConsumer *consumer = nullptr;
-        std::function<void(json&)> cb;
-        {
-          std::lock_guard<std::mutex> guard(cb_lock);
-
-          // XXX: get rid of consumers and use function ptrs for callback
-          const auto &entry = consumers.find(rpc_id);
-          if (entry != consumers.end()) {
-            consumer = entry->second;
-            consumers.erase(entry);
-          }
-
-          const auto &cb_entry = callbacks.find(rpc_id);
-          if (cb_entry != callbacks.end()) {
-            cb = cb_entry->second;
-            callbacks.erase(cb_entry);
-          }
-        }
-
-        if (consumer != nullptr) {
-          consumer->consume(j);
-        }
-        if (cb) {
-          cb(j);
-        }
-      }
-
-      if (j.contains("method")) {
-        std::string method = j["method"].template get<std::string>();
-
-        std::vector<NotifyConsumer*> status_consumers;
-        std::vector<std::function<void(json&)>> method_cbs;
-        {
-          std::lock_guard<std::mutex> guard(cb_lock);
-          if ("notify_status_update" == method) {
-            status_consumers = notify_consumers;
-          }
-
-          const auto &entry = method_resp_cbs.find(method);
-          if (entry != method_resp_cbs.end()) {
-            for (const auto &handler_entry : entry->second) {
-              method_cbs.push_back(handler_entry.second);
-            }
-          }
-        }
-
-        for (const auto &entry : status_consumers) {
-          entry->consume(j);
-        }
-
-        if ("notify_klippy_disconnected" == method) {
-          disconnected();
-        } else if ("notify_klippy_ready" == method) {
-          connected();
-        }
-
-        for (const auto &cb : method_cbs) {
-          cb(j);
-        }
-      }
+      push({Event::Message, json::parse(msg)});
     } catch (const std::exception &e) {
       spdlog::error("dropping websocket message, {}", e.what());
     }
   };
 
-  onclose = [disconnected]() {
+  onclose = [this]() {
     spdlog::debug("onclose");
-    disconnected();
+    push({Event::Disconnected, json()});
   };
 
   // ping
@@ -143,6 +137,80 @@ int KWebSocketClient::connect(const char* url,
 
   return open(url, headers);
 };
+
+// Runs on the LVGL thread, from drain(). Everything it reaches is free to touch
+// widgets.
+void KWebSocketClient::dispatch(json &j) {
+  if (j.contains("id")) {
+    uint64_t rpc_id = j["id"].template get<uint64_t>();
+
+    // Take the handlers out under the lock, then release before invoking.
+    // See the note on cb_lock in the header for why this matters.
+    NotifyConsumer *consumer = nullptr;
+    std::function<void(json&)> cb;
+    {
+      std::lock_guard<std::mutex> guard(cb_lock);
+
+      // XXX: get rid of consumers and use function ptrs for callback
+      const auto &entry = consumers.find(rpc_id);
+      if (entry != consumers.end()) {
+        consumer = entry->second;
+        consumers.erase(entry);
+      }
+
+      const auto &cb_entry = callbacks.find(rpc_id);
+      if (cb_entry != callbacks.end()) {
+        cb = cb_entry->second;
+        callbacks.erase(cb_entry);
+      }
+    }
+
+    if (consumer != nullptr) {
+      consumer->consume(j);
+    }
+    if (cb) {
+      cb(j);
+    }
+  }
+
+  if (j.contains("method")) {
+    std::string method = j["method"].template get<std::string>();
+
+    std::vector<NotifyConsumer*> status_consumers;
+    std::vector<std::function<void(json&)>> method_cbs;
+    {
+      std::lock_guard<std::mutex> guard(cb_lock);
+      if ("notify_status_update" == method) {
+        status_consumers = notify_consumers;
+      }
+
+      const auto &entry = method_resp_cbs.find(method);
+      if (entry != method_resp_cbs.end()) {
+        for (const auto &handler_entry : entry->second) {
+          method_cbs.push_back(handler_entry.second);
+        }
+      }
+    }
+
+    for (const auto &entry : status_consumers) {
+      entry->consume(j);
+    }
+
+    if ("notify_klippy_disconnected" == method) {
+      if (on_disconnected) {
+        on_disconnected();
+      }
+    } else if ("notify_klippy_ready" == method) {
+      if (on_connected) {
+        on_connected();
+      }
+    }
+
+    for (const auto &cb : method_cbs) {
+      cb(j);
+    }
+  }
+}
 
 int KWebSocketClient::send_jsonrpc(const std::string &method,
 				   const json &params,

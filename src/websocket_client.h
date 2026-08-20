@@ -8,6 +8,7 @@
 #include <map>
 #include <vector>
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <mutex>
 
@@ -40,12 +41,47 @@ class KWebSocketClient : public hv::WebSocketClient {
   // Install it before connect(), it is read from the libhv thread afterwards.
   void set_error_handler(std::function<void(const std::string&)> cb);
 
+  // Runs every handler for everything that has arrived since the last call.
+  //
+  // Call this from the LVGL thread and nowhere else. It is the whole point of
+  // the queue: libhv's thread receives, this thread dispatches, so no handler
+  // ever touches a widget from the wrong thread. See docs/audit.md C18.
+  void drain();
+
  private:
   // Sends the request and returns, without registering anything. The id is
   // allocated by the caller so that a caller which also registers a handler can
   // do both under one lock, otherwise a concurrent send can consume the id the
   // handler was filed under and the reply is delivered to the wrong caller.
   int send_rpc(const std::string &method, const json *params, uint64_t rpc_id);
+
+  // What arrives on libhv's event loop thread, waiting for the LVGL thread to
+  // pick it up. A connection opening or closing is queued the same way a
+  // message is: onopen runs on the libhv thread too, and it is the path that
+  // built widgets from there and segfaulted one startup in six.
+  struct Event {
+    enum Kind { Message, Connected, Disconnected } kind;
+    json payload;
+  };
+
+  std::mutex queue_lock;
+  std::deque<Event> queue;
+
+  // A wedged UI must not be allowed to grow this without limit on a machine
+  // with 209 MB of RAM. Dropping the oldest keeps the freshest printer state,
+  // at the cost of possibly dropping a reply and leaving its handler in the
+  // callbacks map forever. That is a slow leak against an unbounded one, and
+  // reaching this at all means the UI has been stalled for minutes.
+  static constexpr size_t queue_max = 512;
+  bool queue_dropped = false;
+
+  void push(Event ev);
+  void dispatch(json &j);
+
+  // Held from connect() so drain() can invoke them. Written once, before the
+  // socket opens.
+  std::function<void()> on_connected;
+  std::function<void()> on_disconnected;
 
   // Guards every container below.
   //

@@ -617,12 +617,19 @@ idempotent.
 
 ## Threading model
 
-Three threads, and the boundary is where the bugs are.
+Four threads, and the boundary is where the bugs are.
 
-- **LVGL thread**: the main loop, all widget calls.
-- **libhv event loop thread**: `WebSocketClient::onmessage` in
-  `src/websocket_client.cpp`, which drives every `NotifyConsumer::consume`, which
-  is what updates `State`.
+- **LVGL thread**: the main loop, all widget calls, and every websocket
+  handler. `GuppyScreen::loop` calls `KWebSocketClient::drain` once a pass,
+  which runs `NotifyConsumer::consume` and every reply callback from here.
+- **libhv event loop thread**: `onmessage`, `onopen` and `onclose` in
+  `src/websocket_client.cpp`. They parse and queue, and do nothing else.
+  Nothing on this thread may touch a widget or `State`, which is the rule the
+  queue exists to make keepable. A connection opening counts: `onopen` runs
+  here too, and building widgets from it is what crashed one startup in six.
+- **`WpaEvent`'s own event loop thread**: a second `hv::EventLoopThread`
+  (`src/wpa_event.cpp`), reading wpa_supplicant's control socket. This file
+  claimed there were three threads for a long time; there are four.
 - **Subprocess workers**: two, both detaching a `std::thread` to run
   `update.sh` under `sp::Popen`. `UpdateDialog::show` runs the update itself;
   `UpdateCheck::check_now` runs `--check` on a poll. Neither touches a
@@ -644,7 +651,14 @@ LVGL is not thread safe. Panels take `lv_lock` around widget work.
 handler while holding it.** `InputShaperPanel` calls back into `gcode_script`
 from inside a reply handler, which self deadlocks, and every `consume()` takes
 `lv_lock`, which inverts the lock order against the LVGL thread. Copy the
-handler out, unlock, then call. Every dispatch site in `onmessage` does this.
+handler out, unlock, then call. Every dispatch site in `dispatch()` does this.
+
+`drain()` is called **outside** the main loop's `lv_lock` guard, and has to be.
+Consumers take `lv_lock` themselves and it is not recursive, so draining under
+it deadlocks on the first consumer. It also takes only what is queued at entry
+rather than looping until empty: handlers send requests whose replies come back
+onto the same queue, so draining to empty would run for as long as the printer
+keeps answering.
 
 `State` has its own separate mutex, and per `docs/audit.md` C1 that mutex does
 not actually protect the reference-returning accessors. Read C1 before touching

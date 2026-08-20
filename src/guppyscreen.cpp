@@ -187,6 +187,12 @@ void GuppyScreen::loop() {
 #endif
 
   while (1) {
+    // Everything the websocket received since the last pass, dispatched here so
+    // that handlers run on this thread rather than libhv's. Deliberately
+    // outside the lock below: every consumer takes lv_lock itself and the mutex
+    // is not recursive, so draining under it would deadlock on the first one.
+    ws.drain();
+
     // Exceptions are contained at the event callbacks themselves, see
     // KGuard::event in event_guard.h. Nothing should reach here.
     //
