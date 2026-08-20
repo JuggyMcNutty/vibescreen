@@ -1,6 +1,7 @@
 #include "wpa_event.h"
 #include "wpa_ctrl.h"
 #include "config.h"
+#include "event_guard.h"
 #include "spdlog/spdlog.h"
 
 #include <memory>
@@ -94,10 +95,41 @@ void WpaEvent::init_wpa() {
 }
 
 void WpaEvent::handle_wpa_events(void *data, int len) {
+  // Runs on this class's own event loop thread. Queue and return: the callbacks
+  // build table rows and send further commands down the control socket, and
+  // both of those belong to the LVGL thread.
   std::string event = std::string((char*)data, len);
   spdlog::trace("handling wpa event {}", event);
-  for (const auto &entry : callbacks) {
-    entry.second(event);
+
+  std::lock_guard<std::mutex> guard(queue_lock);
+  if (queue.size() >= queue_max) {
+    queue.pop_front();
+    if (!queue_dropped) {
+      queue_dropped = true;
+      spdlog::error("wpa event queue full at {}, dropping the oldest", queue_max);
+    }
+  }
+
+  queue.push_back(std::move(event));
+}
+
+void WpaEvent::drain() {
+  std::deque<std::string> batch;
+  {
+    std::lock_guard<std::mutex> guard(queue_lock);
+    batch.swap(queue);
+    queue_dropped = false;
+  }
+
+  for (const auto &event : batch) {
+    for (const auto &entry : callbacks) {
+      // Contained per callback. This is reached from an lv_timer, so a throw
+      // would unwind through lv_timer_handler, which is the one thing
+      // KGuard::event exists to prevent.
+      KGuard::event("wpa event dispatch", [&] {
+	entry.second(event);
+      });
+    }
   }
 }
 

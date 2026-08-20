@@ -26,7 +26,7 @@ LV_IMG_DECLARE(print);
 SettingPanel::SettingPanel(KWebSocketClient &c, std::mutex &l, lv_obj_t *parent, SpoolmanPanel &sm)
   : ws(c)
   , cont(lv_obj_create(parent))
-  , wifi_panel(l)
+  , wifi_panel()
   , sysinfo_panel()
   , spoolman_panel(sm)
   , wifi_btn(cont, &network_img, "WIFI", &SettingPanel::_handle_callback, this)

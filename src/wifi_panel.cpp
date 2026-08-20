@@ -64,9 +64,8 @@ static void draw_part_event_cb(lv_event_t * e)
   });
 }
 
-WifiPanel::WifiPanel(std::mutex &l)
-  : lv_lock(l)
-  , cont(lv_obj_create(lv_scr_act()))
+WifiPanel::WifiPanel()
+  : cont(lv_obj_create(lv_scr_act()))
   , spinner(lv_spinner_create(cont, 1000, 60))
   , top_cont(lv_obj_create(cont))
   , wifi_table(lv_table_create(top_cont))
@@ -161,9 +160,19 @@ WifiPanel::WifiPanel(std::mutex &l)
       [this](const std::string &event) { this->handle_wpa_event(event); });
 
   wpa_event.start();
+
+  // wpa events arrive on WpaEvent's own thread and are handled from here, which
+  // is the same shape the websocket queue uses. 200ms because the only thing
+  // waiting on one is a scan result behind a spinner.
+  wpa_drain_timer = lv_timer_create(&WifiPanel::_drain_wpa, 200, this);
 }
 
 WifiPanel::~WifiPanel() {
+  if (wpa_drain_timer != NULL) {
+    lv_timer_del(wpa_drain_timer);
+    wpa_drain_timer = NULL;
+  }
+
   if (cont != NULL) {
     lv_obj_del(cont);
     cont = NULL;
@@ -275,7 +284,6 @@ void WifiPanel::handle_wpa_event(const std::string &event) {
   const char *failure = wpa_failure_reason(event);
   if (failure != NULL) {
     spdlog::debug("wifi attempt failed: {}", event);
-    std::lock_guard<std::mutex> lock(lv_lock);
     lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(password_input, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(wifi_label,
@@ -299,7 +307,6 @@ void WifiPanel::handle_wpa_event(const std::string &event) {
     find_current_network();
     spdlog::trace("cur_network {}", cur_network);
 
-    std::lock_guard<std::mutex> lock(lv_lock);
     while (std::getline(f, line)) {
       if (line.rfind("bss", 0) == 0) {
 	continue;
@@ -346,7 +353,6 @@ void WifiPanel::handle_wpa_event(const std::string &event) {
 	return a.second > b.second;
       });
       
-      std::lock_guard<std::mutex> lock(lv_lock);
 
       uint32_t index = 0;
       for (const auto &wifi : pairs) {

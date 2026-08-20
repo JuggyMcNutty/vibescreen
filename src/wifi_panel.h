@@ -5,7 +5,6 @@
 #include "event_guard.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
-#include <mutex>
 
 #include <map>
 #include <set>
@@ -13,7 +12,7 @@
 
 class WifiPanel {
  public:
-  WifiPanel(std::mutex &l);
+  WifiPanel();
   
   ~WifiPanel();
 
@@ -56,8 +55,14 @@ class WifiPanel {
     });
   };
 
+  // Pulls whatever wpa_supplicant has said onto this thread. KGuard::event is
+  // inside WpaEvent::drain, per callback, rather than here.
+  static void _drain_wpa(lv_timer_t *timer) {
+    WifiPanel *panel = (WifiPanel*)timer->user_data;
+    panel->wpa_event.drain();
+  };
+
  private:
-  std::mutex &lv_lock;
   WpaEvent wpa_event;
   lv_obj_t *cont;
   lv_obj_t *spinner;
@@ -74,6 +79,7 @@ class WifiPanel {
   std::string cur_network;
   std::map<std::string, std::string> list_networks;
   std::map<std::string, int> wifi_name_db;
+  lv_timer_t *wpa_drain_timer;
   
 };
 

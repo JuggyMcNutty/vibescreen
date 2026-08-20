@@ -355,7 +355,7 @@ queue drained by the LVGL loop, so that no websocket callback ever touches a
 widget. Until then, every new websocket-thread path needs `lv_lock` and an
 audit of the ones already there.
 
-### C19. `WpaEvent` shares one control socket across two threads (open)
+### C19. `WpaEvent` shares one control socket across two threads (fixed)
 
 Found while fixing the wifi panel, and left alone deliberately.
 
@@ -371,9 +371,27 @@ datagram socket, so two overlapping calls can each take the other's answer. The
 window is small, which is presumably why nobody has noticed: a scan result
 arriving in the same moment as a button press.
 
-This is the same disease as C1 and C18 and wants the same cure, so it is not
-worth a local mutex that would have to come out again. Noted here rather than
-patched.
+Same cure as C1 and C18, and it got it. `handle_wpa_events` queues the event
+string and `WpaEvent::drain` runs the callbacks, called from an `lv_timer`
+owned by `WifiPanel`. `send_command` then has one caller thread and the
+overlapping requests cannot happen.
+
+The `callbacks` map went with it: it was written from the LVGL thread at
+registration and read from the wpa thread on every event, which was a second
+unguarded container nobody had noticed.
+
+The part worth remembering is what draining from an `lv_timer` requires.
+`lv_timer_handler` is called with `lv_lock` already held by the main loop, so
+the three `lv_lock` acquisitions inside `WifiPanel::handle_wpa_event` had to
+go: taking a non-recursive mutex the caller already holds is a deadlock, and
+the panel would have hung on its first scan result rather than failed loudly.
+`WifiPanel` no longer takes a `std::mutex&` at all. This is the same reason
+`UpdateDialog`'s worker does not take `lv_lock`, noted there since it was
+written.
+
+Driven against `tools/fake_wpa_supplicant.py`: the network list populates from
+a scan result, which only reaches the table through the queue, and selecting a
+network still sends `LIST_NETWORKS` and brings up the password prompt.
 
 ### C20. Reading a missing config key writes it back as null (fixed)
 
@@ -464,10 +482,11 @@ under and the reply would go to the wrong caller. And
 `unregister_notify_update` called `erase(remove_if(...))` with no end iterator,
 which is undefined when the consumer is not in the list.
 
-**Still open, and deliberately not fixed here.** Handlers are invoked after the
-lock is released, which is required to avoid deadlock, so a panel destroyed on
-the LVGL thread between the copy and the call is a use-after-free. That was
-already the case before, and the honest fix is architectural, see below.
+**The lifetime hazard is closed too**, by the same queue as C1 and C18.
+Handlers are still invoked after the lock is released, but the thread that
+copies them out and the thread that could destroy a panel are now the same one,
+so there is no window between the copy and the call for a panel to disappear
+in.
 
 There is a reproducible instance of it on the simulator's exit path, found
 2026-08-20. Closing the window or sending `SIGTERM` prints
@@ -817,18 +836,14 @@ have to be undone to get there.
 
 ## Suggested order
 
-Done: C2, C3, C4, C6, C8, C9, C10, C12 to C17, C20, B1 to B6, M1, M3, M4, M5,
+Done: C1, C2, C3, C4, C6, C8, C9, C10, C12 to C20, B1 to B6, M1, M3, M4, M5,
 and the `KUtils` parse helpers.
 
 Remaining, roughly in order:
 
-1. C1, C18, C19 and the C9 lifetime hazard, as the message-queue change above.
-   The largest piece of work left and the one that retires the most. C18 is a
-   crash on one startup in six, which is why it comes before the rest rather
-   than last.
-2. C11, the panel destructor double-delete. Latent until something tears a
+1. C11, the panel destructor double-delete. Latent until something tears a
    panel down, and a mechanical sweep once someone wants multi-printer
    switching to actually work.
-3. C7, the non-blocking heat change. Behavioural, wants its own discussion.
+2. C7, the non-blocking heat change. Behavioural, wants its own discussion.
 
 M2, the four leaked singletons, is harmless and stays open.
