@@ -131,6 +131,47 @@ This is the address to point the simulator at:
 PRINTER_HOST=192.168.1.202 scripts/build.sh sim
 ```
 
+## This machine never reports a layer number
+
+Read 2026-08-20 from `printer/objects/query`, idle after a finished print.
+`print_stats` carries the `info` key and nothing in it:
+
+```json
+"info": { "total_layer": null, "current_layer": null }
+```
+
+Klipper only fills those in when the gcode calls `SET_PRINT_STATS_INFO`, which
+is the slicer's job. The files on this machine do not. Four of them were
+sampled over the wire, OrcaSlicer 2.3.0 and 2.4.2, sliced between June 2025 and
+August 2026: no occurrence in any start gcode, and none in 200 KB taken from
+the middle of an 8 MB print, where a per-layer call would have to appear.
+
+So `PrintStatusPanel`'s reported-layer path is dead on our target hardware and
+the counter runs entirely on its estimate. That needs `layer_count`, or
+`first_layer_height` with `layer_height` and `object_height`, out of the file
+metadata, plus `gcode_move.gcode_position` for Z. Moonraker does extract them:
+for the print above, `layer_count` was 123, heights 0.2 and 0.2, object height
+24.6.
+
+Two things follow from this.
+
+The key being present with null members is not the same as the key being
+absent, and both have to reach the estimate. `max_layer` and `current_layer`
+test the inner values rather than the object, so they do.
+
+And the simulator's fake reports real layer numbers by default, so out of the
+box it exercises the one path this printer never takes. `--layer-info none` is
+the printer's shape. Use it before believing anything about the layer counter.
+
+While querying that print, `virtual_sdcard.progress` read exactly `1.0`, with
+`file_position` and `file_size` both 8270417. Upstream #103, the progress bar
+stuck at 99, comes from a printer where progress stops short of 1.0. This one
+does not, so the `state == "complete"` branch that forces 100 is belt and
+braces here rather than the thing that fixes it.
+
+Creality's fork also adds `layer` and `layer_count` to `virtual_sdcard`. Both
+read 0 after that 123 layer print, so nothing fills those either.
+
 ## Raw excerpts
 
 ### CPU
