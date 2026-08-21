@@ -318,6 +318,15 @@ grumpyscreen  pellcorp/grumpyscreen     a live fork, reference only
 `upstream` and `grumpyscreen` both have their push URL set to a bogus string so
 a stray `git push` to either fails loudly instead of trying.
 
+**Always pass `--repo JuggyMcNutty/vibescreen` to `gh`.** With more than one
+GitHub remote it picks one on its own, and here it picks `upstream`. It does not
+say so. `gh run list` then reports the abandoned project's runs, the newest from
+months ago, and `gh release list` reports its 2024 beta tags, which reads
+exactly like our CI having never run and our releases not existing. Measured
+2026-08-21, after drawing that conclusion and being wrong: the run was there and
+green the whole time. `gh run view <id>` is the one that gives the game away,
+because the 404 it returns names the repository it went looking in.
+
 `grumpyscreen` is configured with `tagOpt = --no-tags`. Do not undo that. One of
 their releases is tagged literally `main`, and fetching it creates a
 `refs/tags/main` that collides with our branch, after which every `git push
