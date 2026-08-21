@@ -239,6 +239,56 @@ jobs:
         with:
           path: dist
 
+      # Full history and tags, both needed to work out what has happened since
+      # the last release.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # The notes list every commit since the previous release rather than the
+      # ones in this push. Those are not the same set: a documentation-only
+      # push builds without publishing, so keying off the push would drop its
+      # commits from every release's notes, and they would appear nowhere.
+      - id: changes
+        run: |
+          set -euo pipefail
+
+          # Only our own release tags. The upstream history this repo carries
+          # brings 0.0.x-beta tags with it, and describing against one of those
+          # would produce a changelog going back to 2024.
+          prev=$(git describe --tags --abbrev=0 \
+                   --match '20[0-9][0-9].[0-9][0-9].[0-9][0-9]-*' \
+                   HEAD 2>/dev/null || true)
+
+          delim="CHANGES_$(openssl rand -hex 8)"
+          repo="${{ github.repository }}"
+          limit=50
+
+          if [ -z "$prev" ]; then
+            echo "no previous release tag, listing nothing"
+            {
+              echo "log<<$delim"
+              echo "First release from this workflow."
+              echo "$delim"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "changelog range: $prev..HEAD"
+          fmt="- %s ([\`%h\`](https://github.com/$repo/commit/%H))"
+          total=$(git rev-list --no-merges --count "$prev..HEAD")
+
+          {
+            echo "log<<$delim"
+            git log --no-merges --reverse --format="$fmt" -n "$limit" "$prev..HEAD"
+            if [ "$total" -gt "$limit" ]; then
+              echo
+              echo "$((total - limit)) earlier commits are not listed. See the" \
+                   "[full comparison](https://github.com/$repo/compare/$prev...${{ needs.version.outputs.version }})."
+            fi
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.version.outputs.version }}
@@ -279,6 +329,10 @@ jobs:
             The original guppyscreen's updater points at the upstream project,
             so running it will not pick this up. Use the installer to switch
             across; it keeps your existing `guppyconfig.json`.
+
+            ### What changed
+
+            ${{ steps.changes.outputs.log }}
 
 permissions:
   contents: write

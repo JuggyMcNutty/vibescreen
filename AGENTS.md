@@ -111,7 +111,20 @@ populated release.
 Release notes are generated in the workflow. Keep them practical: which asset
 suits which printer, and how to install. Anyone arriving from the original
 guppyscreen needs the installer rather than `update.sh`, because that project's
-updater points at upstream and will not see our builds.
+updater points at upstream and will not see our builds. That is why the commit
+list goes at the bottom rather than the top.
+
+**The commit list is measured from the previous release tag, not from the
+push.** Those are different sets, and the difference matters: a
+documentation-only push builds without publishing, so anything keyed off
+`github.event.before` would drop its commits from every release's notes and
+they would appear in none of them. `git describe` finds the previous tag, and
+it is restricted to `20[0-9][0-9].*` because the upstream history this repo
+carries brings `0.0.x-beta` tags with it and describing against one of those
+would produce a changelog going back to 2024.
+
+Long ranges are capped at 50 commits, newest kept, with a compare link for the
+rest.
 
 CI asserts the mips binary is statically linked, which is the property that
 decides whether it runs at all, since the glibc version moves between Creality
