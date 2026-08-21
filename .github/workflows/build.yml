@@ -235,15 +235,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/download-artifact@v6
-        with:
-          path: dist
-
+      # Before download-artifact, not after. actions/checkout cleans the
+      # workspace, so putting it second deletes the artifacts that have just
+      # been downloaded and the upload then matches no files.
+      #
       # Full history and tags, both needed to work out what has happened since
       # the last release.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
 
       # The notes list every commit since the previous release rather than the
       # ones in this push. Those are not the same set: a documentation-only
