@@ -25,7 +25,9 @@ Guppy Screen uses C++17, so gcc/g++ 7.2 or newer is required.
 
 ### Environment variables
 
-`CROSS_COMPILE` - toolchain prefix, `mipsel-linux-` for the K1 family
+`CROSS_COMPILE` - toolchain prefix, `mipsel-linux-` for the K1 family and
+`aarch64-none-linux-gnu-` for the arm target. Note the `none`: that is Arm's own
+toolchain, not the `aarch64-linux-gnu-` a distribution package installs
 `GUPPY_THEME` - `material` (default) or `zbolt`
 `GUPPY_ROTATE` - set for the K1/Max, whose panel is portrait
 `GUPPY_SMALL_SCREEN` - set for panels under 800px on the long edge
@@ -49,10 +51,14 @@ Arch and derivatives (`sdl2` is `sdl2-compat` on current Arch):
 ### Building
 
     git clone --recursive <your fork> && cd vibescreen
-    scripts/setup-toolchain.sh      # downloads the cross toolchain, once
+    scripts/setup-toolchain.sh      # downloads both cross toolchains, once
     scripts/build.sh mips           # K1 / K1 Max
     scripts/build.sh arm            # aarch64, for the Debian package
     scripts/build.sh sim            # x86_64 SDL build for this machine
+
+`setup-toolchain.sh` takes `mips` or `arm` if you only want one of them. Neither
+needs root and neither uses the host's packages, so the compiler that built a
+binary does not depend on which machine built it.
 
 `scripts/build.sh` applies the patches in `patches/`, builds the vendored
 libraries if they are missing, rebuilds them when you switch target, and picks

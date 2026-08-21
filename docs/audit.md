@@ -682,6 +682,35 @@ only source change needed to build the tree with it.
 
 ---
 
+### B7. The arm release ships a systemd unit pointing at a missing binary (open)
+
+Found on 2026-08-20 while building the arm target for the first time on this
+machine.
+
+`debian/disable_blinking_cursor.service` runs
+`/home/biqu/guppyscreen/debian/kd_graphic_mode`, and `release.sh` copies that
+binary into the `debian/` directory of every asset. But `scripts/build.sh` only
+builds it for mips:
+
+```sh
+if [ "$target" = "mips" ]; then
+    make kd_graphic_mode
+fi
+```
+
+So the arm build never produces it, `release.sh`'s `cp` prints
+`cannot stat './build/bin/kd_graphic_mode'`, and nothing checks that copy, so
+the asset is published anyway. Every `guppyscreen-arm.tar.gz` we have released
+carries a unit file that cannot start.
+
+It is a five line program doing one `KDSETMODE` ioctl, nothing mips specific
+about it. The fix is to build it for arm as well and to make `release.sh` fail
+on a missing file rather than print and continue. Both are packaging changes
+rather than toolchain ones, which is why they are here instead of in the commit
+that moved the arm toolchain.
+
+---
+
 ## Maintainability
 
 ### M1. Commented-out code left behind (fixed)

@@ -40,7 +40,7 @@ values.
 Three targets, all through one script.
 
 ```sh
-scripts/setup-toolchain.sh          # once, downloads the cross toolchain
+scripts/setup-toolchain.sh          # once, downloads both cross toolchains
 scripts/build.sh mips               # K1 / K1 Max binary
 scripts/build.sh arm                # aarch64, Raspberry Pi and BTT Pad
 scripts/build.sh sim                # x86_64 SDL build that runs on your desktop
@@ -119,8 +119,9 @@ firmware releases.
 
 **Never call `apt-get` directly in the workflow.** Use
 `scripts/ci-apt-install.sh`, and only for something the runner image genuinely
-lacks. The image already ships cmake, gcc, g++ and make, so only the arm build
-(`gcc-aarch64-linux-gnu`) and the simulator (`libsdl2-dev`) need apt at all.
+lacks. The image already ships cmake, gcc, g++ and make, and both cross targets
+download their own toolchain, so the simulator's `libsdl2-dev` is the only thing
+left that needs apt at all.
 
 The runner's `/etc/apt/apt-mirrors.txt` lists `azure.archive.ubuntu.com` first
 and only fails over to the canonical archives on a hard error, never on a slow
@@ -174,6 +175,24 @@ is worth knowing before trusting anything else inherited from upstream.
 
 We use Bootlin `mips32el--musl--stable-2025.08-1`: gcc 14.3.0, binutils 2.43.1,
 musl 1.2.5. Static, so the K1's glibc version is irrelevant to us.
+
+The arm target is Arm's own `arm-gnu-toolchain-14.3.rel1-x86_64-aarch64-none-linux-gnu`,
+gcc 14.3.1, downloaded and pinned the same way and verified against the sha256
+Arm publishes beside it. Two things about it are worth knowing.
+
+**The triple is `aarch64-none-linux-gnu-`, not `aarch64-linux-gnu-`.** That is
+what a distribution package would give you, and it is not what `CROSS_COMPILE`
+is set to here. Anything that hardcodes the old prefix will silently pick up the
+host's compiler if it has one, or fail if it does not.
+
+**It is downloaded rather than installed.** This target used to be whatever
+`aarch64-linux-gnu-gcc` happened to be on the machine, which meant the compiler
+that built a published release depended on the runner image. gcc 14.3 was chosen
+to match the mips toolchain's 14.3.0, so a warning or error found on one target
+applies to the other. 15.2.rel1 exists and was skipped on that ground alone.
+
+Both are static, so neither toolchain's glibc constrains its target, and CI
+asserts that for both.
 
 Known-good fallback if gcc 14 ever becomes more trouble than it is worth:
 `mips32el--musl--stable-2024.02-1` (gcc 12.3.0), which is what upstream CI and

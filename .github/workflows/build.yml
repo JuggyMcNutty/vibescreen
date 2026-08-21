@@ -18,8 +18,9 @@ name: build
 # fires. That wedged nine jobs for hours in August 2026. scripts/ci-apt-install.sh
 # bounds each attempt on wall clock time and drops the Azure mirror before
 # retrying, and every job carries a timeout-minutes so a stall fails the run
-# instead of sitting until the 360 minute default. Only arm and the simulator
-# need apt at all; everything else the builds want is on the runner image.
+# instead of sitting until the 360 minute default. Only the simulator needs apt
+# at all now, for libsdl2-dev: both cross targets download a pinned toolchain
+# rather than taking one from the runner image.
 #
 # A push to main that changes source and builds cleanly publishes its own
 # release, tagged <date>-<sha>, so the release list is a build history rather
@@ -140,26 +141,22 @@ jobs:
         with:
           submodules: recursive
 
-      # Only the arm build needs anything from apt. The runner image already
-      # ships cmake, gcc, g++ and make, so the mips builds installing
-      # build-essential and cmake was 13.6 MB of download to put an older cmake
-      # over a newer one, and three more chances to wedge on a bad mirror.
-      - name: install build dependencies
-        if: matrix.target == 'arm'
-        run: |
-          scripts/ci-apt-install.sh gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      # No apt here at all any more. Both cross targets download a pinned
+      # toolchain, so the compiler that builds a release does not depend on
+      # what the runner image happens to ship, and this job has one less chance
+      # to wedge on a bad mirror. Only the simulator job still needs apt, for
+      # libsdl2-dev.
 
       # setup-toolchain.sh caches the archive here, so a hit skips the download.
-      - name: cache mips toolchain
-        if: matrix.target == 'mips'
+      # Keyed per target, since the two jobs fetch different archives.
+      - name: cache toolchain
         uses: actions/cache@v5
         with:
           path: ~/.cache/guppyscreen
-          key: mips32el-musl-stable-2025.08-1
+          key: toolchain-${{ matrix.target }}-mips-2025.08-1-arm-14.3.rel1
 
-      - name: fetch mips toolchain
-        if: matrix.target == 'mips'
-        run: scripts/setup-toolchain.sh
+      - name: fetch toolchain
+        run: scripts/setup-toolchain.sh ${{ matrix.target }}
 
       - name: build
         run: |
@@ -169,13 +166,22 @@ jobs:
       # Guards the property that actually matters on the printer: the binary has
       # to be static, because the glibc version moves between Creality firmware
       # releases. A dynamically linked build would install and then fail to run.
-      - name: check the mips binary is static
-        if: matrix.target == 'mips'
+      #
+      # Checked for arm too. Its glibc argument is weaker, since that target is
+      # Debian rather than a vendor firmware, but the Makefile links both the
+      # same way and nothing was asserting it, so a toolchain change could turn
+      # it dynamic without anyone noticing.
+      - name: check the binary is static
         run: |
-          readelf=toolchains/mips32el--musl--stable-2025.08-1/bin/mipsel-linux-readelf
+          if [ "${{ matrix.target }}" = "mips" ]; then
+            readelf=toolchains/mips32el--musl--stable-2025.08-1/bin/mipsel-linux-readelf
+          else
+            arm=arm-gnu-toolchain-14.3.rel1-x86_64-aarch64-none-linux-gnu
+            readelf=toolchains/$arm/bin/aarch64-none-linux-gnu-readelf
+          fi
           $readelf -h build/bin/guppyscreen | grep -E 'Class:|Machine:|Flags:'
           if $readelf -lW build/bin/guppyscreen | grep -qE '^\s+(INTERP|DYNAMIC)'; then
-            echo "::error::mips binary is dynamically linked, it will not run on the printer"
+            echo "::error::${{ matrix.target }} binary is dynamically linked"
             exit 1
           fi
 
@@ -191,7 +197,9 @@ jobs:
             export PATH="$PWD/toolchains/mips32el--musl--stable-2025.08-1/bin:$PATH"
             export CROSS_COMPILE=mipsel-linux-
           else
-            export CROSS_COMPILE=aarch64-linux-gnu-
+            arm=arm-gnu-toolchain-14.3.rel1-x86_64-aarch64-none-linux-gnu
+            export PATH="$PWD/toolchains/$arm/bin:$PATH"
+            export CROSS_COMPILE=aarch64-none-linux-gnu-
           fi
           chmod +x ./release.sh
           ./release.sh ${{ matrix.asset }}

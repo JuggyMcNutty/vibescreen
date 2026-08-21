@@ -21,7 +21,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-TOOLCHAIN="$REPO_ROOT/toolchains/mips32el--musl--stable-2025.08-1"
+MIPS_TOOLCHAIN="$REPO_ROOT/toolchains/mips32el--musl--stable-2025.08-1"
+ARM_TOOLCHAIN="$REPO_ROOT/toolchains/arm-gnu-toolchain-14.3.rel1-x86_64-aarch64-none-linux-gnu"
 
 target="${1:-mips}"
 shift || true
@@ -56,24 +57,26 @@ stamp_target="$target-$theme"
 
 case "$target" in
     mips)
-        if [ ! -x "$TOOLCHAIN/bin/mipsel-linux-gcc" ]; then
-            echo "Toolchain missing. Run scripts/setup-toolchain.sh first." >&2
+        if [ ! -x "$MIPS_TOOLCHAIN/bin/mipsel-linux-gcc" ]; then
+            echo "Toolchain missing. Run scripts/setup-toolchain.sh mips first." >&2
             exit 1
         fi
-        export PATH="$TOOLCHAIN/bin:$PATH"
+        export PATH="$MIPS_TOOLCHAIN/bin:$PATH"
         export CROSS_COMPILE=mipsel-linux-
         [ "$small" = true ] || export GUPPY_ROTATE=true
         ;;
     arm)
-        # Expected on PATH rather than downloaded, since distributions package
-        # this one. Debian and Ubuntu: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-        if ! command -v aarch64-linux-gnu-gcc >/dev/null; then
-            echo "aarch64-linux-gnu-gcc not on PATH." >&2
-            echo "Debian/Ubuntu: apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu" >&2
-            echo "Arch:          pacman -S aarch64-linux-gnu-gcc" >&2
+        # Arm's own toolchain, downloaded and pinned like the mips one. This
+        # used to be whatever aarch64-linux-gnu-gcc the host had installed,
+        # which made the compiler that built a release depend on the machine
+        # that built it. Note the triple: aarch64-none-linux-gnu, not the
+        # aarch64-linux-gnu a distribution package gives you.
+        if [ ! -x "$ARM_TOOLCHAIN/bin/aarch64-none-linux-gnu-gcc" ]; then
+            echo "Toolchain missing. Run scripts/setup-toolchain.sh arm first." >&2
             exit 1
         fi
-        export CROSS_COMPILE=aarch64-linux-gnu-
+        export PATH="$ARM_TOOLCHAIN/bin:$PATH"
+        export CROSS_COMPILE=aarch64-none-linux-gnu-
         export EVDEV_CALIBRATE=true
         ;;
     sim)
