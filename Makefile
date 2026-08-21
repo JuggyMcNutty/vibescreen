@@ -146,8 +146,13 @@ $(BUILD_OBJ_DIR)/kd_graphic_mode.o: src/kd_graphic_mode.cpp
 	@$(COMPILE_CC)  $(CFLAGS) -c $< -o $@
 	@echo "CC $<"
 
+# $(LINK_MODE), so this is static like the main binary. It was linked with no
+# flags at all, and built against Arm's toolchain that produced a binary
+# demanding GLIBC_2.34, which will not start on a Debian 11 arm64 image. Only
+# $(LINK_MODE) and not $(LDFLAGS): this program needs libhv and spdlog about as
+# much as it needs a websocket.
 kd_graphic_mode: $(BUILD_OBJ_DIR)/kd_graphic_mode.o
-	$(CC) -o $(BUILD_BIN_DIR)/kd_graphic_mode $(BUILD_OBJ_DIR)/kd_graphic_mode.o
+	$(CC) $(LINK_MODE) -o $(BUILD_BIN_DIR)/kd_graphic_mode $(BUILD_OBJ_DIR)/kd_graphic_mode.o
 
 default: $(TARGET)
 	@mkdir -p $(dir $(BUILD_BIN_DIR)/)

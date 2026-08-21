@@ -682,7 +682,7 @@ only source change needed to build the tree with it.
 
 ---
 
-### B7. The arm release ships a systemd unit pointing at a missing binary (open)
+### B7. The arm release shipped a systemd unit pointing at a missing binary (fixed)
 
 Found on 2026-08-20 while building the arm target for the first time on this
 machine.
@@ -704,10 +704,30 @@ the asset is published anyway. Every `guppyscreen-arm.tar.gz` we have released
 carries a unit file that cannot start.
 
 It is a five line program doing one `KDSETMODE` ioctl, nothing mips specific
-about it. The fix is to build it for arm as well and to make `release.sh` fail
-on a missing file rather than print and continue. Both are packaging changes
-rather than toolchain ones, which is why they are here instead of in the commit
-that moved the arm toolchain.
+about it. It is built for every cross target now, so each asset's copy matches
+its own architecture, and `release.sh` runs under `set -euo pipefail` so a
+missing file fails the packaging instead of printing and publishing anyway.
+
+Two more things fell out of fixing it, and the unit would still not have worked
+without either.
+
+**The unit hardcoded one user's home.** `ExecStart` was
+`/home/biqu/guppyscreen/debian/kd_graphic_mode`, `biqu` being the BTT Pad's
+default account, while the `guppyscreen.service` beside it uses `<USER>` and
+gets templated by `install_services`. So even with the binary present the unit
+pointed at nothing on any machine with a different account. It takes `<USER>`
+now and `installer-deb.sh` fills it in.
+
+**It was linked with no flags at all**, so unlike everything else we ship it
+came out dynamic. Built against Arm's toolchain that gives a binary demanding
+`GLIBC_2.34`, which does not exist on a Debian 11 arm64 image, so it would have
+failed to start on exactly the older machines most likely to be running this.
+The rule passes `$(LINK_MODE)` now, and not `$(LDFLAGS)`, since this program
+needs libhv and spdlog about as much as it needs a websocket.
+
+Existing Debian installs keep the broken unit until `installer-deb.sh` is run
+again. `update.sh` deliberately no-ops on a Debian install, so it will not
+repair this on its own.
 
 ---
 

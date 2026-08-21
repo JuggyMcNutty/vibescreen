@@ -3,7 +3,7 @@ Description=NoBlinkingCursor
 ConditionPathExists=/dev/tty0
 
 [Service]
-ExecStart=/home/biqu/guppyscreen/debian/kd_graphic_mode
+ExecStart=/home/<USER>/guppyscreen/debian/kd_graphic_mode
 Type=idle
 Restart=no
 

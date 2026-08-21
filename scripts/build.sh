@@ -141,7 +141,12 @@ echo "$stamp_target" > "$FLAG_STAMP"
 
 make -j"$(nproc)"
 
-if [ "$target" = "mips" ]; then
+# Ships in the debian/ directory of every asset and is what
+# disable_blinking_cursor.service runs. It used to be built for mips only,
+# which is the one target that has no use for it, so the arm asset carried a
+# unit file pointing at a binary that was never in the tarball. Built for both
+# now, so each asset's copy matches its own architecture.
+if [ "$target" != "sim" ]; then
     make kd_graphic_mode
 fi
 

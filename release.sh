@@ -1,4 +1,10 @@
 #!/bin/bash
+#
+# Fail on the first error. Every cp below is copying something the build was
+# supposed to have produced, and an unchecked one is how every arm release
+# shipped a systemd unit pointing at a kd_graphic_mode that was not in the
+# tarball. See docs/audit.md B7.
+set -euo pipefail
 
 RELEASES_DIR=./releases/guppyscreen
 rm -rf $RELEASES_DIR
