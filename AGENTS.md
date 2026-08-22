@@ -283,6 +283,45 @@ pass.
 `lv_drivers` stays where it is. Its last substantive change was years ago and
 its current tip is a README edit.
 
+### Which libhv we are on
+
+Pinned to **v1.3.4**, dated 2025-10-25. This is a release tag, unlike LVGL,
+because libhv tags them roughly yearly and the branch between them is where the
+churn is.
+
+We were on `a1d8185` until 2026-08-21, which was `v1.3.1-54-g a1d8185`: a
+mid-branch commit inherited from upstream guppyscreen, dated 2023-09-26, never
+chosen by anyone. Moving 118 commits to v1.3.4 was worth it for what is in
+between:
+
+- `8e380f0` and `f2b969f` fix CVE-2023-26146, 26147 and 26148.
+- `41f679e` fixes HTTP header parsing failing when the response is split across
+  TCP segments. That is a client bug and we are a client.
+- `23ff591` fixes a race after `hio_detach`, `b350201` guards a repeated
+  `EventLoopThread::start`, and `a5b3744` and `bb2fae9` harden multithreading.
+  We run two `hv::EventLoopThread`s, see the threading section.
+- `a622307` fixes a reverse proxy buffer overflow and `e1015fb` a crash when
+  the log buffer's max size is exceeded.
+
+The headers we actually include barely moved. `http/client/WebSocketClient.h`
+and `http/client/requests.h` are byte-identical across the bump. What did move
+is the bundled `cpputil/json.hpp`, **nlohmann/json 3.9.1 to 3.12.0**, which nine
+of our headers pull in via `hv/json.hpp`. Two things about that were checked
+rather than assumed, and both are fine:
+
+- `_json_pointer` moved into `nlohmann::literals::json_literals` in 3.11, but
+  `JSON_USE_GLOBAL_UDLS` defaults to `1`, which re-exports it at global scope.
+  Our `"/printer_state/..."_json_pointer` sites are unaffected.
+- `json_pointer` became templated on the string type in 3.11. Every declaration
+  we have spells it `json::json_pointer` (`src/state.h:28`, `src/config.h:33`),
+  which resolves either way, and nothing reopens `namespace nlohmann`.
+
+It cost about 155 KB in the simulator binary. The stripped mips binary is
+6.4 MB either way.
+
+`master` is a further 42 commits ahead with no release behind it. Prefer the
+tag until there is a specific fix worth chasing.
+
 ### `lv_conf.h` is two configs, not one
 
 `lv_conf.h:14` opens `#ifndef SIMULATOR`, `:715` is the `#else`, `:1353` the
