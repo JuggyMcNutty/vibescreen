@@ -11,6 +11,7 @@
 #include "spdlog/spdlog.h"
 #include "state.h"
 #include "theme.h"
+#include "tls.h"
 
 #include <time.h>
 
@@ -87,6 +88,11 @@ GuppyScreen *GuppyScreen::init(std::function<void(lv_color_t, lv_color_t)> hal_i
 #endif  // GUPPYSCREEN_VERSION
 
   spdlog::info("DPI: {}", LV_DPI_DEF);
+
+  // Before anything creates a libhv client. Nothing here builds a wss:// or
+  // https:// url today, so on a printer with no trust store this only logs.
+  KTls::init();
+
   /*LittlevGL init*/
   lv_init();
 

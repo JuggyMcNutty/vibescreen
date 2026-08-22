@@ -731,6 +731,47 @@ repair this on its own.
 
 ---
 
+### B8. libhv's mbedTLS backend cannot verify a certificate (upstream, patched)
+
+Found on 2026-08-21 while compiling mbedTLS in. Carried as
+`patches/0004-libhv-mbedtls-ca.patch`, so it is ours to re-check on every libhv
+bump.
+
+`libhv/ssl/mbedtls.c` takes an `hssl_ctx_opt_t`, which has `ca_file` and
+`ca_path` fields, and **never reads either of them**. It reaches
+`mbedtls_ssl_conf_ca_chain` only inside `if (check)`, which is set when a
+`key_file` was supplied, i.e. when configuring a server's own certificate. A
+client therefore has no trust anchors at all, and both of the settings it can
+end up with are wrong:
+
+- `verify_peer = 0`, which is what `hssl_ctx_new(NULL)` produces, sets
+  `MBEDTLS_SSL_VERIFY_NONE`. The connection is encrypted and completely
+  unauthenticated. That is worse than plain `ws://`, because it looks secure.
+- `verify_peer = 1` sets `MBEDTLS_SSL_VERIFY_REQUIRED` against an empty chain,
+  so every handshake fails.
+
+The openssl backend sitting next to it in the same directory handles both
+fields, and falls back to `SSL_CTX_set_default_verify_paths`. The mbedTLS one
+was simply never finished. Still true at v1.3.4 and on `master`.
+
+The patch adds a second `mbedtls_x509_crt` to the context for trust anchors,
+parses `ca_file` and `ca_path` into it, and installs it with
+`mbedtls_ssl_conf_ca_chain`. Two details in it are deliberate:
+
+- It tests the parse result for `< 0`, not `!= 0`. `mbedtls_x509_crt_parse_file`
+  returns the **number of certificates it could not parse**, so a bundle with
+  one certificate this build dislikes would otherwise be rejected whole.
+- It leaves `mbedtls_ssl_conf_ca_chain(&ctx->conf, ctx->cert.next, NULL)` in the
+  server branch alone. That looks like an off-by-one but is mbedTLS's own
+  server-example idiom: `crt_file` holds the leaf followed by its issuers, so
+  the anchors really are everything after the leaf.
+
+Failing closed then comes for free. `src/tls.cpp` always sets `verify_peer`,
+including when it found no trust store, because leaving `g_ssl_ctx` unset would
+send libhv down its `hssl_ctx_new(NULL)` fallback and back to verifying nothing.
+
+---
+
 ## Maintainability
 
 ### M1. Commented-out code left behind (fixed)

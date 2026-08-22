@@ -20,6 +20,7 @@ PATCHES=(
     "lv_drivers:patches/0001-lv_driver_fb_ioctls.patch"
     "spdlog:patches/0002-spdlog_fmt_initializer_list.patch"
     "lvgl:patches/0003-lvgl-dpi-text-scale.patch"
+    "libhv:patches/0004-libhv-mbedtls-ca.patch"
 )
 
 failed=0

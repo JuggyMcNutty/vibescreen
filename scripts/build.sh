@@ -93,6 +93,25 @@ if [ "$small" = true ]; then
     stamp_target="$stamp_target-small"
 fi
 
+if [ ! -f mbedtls/library/Makefile ]; then
+    echo "mbedtls submodule is not checked out." >&2
+    echo "Run: git submodule update --init --recursive" >&2
+    exit 1
+fi
+
+# mbedtls carries a submodule of its own, and a plain "git submodule update
+# --init" does not fetch a nested one. It is needed even though the 3.6 branch
+# commits every file in library/Makefile's GENERATED_FILES: those files have
+# per-file rules naming ../framework/scripts/*.py as a prerequisite, and make
+# fails on a prerequisite it cannot build regardless of whether the target is
+# already up to date. Without this the build dies partway through compiling
+# mbedtls, with a message that does not mention submodules.
+if [ ! -f mbedtls/framework/exported.make ]; then
+    echo "mbedtls/framework is not checked out." >&2
+    echo "Run: git submodule update --init --recursive" >&2
+    exit 1
+fi
+
 # The patches are not committed into the submodules, so re-assert them on every
 # build. Cheap, and skips anything already applied.
 ./scripts/apply-patches.sh
@@ -111,12 +130,19 @@ FLAG_STAMP="$REPO_ROOT/.build-flags"
 prev_arch="$(cat "$ARCH_STAMP" 2>/dev/null || echo none)"
 prev_flags="$(cat "$FLAG_STAMP" 2>/dev/null || echo none)"
 
-if [ "$prev_arch" != "$target" ] || [ "$do_clean" = true ]; then
-    if [ "$prev_arch" != "$target" ] && [ "$prev_arch" != none ]; then
-        echo "Vendored libs were built for '$prev_arch', rebuilding for '$target'"
+# The "-tls" suffix is not decoration. It invalidates every tree stamped before
+# mbedTLS was compiled in, where libhv/lib/libhv.a exists and looks fresh but was
+# built without -DWITH_MBEDTLS, so the link would go looking for a backend that
+# archive does not contain.
+arch_stamp="$target-tls"
+
+if [ "$prev_arch" != "$arch_stamp" ] || [ "$do_clean" = true ]; then
+    if [ "$prev_arch" != "$arch_stamp" ] && [ "$prev_arch" != none ]; then
+        echo "Vendored libs were built as '$prev_arch', rebuilding as '$arch_stamp'"
     fi
     make wpaclean
     make spdlogclean
+    make mbedtlsclean
     # libhv's own clean drops include/hv but leaves lib/, which would fool the
     # freshness checks below into reusing a wrong-architecture archive.
     make libhvclean
@@ -133,10 +159,11 @@ fi
 # libhv only populates include/hv as part of building the library, so treat a
 # missing header dir as "not built" too.
 [ -f wpa_supplicant/wpa_supplicant/libwpa_client.a ]              || make wpaclient
+[ -f mbedtls/library/libmbedtls.a ]                               || make libmbedtls.a
 { [ -f libhv/lib/libhv.a ] && [ -d libhv/include/hv ]; }          || make libhv.a
 [ -f spdlog/build/libspdlog.a ]                                   || make libspdlog.a
 
-echo "$target" > "$ARCH_STAMP"
+echo "$arch_stamp" > "$ARCH_STAMP"
 echo "$stamp_target" > "$FLAG_STAMP"
 
 make -j"$(nproc)"

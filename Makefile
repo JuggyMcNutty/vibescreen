@@ -31,7 +31,7 @@ WARNINGS		:= -Wall -Wextra -Wno-unused-function -Wno-error=strict-prototypes -Wp
 # makes exception handling appear to work in the simulator while doing nothing
 # on the printer.
 CFLAGS 			?= -O3 -g0 -MD -MP -funwind-tables -I$(LVGL_DIR)/ $(WARNINGS)
-LDFLAGS 		?= $(LINK_MODE) -lm -Llibhv/lib -Lspdlog/build -l:libhv.a -latomic -lpthread -Lwpa_supplicant/wpa_supplicant/ -l:libwpa_client.a -lstdc++fs -l:libspdlog.a
+LDFLAGS 		?= $(LINK_MODE) -lm -Llibhv/lib -Lspdlog/build -l:libhv.a -Lmbedtls/library -l:libmbedtls.a -l:libmbedx509.a -l:libmbedcrypto.a -latomic -lpthread -Lwpa_supplicant/wpa_supplicant/ -l:libwpa_client.a -lstdc++fs -l:libspdlog.a
 BIN 			= guppyscreen
 BUILD_DIR 		= ./build
 BUILD_OBJ_DIR 	= $(BUILD_DIR)/obj
@@ -87,7 +87,10 @@ TARGET 			= $(addprefix $(BUILD_OBJ_DIR)/, $(patsubst ./%, %, $(OBJS)))
 INC 				:= -I./ -I./lvgl/ -I./lv_touch_calibration -I./spdlog/include -Ilibhv/include -Iwpa_supplicant/src/common
 LDLIBS	 			:= -lm
 
-DEFINES				+= -D _GNU_SOURCE -DSPDLOG_COMPILED_LIB
+# Our translation units pull in hv/hssl.h transitively, and it decides whether
+# to declare HV_WITHOUT_SSL from this. It has to match what libhv itself was
+# compiled with, which the libhv.a rule below sets.
+DEFINES				+= -D _GNU_SOURCE -DSPDLOG_COMPILED_LIB -D WITH_MBEDTLS
 
 ifdef EVDEV_CALIBRATE
 DEFINES +=  -D EVDEV_CALIBRATE
@@ -120,8 +123,28 @@ NPROC ?= $(shell nproc)
 
 all: default
 
-libhv.a:
-	$(MAKE) -C libhv -j$(NPROC) libhv
+# WITH_MBEDTLS on the command line beats the WITH_MBEDTLS=no in libhv's own
+# config.mk, because make gives command-line variables precedence over anything
+# an included makefile sets. That saves patching a file inside the submodule.
+#
+# INCDIRS and LIBDIRS are both "override ... +=" in libhv/Makefile.in, so values
+# passed here are kept and appended to rather than discarded. LIBDIRS is needed
+# even though we only ever link the static archive: libhv's own target builds
+# TARGET_TYPE="SHARED|STATIC", and the shared half links -lmbedtls.
+libhv.a: libmbedtls.a
+	$(MAKE) -C libhv -j$(NPROC) libhv WITH_MBEDTLS=yes \
+		INCDIRS=$(CURDIR)/mbedtls/include LIBDIRS=$(CURDIR)/mbedtls/library
+
+# Built with mbedtls's own makefile rather than its CMake, to stay with the
+# in-tree, in-place pattern libhv and libwpa_client already use.
+#
+# CFLAGS has to be given in full because library/Makefile only defaults it with
+# ?=, so naming it here replaces the -O2 that default carried. -fPIC is for
+# libhv's shared library, which would otherwise fail to link against these
+# archives; libhv compiles itself -fPIC for the same reason, and the binary we
+# ship is static either way.
+libmbedtls.a:
+	$(MAKE) -C mbedtls -j$(NPROC) lib CC=$(CC) AR=$(AR) CFLAGS="-O2 -fPIC"
 
 libspdlog.a:
 	@mkdir -p $(SPDLOG_DIR)/build
@@ -165,6 +188,9 @@ spdlogclean:
 libhvclean:
 	$(MAKE) -C libhv clean
 
+mbedtlsclean:
+	$(MAKE) -C mbedtls clean
+
 wpaclean:
 	$(MAKE) -C wpa_supplicant/wpa_supplicant clean
 
@@ -181,6 +207,8 @@ uninstall:
 build:
 	$(MAKE) wpaclean
 	$(MAKE) wpaclient
+	$(MAKE) mbedtlsclean
+	$(MAKE) libmbedtls.a
 	$(MAKE) libhvclean
 	$(MAKE) libhv.a
 	$(MAKE) spdlogclean
