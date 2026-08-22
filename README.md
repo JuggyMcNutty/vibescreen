@@ -7,9 +7,7 @@ which stopped receiving commits in July 2024.
 
 ## What has changed since guppyscreen?
 
-**The bed mesh panel was rewritten.** The 3D view labels the corners of its
-ground plane with the bed's own coordinates, so the mesh can still be matched to
-the machine after dragging it round.
+**The bed mesh panel was rewritten.** Now has a 3d movable view of the bed.
 
 <img src="screenshots/bedmesh.png" title="" alt="Bed mesh drawn as a shaded surface" data-align="center">
 
