@@ -7,6 +7,8 @@ Dependencies:
    An embedded graphics library
  - [libhv](https://github.com/ithewei/libhv)
    A network library
+ - [mbedtls](https://github.com/Mbed-TLS/mbedtls)
+   The TLS backend libhv is built against, so that wss:// and https:// work
  - [spdlog](https://github.com/gabime/spdlog)
    A logging library
  - [wpa_supplicant](https://w1.fi/wpa_supplicant/)

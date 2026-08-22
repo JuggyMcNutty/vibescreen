@@ -239,10 +239,11 @@ src/                  the application, all ours to maintain
 lvgl/                 submodule, release/v8.4 head, see below
 lv_drivers/           submodule, v8.3.0, upstream is dead
 libhv/                submodule, websocket and http client
+mbedtls/              submodule, the TLS backend libhv is built against
 spdlog/               submodule, logging
 wpa_supplicant/       vendored hostap copy, built only for libwpa_client.a
 lv_touch_calibration/ in-tree, not a submodule, touch calibration screens
-patches/              three patches applied to submodules, see below
+patches/              four patches applied to submodules, see below
 k1/                   payload installed onto the printer, init scripts and klippy modules
 assets/               generated LVGL C arrays for icons and fonts
 debian/               Raspberry Pi and Debian packaging, plus the config template
@@ -322,6 +323,72 @@ It cost about 155 KB in the simulator binary. The stripped mips binary is
 `master` is a further 42 commits ahead with no release behind it. Prefer the
 tag until there is a specific fix worth chasing.
 
+### mbedTLS, and why there is no trust store
+
+libhv is built `WITH_MBEDTLS=yes` against the `mbedtls` submodule, pinned to
+**v3.6.7**, the head of the 3.6 LTS line. So `wss://` and `https://` work, with
+the certificate actually verified. Nothing in the tree builds such a URL yet:
+`src/guppyscreen.cpp`, `src/printer_select_panel.cpp` and `src/utils.cpp` all
+still construct `ws://` and `http://`. Teaching them a scheme is a separate
+change.
+
+Not mbedTLS 4.x. It moved to PSA-only crypto and changed the `x509` and
+`pk_parse_keyfile` APIs; `libhv/ssl/mbedtls.c` only branches on
+`MBEDTLS_VERSION_MAJOR >= 3` and will not compile against it.
+
+**It costs 817 KB.** The stripped mips binary went from 6.4 MB to 7.2 MB,
+measured, which is twice what this file used to estimate. That is the stock
+`mbedtls_config.h`, which enables TLS 1.2 and 1.3, DTLS, every ciphersuite and
+the self tests. A trimmed config would win most of that back and is the obvious
+lever if the size ever matters, but getting one wrong quietly drops the
+ciphersuite some real server needed, so it wants measuring against a real
+handshake rather than guessing.
+
+Three things about the build are not obvious:
+
+- **mbedtls has a submodule of its own** and `git submodule update --init` does
+  not fetch a nested one. Use `--recursive`. The 3.6 branch commits every file
+  in `library/Makefile`'s `GENERATED_FILES`, so it looks like the framework is
+  unnecessary, and it is not: those files have per-file rules naming
+  `../framework/scripts/*.py` as a prerequisite, and make fails on a
+  prerequisite it cannot build whether or not the target is up to date.
+  `scripts/build.sh` checks for it and says what to run.
+- **We pass `WITH_MBEDTLS=yes` on libhv's make command line** rather than
+  patching its `config.mk`, because a command-line variable beats an included
+  makefile. Our own objects get `-D WITH_MBEDTLS` too, from the top-level
+  `Makefile`, since `hv/hssl.h` decides whether to declare `HV_WITHOUT_SSL`
+  from it.
+- **mbedtls is built `-fPIC`.** Not for us, we link it statically: libhv's own
+  target builds `TARGET_TYPE="SHARED|STATIC"` and the shared half links
+  `-lmbedtls`, which fails against non-PIC archives.
+
+`patches/0004-libhv-mbedtls-ca.patch` is what makes verification work at all.
+libhv's mbedTLS backend ignores `ca_file` and `ca_path` entirely, so without the
+patch a client either verifies nothing or fails every handshake. Read
+`docs/audit.md` B8 before touching it or bumping libhv.
+
+**No CA bundle is shipped.** `src/tls.cpp` looks for one at, in order: the
+`ca_file` key in `guppyconfig.json`, `cacert.pem` beside the binary, then
+`/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt` and
+`/etc/ssl/cert.pem`. A desktop and a Debian install find one; **a K1 has none of
+them**, so on a printer TLS is compiled in and inert until someone drops a
+bundle into `/usr/data/guppyscreen/cacert.pem`. Vendoring a 230 KB Mozilla
+bundle with an expiry date on it, for a feature no URL in the tree uses, is a
+maintenance obligation without a working feature behind it. Ship one as part of
+whatever first needs it.
+
+When nothing is found it still sets `verify_peer` and logs every path it tried.
+That is deliberate: leaving `g_ssl_ctx` unset sends libhv down its
+`hssl_ctx_new(NULL)` fallback, which verifies nothing, so the choice is between
+failing closed and connecting to anyone claiming to be the printer. Measured
+2026-08-21: with no store the handshake ends in `unknown ca` and the UI stays
+disconnected.
+
+**mbedTLS matches `dNSName` and CN, not `iPAddress`.** A certificate carrying
+`IP:127.0.0.1` in its SAN is still rejected for a `wss://127.0.0.1` URL, which
+was measured, not assumed. Anyone putting a real certificate in front of
+Moonraker has to reach it by the name on the certificate.
+
 ### `lv_conf.h` is two configs, not one
 
 `lv_conf.h:14` opens `#ifndef SIMULATOR`, `:715` is the `#else`, `:1353` the
@@ -351,13 +418,18 @@ sitting inside an `#if LV_MEM_CUSTOM == 0`.
 
 ### The patches
 
-Three patches in `patches/` must be applied to submodules before building. They
+Four patches in `patches/` must be applied to submodules before building. They
 are not committed into the submodules, so a fresh clone or a `git submodule
 update` silently reverts them and the build then fails confusingly.
 `scripts/apply-patches.sh` handles this and `scripts/build.sh` calls it every
-time, so you should not need to think about it. Never `git add` a submodule
-pointer change; `git status` showing `m lvgl` and friends is expected and
-correct.
+time, so you should not need to think about it.
+
+`git status` showing `m lvgl` and friends is expected and correct: that is the
+patch, not a mistake, and staging it would commit patched sources into the
+submodule pointer. **Do not `git add` a submodule for that reason.** Moving a
+pin deliberately is the one exception, and it looks different in `git status`:
+a content change shows as lowercase `m` in the second column, a pointer change
+as `M` in the first. Only the second is ever meant to be committed.
 
 ## Git remotes
 
@@ -531,11 +603,14 @@ one `.bak` of whatever it replaced and telling the user that Klipper needs a
 `update.sh --check` answers "is there a newer release" and installs nothing,
 printing `status=`, `current=` and `latest=` on stdout. `UpdateCheck`
 (`src/update_check.cpp`) polls it so the UI can offer an update without this
-binary needing TLS, which it does not have: libhv is built `WITH_OPENSSL=no`.
-Adding a TLS stack and a trust store to fetch one version string is the wrong
-trade, and it would put a second definition of "newer" in the tree. If in-binary
-HTTPS is ever really needed, mbedTLS is roughly 400 KB static against OpenSSL's
-3 MB.
+binary having to talk to GitHub itself.
+
+**That stays true now that the binary can do TLS.** This paragraph used to say
+the binary had no TLS at all, which stopped being the reason on 2026-08-21. The
+reason it should still shell out is the other half of what was written here: a
+second definition of "newer" in the tree is a bug waiting to happen, and the
+one on disk is the copy that performs the upgrade. See the mbedTLS section
+above for what the binary can and cannot reach.
 
 That refresh runs on the **already up to date** path as well as after an
 install, which is not an optimisation but the only way it ever runs at all:

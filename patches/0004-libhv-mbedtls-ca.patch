@@ -1,0 +1,83 @@
+diff --git a/ssl/mbedtls.c b/ssl/mbedtls.c
+index 4a14ead..3cf95a4 100644
+--- a/ssl/mbedtls.c
++++ b/ssl/mbedtls.c
+@@ -31,6 +31,7 @@ struct mbedtls_ctx {
+     mbedtls_ctr_drbg_context    ctr_drbg;
+     mbedtls_ssl_config          conf;
+     mbedtls_x509_crt            cert;
++    mbedtls_x509_crt            cacert;
+     mbedtls_pk_context          pkey;
+ #if defined(MBEDTLS_SSL_CACHE_C)
+     mbedtls_ssl_cache_context   cache;
+@@ -46,6 +47,7 @@ hssl_ctx_t hssl_ctx_new(hssl_ctx_opt_t* param) {
+     mbedtls_ssl_cache_init(&ctx->cache);
+ #endif
+     mbedtls_x509_crt_init(&ctx->cert);
++    mbedtls_x509_crt_init(&ctx->cacert);
+     mbedtls_pk_init(&ctx->pkey);
+     mbedtls_entropy_init(&ctx->entropy);
+     mbedtls_ctr_drbg_init(&ctx->ctr_drbg);
+@@ -53,6 +55,7 @@ hssl_ctx_t hssl_ctx_new(hssl_ctx_opt_t* param) {
+     int mode = MBEDTLS_SSL_VERIFY_NONE;
+     int endpoint = MBEDTLS_SSL_IS_CLIENT;
+     bool check = false;
++    bool ca = false;
+     if (param) {
+         if (param->crt_file && *param->crt_file) {
+             if (mbedtls_x509_crt_parse_file(&ctx->cert, param->crt_file) != 0) {
+@@ -60,6 +63,24 @@ hssl_ctx_t hssl_ctx_new(hssl_ctx_opt_t* param) {
+                 goto error;
+             }
+         }
++        // parse_file and parse_path return the number of certificates they
++        // could not parse, so only a negative result is a failure. A CA bundle
++        // carrying one certificate this mbedtls build dislikes must not throw
++        // away the other hundred and forty.
++        if (param->ca_file && *param->ca_file) {
++            if (mbedtls_x509_crt_parse_file(&ctx->cacert, param->ca_file) < 0) {
++                fprintf(stderr, "ssl ca_file error!\n");
++                goto error;
++            }
++            ca = true;
++        }
++        if (param->ca_path && *param->ca_path) {
++            if (mbedtls_x509_crt_parse_path(&ctx->cacert, param->ca_path) < 0) {
++                fprintf(stderr, "ssl ca_path error!\n");
++                goto error;
++            }
++            ca = true;
++        }
+         if (param->key_file && *param->key_file) {
+ #if MBEDTLS_VERSION_MAJOR >= 3
+             if (mbedtls_pk_parse_keyfile(&ctx->pkey, param->key_file, NULL, NULL, NULL) != 0) {
+@@ -91,8 +112,20 @@ hssl_ctx_t hssl_ctx_new(hssl_ctx_opt_t* param) {
+     mbedtls_ssl_conf_session_cache(&ctx->conf, &ctx->cache, mbedtls_ssl_cache_get, mbedtls_ssl_cache_set);
+ #endif
+ 
++    // ca_file and ca_path are parsed into hssl_ctx_opt_t and then never used by
++    // this backend, which is why it can only ever run MBEDTLS_SSL_VERIFY_NONE:
++    // a client has no trust anchors, so verify_peer either does nothing or
++    // fails every handshake. The openssl backend beside this one gets it right.
++    if (ca) {
++        mbedtls_ssl_conf_ca_chain(&ctx->conf, &ctx->cacert, NULL);
++    }
++
+     if (check) {
+-        mbedtls_ssl_conf_ca_chain(&ctx->conf, ctx->cert.next, NULL);
++        // Unchanged, and deliberately not &ctx->cert: crt_file holds the leaf
++        // followed by its issuers, so the anchors are everything after it.
++        if (!ca) {
++            mbedtls_ssl_conf_ca_chain(&ctx->conf, ctx->cert.next, NULL);
++        }
+         if (mbedtls_ssl_conf_own_cert(&ctx->conf, &ctx->cert, &ctx->pkey) != 0) {
+             fprintf(stderr, "ssl key_file check failed!\n");
+             goto error;
+@@ -108,6 +141,7 @@ void hssl_ctx_free(hssl_ctx_t ssl_ctx) {
+     if (!ssl_ctx) return;
+     struct mbedtls_ctx *mctx = (struct mbedtls_ctx *)ssl_ctx;
+     mbedtls_x509_crt_free(&mctx->cert);
++    mbedtls_x509_crt_free(&mctx->cacert);
+     mbedtls_pk_free(&mctx->pkey);
+     mbedtls_ssl_config_free(&mctx->conf);
+ #if defined(MBEDTLS_SSL_CACHE_C)
