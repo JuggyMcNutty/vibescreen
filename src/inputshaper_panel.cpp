@@ -312,8 +312,16 @@ void InputShaperPanel::show_axis(size_t idx) {
   set_frequency(axis.freq);
 
   refresh_headline();
+
+  // The placeholder names what Calibrate will run, which is the axis row's
+  // target and not the axis on screen. The two differ under "X + Y", where
+  // naming the shown axis alone read as though the other would be skipped.
+  std::string target = wants(0) && wants(1)
+    ? "both axes"
+    : fmt::format("the {} axis", wants(0) ? axes[0].name : axes[1].name);
+
   lv_label_set_text(table, axis.result.is_null()
-		    ? fmt::format("Calibrate to measure the {} axis.", axis.name).c_str()
+		    ? fmt::format("Calibrate to measure {}.", target).c_str()
 		    : render_table(axis.result).c_str());
 
   if (axis.plot_path.empty()) {
@@ -784,10 +792,9 @@ void InputShaperPanel::handle_selector(lv_event_t *e) {
   if (selector == axis_sel.get_selector()) {
     axis_sel.set_selected_idx(idx);
     // "X + Y" is a calibration target rather than a view, so it leaves the
-    // shown axis where it was.
-    if (idx != TARGET_BOTH) {
-      show_axis(idx);
-    }
+    // shown axis where it was. It still redraws, because the placeholder in
+    // an uncalibrated axis names the target rather than the axis.
+    show_axis(idx == TARGET_BOTH ? shown : idx);
 
   } else if (selector == view_sel.get_selector()) {
     view_sel.set_selected_idx(idx);
