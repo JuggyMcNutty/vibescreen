@@ -600,6 +600,18 @@ reaches an existing install only because `update.sh` now re-copies it, keeping
 one `.bak` of whatever it replaced and telling the user that Klipper needs a
 `FIRMWARE_RESTART`. It never restarts Klipper itself, because that ends a print.
 
+**File modes are part of that install, and the copy does not carry them.**
+`gcode_shell_command` execs `calibrate_shaper.py` and `graph_belts.py` rather
+than importing them, so they need `+x` on the installed copy. `cp` onto a file
+that already exists keeps the destination's mode, and `install_file` returns
+early when `cmp -s` says the content matches, so a copy that once arrived
+without the bit would never get it back: identical content means nothing to
+copy, and nothing to copy means nothing reaches the mode. Both installers and
+`update.sh` set it explicitly, and in `update.sh` that runs *outside*
+`install_file` for exactly that reason. See `docs/audit.md` C21, which is a
+calibration that could not run on the development printer for as long as we
+have had it.
+
 `update.sh --check` answers "is there a newer release" and installs nothing,
 printing `status=`, `current=` and `latest=` on stdout. `UpdateCheck`
 (`src/update_check.cpp`) polls it so the UI can offer an update without this

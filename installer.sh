@@ -139,6 +139,13 @@ mkdir -p $K1_CONFIG_DIR/GuppyScreen/scripts
 cp $K1_GUPPY_DIR/scripts/*.cfg $K1_CONFIG_DIR/GuppyScreen
 cp $K1_GUPPY_DIR/scripts/*.py $K1_CONFIG_DIR/GuppyScreen/scripts
 
+# cp onto a file that already exists keeps that file's mode, so a copy which
+# once arrived without its execute bit keeps it through every reinstall. The
+# two scripts gcode_shell_command runs are execed directly, so the mode is
+# part of the install rather than a detail of the tarball.
+chmod a+x $K1_CONFIG_DIR/GuppyScreen/scripts/calibrate_shaper.py \
+         $K1_CONFIG_DIR/GuppyScreen/scripts/graph_belts.py
+
 ## includ guppyscreen *.cfg in printer.cfg
 if grep -q "include GuppyScreen" $K1_CONFIG_DIR/printer.cfg ; then
     echo "printer.cfg already includes GuppyScreen cfgs"

@@ -81,6 +81,11 @@ install_guppy_goodies() {
     sed -i "s|<CONFIG_DIR>|$CONFIG_DIR|g; s|<KLIPPER_PATH>|$KLIPPER_PATH|g" $GUPPY_DIR/debian/guppy_cmd.cfg
     cp $GUPPY_DIR/debian/*.cfg $CONFIG_DIR/GuppyScreen
     cp $GUPPY_DIR/scripts/*.py $CONFIG_DIR/GuppyScreen/scripts
+
+    # See installer.sh: cp preserves an existing destination's mode, and these
+    # two are execed by gcode_shell_command rather than imported.
+    chmod a+x $CONFIG_DIR/GuppyScreen/scripts/calibrate_shaper.py \
+             $CONFIG_DIR/GuppyScreen/scripts/graph_belts.py
     
     if grep -q "include GuppyScreen" $CONFIG_DIR/printer.cfg ; then
 	echo "printer.cfg already includes GuppyScreen cfgs"

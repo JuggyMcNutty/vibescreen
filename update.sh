@@ -188,6 +188,21 @@ print(config)" 2>/dev/null)
         [ -f "$f" ] && install_file "$f" "$config_dir/GuppyScreen/scripts/$(basename "$f")"
     done
 
+    # Outside install_file on purpose. It returns early when the content
+    # already matches, which is exactly the state of a machine whose copy
+    # arrived without its execute bit: nothing to copy, so nothing ever
+    # corrects the mode. gcode_shell_command execs these two directly rather
+    # than importing them, so a missing bit is a PermissionError part way
+    # through a calibration. Measured on the development K1 Max, where the
+    # input shaper had never once produced a plot.
+    #
+    # a+x rather than +x: a bare +x is masked by umask, and root's is 077 on
+    # a K1, which would leave the mode depending on who ran the update.
+    for f in calibrate_shaper.py graph_belts.py; do
+        dst="$config_dir/GuppyScreen/scripts/$f"
+        [ -f "$dst" ] && chmod a+x "$dst"
+    done
+
     # installer.sh copies these two into klippy/extras, so on a stock install
     # they are real files and want refreshing like everything else.
     #
