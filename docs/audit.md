@@ -284,6 +284,64 @@ Defaults now come from `[input_shaper]` read through `configfile`. The
 `input_shaper` object cannot answer for itself: it reports an empty status on
 the Klipper the K1 ships.
 
+### C21. The input shaper analysis could never run (fixed)
+
+Calibrate ran the X sweep to the end, wrote its CSV, and then died with `Error
+running command {guppy_input_shaper}`. Y never started, because the `!!` Klipper
+broadcasts takes the whole queue with it. Measured on the development K1 Max,
+where `resonances_x.png` had never once existed:
+
+```
+PermissionError: [Errno 13] Permission denied:
+  '/usr/data/printer_data/config/GuppyScreen/scripts/calibrate_shaper.py'
+```
+
+`guppy_cmd.cfg` named the bare script as its `command`, so `gcode_shell_command`
+`shlex.split`s it and `Popen`s it, which execs it. The installed copy was
+`0644`. The one in the tarball beside it was `0755`, and the file is `100755` in
+git and always has been, upstream included.
+
+Two things kept it that way, and the second is the interesting one. `cp` onto a
+file that already exists keeps the destination's mode, and no `chmod` appeared
+anywhere in the tree, so `installer.sh` could not correct a bit that had gone
+missing once. Then `update.sh`'s `install_file` returns early when `cmp -s` says
+the content matches, which is exactly the state of the broken machine: nothing
+to copy, so nothing ever reached the mode. **A content check is not an install
+check.** Anything keyed off `cmp` has to have the mode handled beside it rather
+than inside it.
+
+`graph_belts.py` escaped by luck alone. Its content changed on 2026-08-20, so it
+was rewritten and came out executable, which is the only reason belt calibration
+worked. It was one edit away from the same failure.
+
+Fixed twice over. The two `[gcode_shell_command]` declarations now name the
+interpreter, in `k1/scripts/guppy_cmd.cfg` and `debian/guppy_cmd.cfg`, which
+makes the bit irrelevant and reaches every already-broken install for free,
+since the cfg content changes and `install_file` then does copy it. And both
+installers plus `update.sh` set the bit, the last outside `install_file` for the
+reason above.
+
+Bare `python3` rather than an absolute path: the scripts' shebang is
+`#!/usr/bin/env python3`, so PATH resolution is already what happens, and
+klippy's own environment reads `PATH=/bin:/sbin:/usr/bin:/usr/sbin` with
+`/usr/bin/python3 -> python3.8`. One spelling works for the K1 and the Debian
+config alike.
+
+### C22. An abandoned resonance run does not say what went wrong (open)
+
+Two things found while tracing C21, both in `src/inputshaper_panel.cpp`.
+
+The `!!` branch at `:690` puts Klipper's own words on the status line. For C21
+that read `Error running command {guppy_input_shaper}`, which names no file, no
+reason and no remedy. Every other ending got a written explanation in the C14
+round; this one is a passthrough, and it is the branch that catches the failures
+nobody anticipated.
+
+`abandon_runs` also clears `pending` on both axes even when asked for the
+analysing ones only (`:594`). That is deliberate, and the comment says why, but
+the status text does not mention that the queued Y test was dropped. A user who
+asked for X + Y is told only that the analysis produced no result.
+
 ### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget
