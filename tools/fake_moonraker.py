@@ -425,7 +425,7 @@ STATUS["configfile"]["settings"].update({
 if SHAPER_CONFIG:
     STATUS["configfile"]["settings"].update({
         "gcode_shell_command guppy_belts_calibration": {
-            "command": "/usr/data/printer_data/config/GuppyScreen/scripts/graph_belts.py",
+            "command": "python3 /usr/data/printer_data/config/GuppyScreen/scripts/graph_belts.py",
             "timeout": 600.0, "verbose": True},
         "resonance_tester": RESONANCE_TESTER,
         "adxl345": {"axes_map": ["x", "-z", "y"], "rate": 3200,
@@ -434,7 +434,7 @@ if SHAPER_CONFIG:
                                     "shaper_freq_x": 0.0, "shaper_type_y": "mzv",
                                     "shaper_freq_y": 0.0},
         "gcode_shell_command guppy_input_shaper": {
-            "command": "/usr/data/printer_data/config/GuppyScreen/scripts/calibrate_shaper.py",
+            "command": "python3 /usr/data/printer_data/config/GuppyScreen/scripts/calibrate_shaper.py",
             "timeout": 600.0, "verbose": True},
     })
     STATUS["configfile"]["config"].update({
@@ -443,7 +443,7 @@ if SHAPER_CONFIG:
         "adxl345": {"cs_pin": "nozzle_mcu:PA4", "spi_speed": "5000000"},
         "calibrate_shaper_config": {},
         "gcode_shell_command guppy_input_shaper": {
-            "command": "/usr/data/printer_data/config/GuppyScreen/scripts/calibrate_shaper.py",
+            "command": "python3 /usr/data/printer_data/config/GuppyScreen/scripts/calibrate_shaper.py",
             "timeout": "600.0", "verbose": "True"},
     })
 
