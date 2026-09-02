@@ -342,6 +342,58 @@ analysing ones only (`:594`). That is deliberate, and the comment says why, but
 the status text does not mention that the queued Y test was dropped. A user who
 asked for X + Y is told only that the analysis produced no result.
 
+### C23. A file list refresh threw away where the user was (fixed)
+
+Reported as issue #5: the file list scrolls back to the top on its own, "making
+it impossible to view older files".
+
+`150073c` subscribed `PrintPanel` to `notify_filelist_changed` so a file sent
+from the slicer appears without anyone pressing Reload, which is upstream #95.
+It did not make the resulting refresh non-disruptive, so every announcement
+rebuilt the list as if the panel had just been opened. `populate_files` reset
+`sorted_by` to `SORTED_BY_MODIFIED`, undoing an A-Z the user had chosen;
+`show_dir` ended with `lv_obj_scroll_to_y(file_table, 0, LV_ANIM_OFF)`; and it
+then selected the first file, which sends `FilePanel::refresh_view` back to
+disk for a thumbnail.
+
+The frequency is the part that is not obvious, and one half of the explanation
+is measured and the other is not. Measured: `subscribe` did `root.clear()`,
+which threw away every cached `Tree::metadata`, so each refresh re-requested
+`server.files.metadata` for whatever it had just selected. Not measured, because
+it wants a real moonraker rather than the fake: whether moonraker then announces
+a filelist change for the scan it does to answer, which would close the loop and
+mean the announcements the user sees are largely the panel's own. Worth checking
+against the development printer if this ever comes back. Nothing in the fix
+rests on it either way; the cache is worth keeping for the round trip and the
+thumbnail decode it saves on its own.
+
+`show_dir` now takes why it is redrawing. A refetch builds the row strings
+first and returns without touching the table when they match what is already
+there; when they do differ it holds the view on the row that was at the top,
+not on the pixel offset, since files arrive newest first and a fixed offset
+walks the list under the user just as visibly. The selection survives by path
+and is only replaced when that file is gone. Metadata is carried across the
+rebuild, keyed by path and qualified by modified time. Announcements are
+coalesced through a one second `lv_timer` rather than each firing its own
+`server.files.list`.
+
+Measured against the fake with `--files 30 --drop-every 6 --announce-every 4`,
+scrolled a third of the way down with a file selected: ten new files arriving at
+the top of the list left the visible rows and the detail panel byte-identical
+between two screenshots, with only the scrollbar changing. Over one session, 55
+refetches produced 4 `server.files.metadata` requests, one per file actually
+looked at, where before every refetch would have produced one. Two
+announcements landing in the same second produced one `server.files.list`.
+
+Two more bugs in the same sort state, both fixed with it. `sorted_by` held the
+column and the direction in one bit field and came out `0` after a descending
+Modified sort, so the `show_dir(cur_dir, sorted_by)` in the directory
+navigation path passed `0` as the sort type and silently re-sorted the new
+directory by name. It is two members now, `sort_column` and `sort_reversed`.
+And `show_dir` went through `KUtils::sort_map_values`, which takes its
+`std::map` **by value**, deep copying every `Tree` in the directory and all of
+their metadata on every redraw; it sorts pointers now. See M9.
+
 ### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget
@@ -955,6 +1007,18 @@ how this is driven.
 
 ---
 
+### M9. `sort_map_values` copies the whole map (open)
+
+`KUtils::sort_map_values` (`src/utils.h:119`) takes `std::map<T, U> v` by value
+and then copies each value again into the output vector. For `PrintPanel` that
+was a deep copy of every `Tree` in the directory, children and cached metadata
+included, on each redraw; that call site is gone, see C23.
+
+`src/spoolman_panel.cpp` still has ten of them, over `std::map<uint32_t, json>`.
+The maps there are small and the copies are of json values rather than trees, so
+this is a cleanup rather than a bug. Taking the map by const reference and
+pushing pointers, or taking `std::vector<U*>`, would fix all of them at once.
+
 ## On mining `pellcorp/grumpyscreen`
 
 Worth recalibrating the expectation here. The fork is 233 commits ahead and 0
@@ -1009,12 +1073,16 @@ from elsewhere again.
 
 ## Suggested order
 
-Done: everything except C7 and M2. C1 to C6, C8 to C20, B1 to B6, M1, M3 to
-M8, and the `KUtils` parse helpers.
+Done: everything except C7, C22, M2 and M9. C1 to C6, C8 to C21, C23, B1 to B8,
+M1, M3 to M8, and the `KUtils` parse helpers.
 
 Remaining:
 
 1. C7, the non-blocking heat change. Behavioural, wants its own discussion, and
    the only correctness finding left open.
+2. C22, the abandoned resonance run that does not say what went wrong. Wording
+   and status text, not a mechanism.
+3. M9, `sort_map_values` copying its map. Cosmetic now that the one call site
+   where it was expensive is gone.
 
 M2, the four leaked singletons, is harmless and stays open.

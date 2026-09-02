@@ -103,7 +103,7 @@ commit is named so the reasoning can be read back.
 | --- | --- | --- |
 | #33, #118 | Fan sliders ignored the speed the fan starts at | `4679274` |
 | #94, #103, #47 | Print status never dismissed, stuck at 99 percent | `6f355f8` |
-| #95 | File list did not refresh when a file was uploaded | `150073c` |
+| #95 | File list did not refresh when a file was uploaded | `150073c`, and see C23 |
 | #104 | Belt calibration crashed Klipper, and its panel span forever | `745ab03` |
 | #135 | Belt calibration warned twice on every run | `c443f0b` |
 | #90 | Load filament leaked relative extrusion mode | `59993da` |
