@@ -776,6 +776,22 @@ result was compared against a committed screenshot.
 `xdotool` can drive it, but LVGL polls its input device, so an instantaneous
 click gets missed. Move, then `mousedown`, wait ~0.4s, then `mouseup`.
 
+**On a Wayland desktop it cannot drive it at all.** XWayland refuses XTest
+pointer warping, so `xdotool mousemove` returns success and the pointer does not
+move; every click then lands wherever the real mouse happens to be, which reads
+exactly like LVGL dropping the input. Measured 2026-09-02. Run the simulator on
+a headless X server instead, where XTest works and `xwd` still does:
+
+```sh
+sh -c 'trap "" USR1; exec Xvfb :99 -screen 0 1280x800x24' &
+DISPLAY=:99 SDL_VIDEODRIVER=x11 ./build/bin/guppyscreen &
+DISPLAY=:99 python3 tools/shot.py shot.png
+```
+
+The `trap` is not decoration: Xvfb signals `SIGUSR1` to its parent when it is
+ready, and a shell that has not ignored it dies with status 144, taking the
+launch with it.
+
 **The window's backing store lags an interaction by much more than a frame.**
 Under XWayland a grab taken a second after a click can still show the state
 before it, which reads exactly like the click having been dropped. Retrying
