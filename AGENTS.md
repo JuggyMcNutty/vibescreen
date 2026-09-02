@@ -702,8 +702,19 @@ python3 tools/fake_moonraker.py --print complete --print-seconds 120
 python3 tools/fake_moonraker.py --layer-info none # the K1 Max's shape, see below
 python3 tools/fake_moonraker.py --belts fail      # or slow, timeout, empty
 python3 tools/fake_moonraker.py --drop-file 20    # announce an upload
+python3 tools/fake_moonraker.py --files 30 --drop-every 6 --announce-every 4
 python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshake
 ```
+
+That second line is the file panel's hard case, and every part of it earns its
+place. `--files` pads the list until it scrolls, since a list that cannot
+scroll cannot show a scroll position being lost. `--drop-every` keeps announcing
+new files, which is a slicer sending a batch. `--announce-every` announces a
+change that changes nothing, which is what moonraker sends after scanning a
+file's metadata and is most of what the panel really receives. See
+`docs/audit.md` C23 for why the third one matters most: asking for metadata is
+what makes moonraker scan, so a panel that re-asks on every refresh keeps its
+own announcements coming.
 
 `--layer-info none` is worth knowing about. By default the fake reports layer
 numbers in `print_stats.info`, and our K1 Max never does, because no file on it

@@ -41,7 +41,16 @@ SET_PRINT_STATS_INFO, so info stays {total_layer: null, current_layer: null} for
 the whole print and the panel has only the estimate to work from.
 
 --drop-file <seconds> announces a new gcode file that long after connect, the
-way Moonraker does after an upload.
+way Moonraker does after an upload. --drop-every <seconds> keeps doing it, which
+is what a slicer sending a batch looks like from here.
+
+--announce-every <seconds> announces a change that changes nothing, by
+re-sending an existing file. Moonraker does this whenever it scans metadata it
+did not already hold, and the file panel has to treat it as a no-op: issue #5
+was the list jumping back to the top on every one of them.
+
+--files <n> pads the gcode list out to n entries, since two files cannot scroll
+and a list that cannot scroll cannot show a scroll position being lost.
 
 --belts [normal|slow|fail|timeout|empty] answers the belts panel's half-axis
 sweeps and its analysis, ending the way the mode says.
@@ -213,8 +222,25 @@ def build_bed_mesh(shape):
 
 SHAPER_MODES = ("normal", "slow", "fail", "timeout")
 # Announce a new gcode file this many seconds after connect, so the file panel
-# can be watched noticing it without anyone pressing Reload.
+# can be watched noticing it without anyone pressing Reload. --drop-every
+# repeats it, because one file arriving is the easy case: the panel has to hold
+# its place through a batch.
 FILE_DROP_SECONDS = float(_arg_value("--drop-file", "0")) if "--drop-file" in sys.argv else 0
+FILE_DROP_EVERY = float(_arg_value("--drop-every", "0")) if "--drop-every" in sys.argv else 0
+if FILE_DROP_EVERY and not FILE_DROP_SECONDS:
+    # --drop-every on its own reads as "keep dropping files", so it has to start
+    # one rather than needing --drop-file beside it to arm the task.
+    FILE_DROP_SECONDS = FILE_DROP_EVERY
+
+# Announce a filelist change that does not change the list. Moonraker sends one
+# whenever it has had to scan a file's metadata, so the panel sees these without
+# anyone uploading anything, and rewriting the table for one is issue #5.
+ANNOUNCE_EVERY = float(_arg_value("--announce-every", "0")) if "--announce-every" in sys.argv else 0
+
+# Global rather than per connection. Reconnecting used to restart the numbering
+# and re-announce paths the list already had, which is a change that changes
+# nothing, so a reconnect quietly turned the drop test into the no-op test.
+DROP_SEQ = 0
 
 # Require this key on the websocket handshake, the way Moonraker does when its
 # authorization component is enforcing one.
@@ -455,6 +481,19 @@ FILES = [
     {"path": "calibration/first_layer.gcode", "modified": time.time() - 86400,
      "size": 184320},
 ]
+
+# Two files fit on screen, and a list that never scrolls cannot demonstrate a
+# scroll position being kept or lost. --files pads it out.
+#
+# The modified times run backwards against the names on purpose: newest last
+# alphabetically. Sorted by name these come out 002 first, sorted by date 029
+# first, so which sort is in effect can be read off the screen. Times that
+# agreed with the names made the two orders identical and the sort untestable.
+FILE_COUNT = int(_arg_value("--files", "0")) if "--files" in sys.argv else 0
+for _n in range(len(FILES), FILE_COUNT):
+    FILES.append({"path": "part_%03d.gcode" % _n,
+                  "modified": time.time() - (FILE_COUNT - _n) * 3600,
+                  "size": 100000 + _n * 1000})
 
 # Every slicer worth using embeds preview images now, and the file browser and
 # the print status panel both draw one, so a fake without them exercises only
@@ -829,15 +868,44 @@ async def drop_a_file(ws):
     The panel had no way to hear about this at all: it consumed only
     notify_status_update, so the list changed when someone pressed Reload and
     not before.
+
+    With --drop-every it keeps going. One file arriving is the case that got
+    fixed first; a stream of them is the case where the panel has to leave the
+    user where they were scrolled to while the list grows underneath.
     """
+    global DROP_SEQ
     await asyncio.sleep(FILE_DROP_SECONDS)
-    item = {"path": "dropped_by_the_fake.gcode", "root": "gcodes",
-            "modified": time.time(), "size": 991232}
-    FILES.append({k: item[k] for k in ("path", "modified", "size")})
-    await ws.send(json.dumps({
-        "jsonrpc": "2.0", "method": "notify_filelist_changed",
-        "params": [{"action": "create_file", "item": item}]}))
-    print("fake announced a new file", flush=True)
+    while True:
+        DROP_SEQ += 1
+        item = {"path": "dropped_by_the_fake_%d.gcode" % DROP_SEQ, "root": "gcodes",
+                "modified": time.time(), "size": 991232}
+        FILES.append({k: item[k] for k in ("path", "modified", "size")})
+        await ws.send(json.dumps({
+            "jsonrpc": "2.0", "method": "notify_filelist_changed",
+            "params": [{"action": "create_file", "item": item}]}))
+        print("fake announced a new file, %s" % item["path"], flush=True)
+        if not FILE_DROP_EVERY:
+            return
+        await asyncio.sleep(FILE_DROP_EVERY)
+
+
+async def announce_no_change(ws):
+    """Announce a filelist change that leaves the list exactly as it was.
+
+    This is the shape Moonraker sends after scanning a file's metadata, and it
+    is the majority of what the panel receives, because asking for metadata is
+    what makes moonraker scan. The correct response to one is to do nothing at
+    all: not to re-sort, not to scroll, not to reload the thumbnail, and above
+    all not to ask for the metadata again, which would bring the next one
+    straight back.
+    """
+    while True:
+        await asyncio.sleep(ANNOUNCE_EVERY)
+        item = dict(FILES[0], root="gcodes")
+        await ws.send(json.dumps({
+            "jsonrpc": "2.0", "method": "notify_filelist_changed",
+            "params": [{"action": "modify_file", "item": item}]}))
+        print("fake announced a change that changes nothing", flush=True)
 
 
 async def run_print(ws):
@@ -932,6 +1000,7 @@ async def handler(ws):
     pusher = asyncio.create_task(push_status())
     printer = asyncio.create_task(run_print(ws)) if PRINT_RUN else None
     dropper = asyncio.create_task(drop_a_file(ws)) if FILE_DROP_SECONDS else None
+    announcer = asyncio.create_task(announce_no_change(ws)) if ANNOUNCE_EVERY else None
     # Held only so the tasks are not garbage collected while they run, which
     # asyncio does not otherwise prevent for a task nobody awaits.
     tasks = set()
@@ -977,6 +1046,8 @@ async def handler(ws):
             printer.cancel()
         if dropper is not None:
             dropper.cancel()
+        if announcer is not None:
+            announcer.cancel()
         for task in tasks:
             task.cancel()
 
