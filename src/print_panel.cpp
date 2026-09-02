@@ -4,8 +4,12 @@
 #include "utils.h"
 #include "spdlog/spdlog.h"
 
+#include <algorithm>
 #include <map>
 #include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 
 LV_IMG_DECLARE(info_img);
 LV_IMG_DECLARE(print);
@@ -38,7 +42,10 @@ PrintPanel::PrintPanel(KWebSocketClient &websocket, std::mutex &lock, PrintStatu
   , cur_file(NULL)
   , file_panel(file_view)
   , print_status(ps)
-  , sorted_by(SORTED_BY_MODIFIED)
+  , sort_column(SORTED_BY_MODIFIED)
+  , sort_reversed(true)
+  , refresh_pending(false)
+  , refresh_timer(NULL)
 {
   spdlog::trace("building print panel");
   lv_obj_move_background(files_cont);
@@ -148,9 +155,18 @@ PrintPanel::PrintPanel(KWebSocketClient &websocket, std::mutex &lock, PrintStatu
   ws.register_method_callback("notify_filelist_changed",
 			      "PrintPanel",
 			      [this](json& d) { this->handle_filelist_changed(d); });
+
+  // The announcements arrive one per file and the refetch is the whole gcodes
+  // list, so they are coalesced here rather than acted on where they land.
+  refresh_timer = lv_timer_create(&PrintPanel::_handle_refresh_timer, 1000, this);
 }
 
 PrintPanel::~PrintPanel() {
+  if (refresh_timer != NULL) {
+    lv_timer_del(refresh_timer);
+    refresh_timer = NULL;
+  }
+
   if (files_cont != NULL) {
     lv_obj_del(files_cont);
     files_cont = NULL;
@@ -162,9 +178,11 @@ PrintPanel::~PrintPanel() {
   }
 }
 
-void PrintPanel::populate_files(json &j) {
-  sorted_by = SORTED_BY_MODIFIED;
-  show_dir(cur_dir, SORTED_BY_MODIFIED);
+// A refetch is not a request to be taken back to the top of a freshly sorted
+// list. It used to reset the sort here as well, which meant an announcement
+// undid an A-Z the user had picked.
+void PrintPanel::populate_files() {
+  show_dir(cur_dir, ListChange::Refetch);
 }
 
 void PrintPanel::consume(json &j) {  
@@ -182,9 +200,9 @@ void PrintPanel::consume(json &j) {
   }
 }
 
-// Runs on the libhv thread. subscribe() takes lv_lock in its own reply handler
-// rather than here, so this must not hold it, and the refetch is what redraws
-// rather than this.
+// Runs on the libhv thread, so it only raises a flag. The refetch itself is the
+// timer's, on the LVGL thread, which coalesces the burst an upload of several
+// files produces into one request.
 void PrintPanel::handle_filelist_changed(json &j) {
   auto &root_name = j["/params/0/item/root"_json_pointer];
   if (!root_name.is_null() && root_name.template get<std::string>() != "gcodes") {
@@ -192,14 +210,30 @@ void PrintPanel::handle_filelist_changed(json &j) {
     return;
   }
 
-  spdlog::debug("file list changed, refetching: {}", j.dump());
-  subscribe();
+  spdlog::debug("file list changed: {}", j.dump());
+  refresh_pending = true;
+}
+
+void PrintPanel::handle_refresh_timer() {
+  if (refresh_pending.exchange(false)) {
+    subscribe();
+  }
 }
 
 void PrintPanel::subscribe() {
   ws.send_jsonrpc("server.files.list", R"({"root":"gcodes"})"_json, [this](json &d) {
     std::lock_guard<std::mutex> lock(lv_lock);
     std::string cur_path = cur_dir->full_path;
+    std::string cur_file_name = cur_file != NULL ? cur_file->name : "";
+    std::string cur_file_path = cur_file != NULL ? cur_file->full_path : "";
+
+    // The tree is thrown away and rebuilt below, which used to take every
+    // cached metadata with it. Moonraker announces a filelist change when it
+    // has to scan a file it holds no metadata for, so a refresh that discards
+    // the cache asks again and is told again. See docs/audit.md C23.
+    std::map<std::string, std::pair<uint32_t, json>> metadata;
+    root.collect_metadata(metadata);
+
     root.clear();
     cur_file = NULL;
     cur_dir = NULL;
@@ -209,10 +243,25 @@ void PrintPanel::subscribe() {
         root.add_path(KUtils::split(f["path"], '/'), f["path"], f["modified"].template get<uint32_t>());
       }
     }
+    root.apply_metadata(metadata);
+
     Tree *dir = root.find_path(KUtils::split(cur_path, '/'));
     // need to simply this using the directory endpoint
     cur_dir = dir;
-    this->populate_files(d);
+
+    // find_path cannot be used for a file: it refuses to end on a leaf and
+    // returns the root for anything it cannot reach. The selection is always a
+    // child of the directory on screen, so look it up there, and compare the
+    // full path in case the directory itself went away and find_path fell back
+    // to the root.
+    if (!cur_file_name.empty()) {
+      Tree *f = cur_dir->get_child(cur_file_name);
+      if (f != NULL && f->is_leaf() && f->full_path == cur_file_path) {
+        cur_file = f;
+      }
+    }
+
+    this->populate_files();
   });
 }
 
@@ -254,13 +303,13 @@ void PrintPanel::handle_callback(lv_event_t *e) {
       if ((strcmp(filename, "..") == 0)) {
 	if (cur_dir->parent != cur_dir) {
 	  cur_dir = cur_dir->parent;
-	  show_dir(cur_dir, sorted_by);
+	  show_dir(cur_dir, ListChange::UserAction);
 	}
       } else {
 	Tree *dir = cur_dir->get_child(filename);
 	if (dir != NULL) {
 	  cur_dir = dir;
-	  show_dir(cur_dir, sorted_by);
+	  show_dir(cur_dir, ListChange::UserAction);
 	}
       }
     }
@@ -273,59 +322,126 @@ void PrintPanel::handle_callback(lv_event_t *e) {
   }
 }
 
-void PrintPanel::show_dir(Tree *dir, uint32_t sort_type) {
-  uint32_t index = 0;
-  lv_table_set_cell_value_fmt(file_table, index++, 0, LV_SYMBOL_DIRECTORY "  %s", "..");
+void PrintPanel::show_dir(Tree *dir, ListChange why) {
+  std::vector<Tree*> entries;
+  entries.reserve(dir->children.size());
+  for (auto &c : dir->children) {
+    entries.push_back(&c.second);
+  }
 
-  bool reversed = sorted_by & sort_type;
-  std::vector<Tree> sorted_files;
-  if (sort_type == SORTED_BY_MODIFIED) {
-    KUtils::sort_map_values<std::string, Tree>(dir->children, sorted_files, [reversed](Tree &x, Tree &y) {
-	if (x.is_leaf() && !y.is_leaf()) {
-	  return false;
-	} else if (!x.is_leaf() && y.is_leaf()) {
-	  return true;
+  // Directories first either way, then the chosen column. Sorting pointers
+  // rather than going through KUtils::sort_map_values, which takes its map by
+  // value and so deep copied every node and its metadata on each redraw.
+  const bool reversed = sort_reversed;
+  if (sort_column == SORTED_BY_MODIFIED) {
+    std::sort(entries.begin(), entries.end(), [reversed](Tree *x, Tree *y) {
+	if (x->is_leaf() != y->is_leaf()) {
+	  return !x->is_leaf();
 	}
 
-	return reversed ? x.date_modified > y.date_modified : y.date_modified > x.date_modified;
+	return reversed ? x->date_modified > y->date_modified : y->date_modified > x->date_modified;
       });
   } else {
-    KUtils::sort_map_values<std::string, Tree>(dir->children, sorted_files, [reversed](Tree &x, Tree &y) {
-	if (x.is_leaf() && !y.is_leaf()) {
-	  return false;
-	} else if (!x.is_leaf() && y.is_leaf()) {
-	  return true;
+    std::sort(entries.begin(), entries.end(), [reversed](Tree *x, Tree *y) {
+	if (x->is_leaf() != y->is_leaf()) {
+	  return !x->is_leaf();
 	}
 
-	return reversed ? x.name > y.name : y.name > x.name;
+	return reversed ? x->name > y->name : y->name > x->name;
       });
   }
-      
-  sorted_by = (sorted_by ^ sort_type) & sort_type;
-  for (const auto &c : sorted_files) {
-    if (c.is_leaf()) {
-      lv_table_set_cell_value_fmt(file_table, index, 0, LV_SYMBOL_FILE "  %s", c.name.c_str());
-    } else {
-      lv_table_set_cell_value_fmt(file_table, index, 0, LV_SYMBOL_DIRECTORY "  %s", c.name.c_str());
-    }
-    index++;
+
+  std::vector<std::string> rows;
+  rows.reserve(entries.size() + 1);
+  rows.push_back(LV_SYMBOL_DIRECTORY "  ..");
+  for (const Tree *e : entries) {
+    rows.push_back((e->is_leaf() ? LV_SYMBOL_FILE "  " : LV_SYMBOL_DIRECTORY "  ") + e->name);
   }
 
-  lv_table_set_row_cnt(file_table, index);
-  lv_obj_scroll_to_y(file_table, 0, LV_ANIM_OFF);
+  bool same_rows = lv_table_get_row_cnt(file_table) == rows.size();
+  for (uint16_t r = 0; same_rows && r < rows.size(); r++) {
+    same_rows = rows[r] == lv_table_get_cell_value(file_table, r, 0);
+  }
 
-  // XXX: maybe use the directory instead of file endpoint in moonraker
-  for (auto &c : sorted_files) {
-    if (c.is_leaf()) {
-      const auto &selected = dir->children.find(c.name);
-      if (selected != dir->children.cend()) {
-	cur_file = &selected->second;
-	show_file_detail(cur_file);
+  // Moonraker announces a filelist change for things that do not change the
+  // list, a metadata scan among them. Rewriting the table for one of those cost
+  // the scroll position, the selection and a thumbnail decode, all for the same
+  // rows. Issue #5.
+  if (same_rows && why == ListChange::Refetch) {
+    spdlog::trace("file list refetched unchanged, leaving the view alone");
+    return;
+  }
+
+  // Hold the view on the row that is at the top of it, not on the pixel offset.
+  // The default sort puts new files first, so an offset held constant while
+  // rows are inserted above it walks the list under the user just as visibly as
+  // the scroll reset did.
+  std::string anchor;
+  lv_coord_t row_h = 0;
+  uint16_t anchor_row = 0;
+  if (why == ListChange::Refetch) {
+    uint16_t old_cnt = lv_table_get_row_cnt(file_table);
+    lv_coord_t total = lv_obj_get_scroll_y(file_table)
+      + lv_obj_get_content_height(file_table)
+      + lv_obj_get_scroll_bottom(file_table);
+    if (old_cnt > 0 && total > 0) {
+      // Rounded, not truncated. The rows are not quite uniform: measured on a
+      // 48 row list the total was 2783, which is 47 rows of 58 and one of 57,
+      // and truncating gave 57 for all of them. That under-scrolled by a pixel
+      // per inserted row, so the view crept upwards over a batch of uploads.
+      row_h = (total + old_cnt / 2) / old_cnt;
+    }
+    if (row_h > 0) {
+      anchor_row = lv_obj_get_scroll_y(file_table) / row_h;
+      if (anchor_row < old_cnt) {
+        anchor = lv_table_get_cell_value(file_table, anchor_row, 0);
       }
-      break;
     }
   }
 
+  for (uint16_t r = 0; r < rows.size(); r++) {
+    lv_table_set_cell_value(file_table, r, 0, rows[r].c_str());
+  }
+  lv_table_set_row_cnt(file_table, rows.size());
+  lv_obj_update_layout(file_table);
+
+  if (why == ListChange::Refetch) {
+    const auto &at = std::find(rows.cbegin(), rows.cend(), anchor);
+    if (!anchor.empty() && at != rows.cend()) {
+      lv_coord_t moved = (lv_coord_t)(at - rows.cbegin()) - (lv_coord_t)anchor_row;
+      if (moved != 0) {
+        lv_obj_scroll_by(file_table, 0, -moved * row_h, LV_ANIM_OFF);
+      }
+    }
+
+    // Both ends, because the anchor can move either way. scroll_bottom goes
+    // negative once the view is past the end of a list that shrank, and
+    // scroll_y goes negative once it is above the start.
+    lv_coord_t past_end = -lv_obj_get_scroll_bottom(file_table);
+    if (past_end > 0) {
+      lv_obj_scroll_by(file_table, 0, past_end, LV_ANIM_OFF);
+    }
+    lv_coord_t above_start = lv_obj_get_scroll_y(file_table);
+    if (above_start < 0) {
+      lv_obj_scroll_by(file_table, 0, above_start, LV_ANIM_OFF);
+    }
+  } else {
+    lv_obj_scroll_to_y(file_table, 0, LV_ANIM_OFF);
+  }
+
+  // A user asking for a different view gets the first file of it. A refetch
+  // keeps whatever was selected, and only falls back here when that file is
+  // gone, because refresh_view reloads the thumbnail from disk.
+  if (why == ListChange::UserAction || cur_file == NULL) {
+    cur_file = NULL;
+    for (Tree *e : entries) {
+      if (e->is_leaf()) {
+	cur_file = e;
+	show_file_detail(cur_file);
+	break;
+      }
+    }
+  }
 }
 
 void PrintPanel::show_file_detail(Tree *f) {
@@ -419,10 +535,16 @@ void PrintPanel::handle_btns(lv_event_t *event) {
       subscribe();
       
     } else if (btn == modified_sort_btn) {
-      show_dir(cur_dir, SORTED_BY_MODIFIED);
+      // Pressing the column already sorted on reverses it. Arriving at a column
+      // takes its natural order: newest first, or A before Z.
+      sort_reversed = sort_column == SORTED_BY_MODIFIED ? !sort_reversed : true;
+      sort_column = SORTED_BY_MODIFIED;
+      show_dir(cur_dir, ListChange::UserAction);
 
     } else if (btn == az_sort_btn) {
-      show_dir(cur_dir, SORTED_BY_NAME);
+      sort_reversed = sort_column == SORTED_BY_NAME ? !sort_reversed : false;
+      sort_column = SORTED_BY_NAME;
+      show_dir(cur_dir, ListChange::UserAction);
     }
   }
 }

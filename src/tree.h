@@ -4,6 +4,9 @@
 #include <sstream>
 #include <vector>
 #include <iterator>
+#include <map>
+#include <string>
+#include <utility>
 
 #include "file_panel.h"
 #include "spdlog/spdlog.h"
@@ -112,6 +115,37 @@ Tree(const std::string &filename, const std::string &path, uint32_t modified)
 
   void clear() {
     children.clear();
+  }
+
+  // Metadata survives the rebuild in PrintPanel::subscribe, which throws the
+  // whole tree away and asks moonraker for the list again. Without this every
+  // refresh re-requests server.files.metadata for whatever is on screen, and
+  // moonraker announces a filelist change whenever it has to scan a file it has
+  // no metadata for, so the refresh and the request feed each other. See
+  // docs/audit.md C23.
+  //
+  // Keyed by full_path and qualified by date_modified, so a file replaced under
+  // the same name misses and is scanned again.
+  void collect_metadata(std::map<std::string, std::pair<uint32_t, json>> &out) const {
+    if (has_metadata) {
+      out.insert({full_path, {date_modified, metadata}});
+    }
+
+    for (const auto &c : children) {
+      c.second.collect_metadata(out);
+    }
+  }
+
+  void apply_metadata(const std::map<std::string, std::pair<uint32_t, json>> &in) {
+    const auto &entry = in.find(full_path);
+    if (entry != in.cend() && entry->second.first == date_modified) {
+      has_metadata = true;
+      metadata = entry->second.second;
+    }
+
+    for (auto &c : children) {
+      c.second.apply_metadata(in);
+    }
   }
 
   const char* get_thumbpath() {
