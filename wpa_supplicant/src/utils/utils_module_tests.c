@@ -127,9 +127,11 @@ static int printf_encode_decode_tests(void)
 
 static int bitfield_tests(void)
 {
-	struct bitfield *bf;
+	struct bitfield *bf, *bf_a = NULL, *bf_b = NULL, *bf_c = NULL;
 	int i;
 	int errors = 0;
+	u8 data_a[4] = { 0xff, 0x3f, 0x01, 0xf0 };
+	u8 data_b[4] = { 0xff, 0xc0, 0xfe, 0x0f };
 
 	wpa_printf(MSG_INFO, "bitfield tests");
 
@@ -210,6 +212,76 @@ static int bitfield_tests(void)
 		errors++;
 	bitfield_free(bf);
 
+	bf_a = bitfield_alloc_data(data_a, sizeof(data_a));
+	if (!bf_a)
+		goto fail;
+
+	bf_b = bitfield_alloc_data(data_b, sizeof(data_b));
+	if (!bf_b)
+		goto fail;
+
+	bf_c = bitfield_dup(bf_a);
+	if (!bf_c)
+		goto fail;
+
+	/* test intersection */
+	if (bitfield_intersect_in_place(bf_c, bf_b))
+		goto fail;
+
+	for (i = 0; i < 8; i++)
+		if (!bitfield_is_set(bf_c, i))
+			goto fail;
+
+	for (; i < 32; i++)
+		if (bitfield_is_set(bf_c, i))
+			goto fail;
+
+	bitfield_free(bf_c);
+
+	/* test union */
+	bf_c = bitfield_union(bf_a, bf_b);
+	if (!bf_c)
+		goto fail;
+
+	if (!bitfield_intersects(bf_a, bf_c) ||
+	    !bitfield_intersects(bf_b, bf_c) ||
+	    !bitfield_intersects(bf_c, bf_a) ||
+	    !bitfield_intersects(bf_c, bf_b) ||
+	    !bitfield_intersects(bf_a, bf_b))
+		goto fail;
+
+	for (i = 0; i < 32; i++)
+		if (!bitfield_is_set(bf_c, i))
+			goto fail;
+
+	if (!bitfield_is_subset(bf_c, bf_a) ||
+	    !bitfield_is_subset(bf_c, bf_b) ||
+	    bitfield_is_subset(bf_a, bf_c) ||
+	    bitfield_is_subset(bf_b, bf_c) ||
+	    bitfield_is_subset(bf_a, bf_b))
+		goto fail;
+
+	/* test in place union */
+	if (bitfield_union_in_place(bf_a, bf_b))
+		goto fail;
+
+	if (bitfield_size(bf_a) != 32 ||
+	    bitfield_size(bf_b) != 32 ||
+	    bitfield_size(bf_c) != 32)
+		goto fail;
+
+	for (i = 0; i < 32; i++)
+		if (!bitfield_is_set(bf_c, i))
+			goto fail;
+	goto out;
+
+fail:
+	errors++;
+out:
+	bitfield_free(bf_a);
+	bitfield_free(bf_c);
+	bitfield_free(bf_b);
+
 	if (errors) {
 		wpa_printf(MSG_ERROR, "%d bitfield test(s) failed", errors);
 		return -1;
@@ -226,7 +298,7 @@ static int int_array_tests(void)
 	int test3[] = { 1, 1, 1, -1, 2, 3, 4, 1, 2, 0 };
 	int test3_res[] = { -1, 1, 2, 3, 4, 0 };
 	int errors = 0;
-	int len;
+	size_t len;
 
 	wpa_printf(MSG_INFO, "int_array tests");
 
@@ -296,52 +368,53 @@ static int base64_tests(void)
 {
 	int errors = 0;
 	unsigned char *res;
+	char *res2;
 	size_t res_len;
 
 	wpa_printf(MSG_INFO, "base64 tests");
 
-	res = base64_encode((const unsigned char *) "", ~0, &res_len);
+	res2 = base64_encode("", ~0, &res_len);
+	if (res2) {
+		errors++;
+		os_free(res2);
+	}
+
+	res2 = base64_encode("=", 1, &res_len);
+	if (!res2 || res_len != 5 || res2[0] != 'P' || res2[1] != 'Q' ||
+	    res2[2] != '=' || res2[3] != '=' || res2[4] != '\n')
+		errors++;
+	os_free(res2);
+
+	res2 = base64_encode("=", 1, NULL);
+	if (!res2 || res2[0] != 'P' || res2[1] != 'Q' ||
+	    res2[2] != '=' || res2[3] != '=' || res2[4] != '\n')
+		errors++;
+	os_free(res2);
+
+	res = base64_decode("", 0, &res_len);
 	if (res) {
 		errors++;
 		os_free(res);
 	}
 
-	res = base64_encode((const unsigned char *) "=", 1, &res_len);
-	if (!res || res_len != 5 || res[0] != 'P' || res[1] != 'Q' ||
-	    res[2] != '=' || res[3] != '=' || res[4] != '\n')
-		errors++;
-	os_free(res);
-
-	res = base64_encode((const unsigned char *) "=", 1, NULL);
-	if (!res || res[0] != 'P' || res[1] != 'Q' ||
-	    res[2] != '=' || res[3] != '=' || res[4] != '\n')
-		errors++;
-	os_free(res);
-
-	res = base64_decode((const unsigned char *) "", 0, &res_len);
+	res = base64_decode("a", 1, &res_len);
 	if (res) {
 		errors++;
 		os_free(res);
 	}
 
-	res = base64_decode((const unsigned char *) "a", 1, &res_len);
+	res = base64_decode("====", 4, &res_len);
 	if (res) {
 		errors++;
 		os_free(res);
 	}
 
-	res = base64_decode((const unsigned char *) "====", 4, &res_len);
-	if (res) {
-		errors++;
-		os_free(res);
-	}
-
-	res = base64_decode((const unsigned char *) "PQ==", 4, &res_len);
+	res = base64_decode("PQ==", 4, &res_len);
 	if (!res || res_len != 1 || res[0] != '=')
 		errors++;
 	os_free(res);
 
-	res = base64_decode((const unsigned char *) "P.Q-=!=*", 8, &res_len);
+	res = base64_decode("P.Q-=!=*", 8, &res_len);
 	if (!res || res_len != 1 || res[0] != '=')
 		errors++;
 	os_free(res);
@@ -863,6 +936,9 @@ static const struct json_test_data json_test_cases[] = {
 	{ "{\"t\":truetrue}", NULL },
 	{ "\"test\"", "[1:STRING:]" },
 	{ "123", "[1:NUMBER:]" },
+	{ "4.5", "[1:DOUBLE:]" },
+	{ "-6.7e-3", "[1:DOUBLE:]" },
+	{ "8.9e4", "[1:DOUBLE:]" },
 	{ "true", "[1:BOOLEAN:]" },
 	{ "false", "[1:BOOLEAN:]" },
 	{ "null", "[1:NULL:]" },
@@ -890,13 +966,16 @@ static int json_tests(void)
 	unsigned int i;
 	struct json_token *root;
 	char buf[1000];
+	static const char *dval[] = { "-6.78e-2", "8.9e3" };
+	double exp_dval[] = { -6.78e-2, 8.9e3 };
+	int res;
 
 	wpa_printf(MSG_INFO, "JSON tests");
 
 	for (i = 0; i < ARRAY_SIZE(json_test_cases); i++) {
 		const struct json_test_data *test = &json_test_cases[i];
-		int res = 0;
 
+		res = 0;
 		root = json_parse(test->json, os_strlen(test->json));
 		if ((root && !test->tree) || (!root && test->tree)) {
 			wpa_printf(MSG_INFO, "JSON test %u failed", i);
@@ -915,6 +994,21 @@ static int json_tests(void)
 			return -1;
 
 	}
+
+	for (i = 0; i < ARRAY_SIZE(dval); i++) {
+		root = json_parse(dval[i], os_strlen(dval[i]));
+		if (!root) {
+			wpa_printf(MSG_INFO, "JSON test dval %u failed", i);
+			return -1;
+		}
+		if (root->type != JSON_DOUBLE || root->dnumber != exp_dval[i]) {
+			wpa_printf(MSG_INFO, "JSON test dval %u failed", i);
+			res = -1;
+		}
+		json_free(root);
+		if (res < 0)
+			return -1;
+	}
 #endif /* CONFIG_JSON */
 	return 0;
 }
@@ -929,7 +1023,7 @@ static int const_time_tests(void)
 		{ 0, 0 },
 		{ 1, 0 },
 		{ 2, 0 },
-		{ 1 << (sizeof(unsigned int) * 8 - 1), ~0 },
+		{ 1U << (sizeof(unsigned int) * 8 - 1), ~0 },
 		{ ~0 - 1, ~0 },
 		{ ~0, ~0 }
 	};
@@ -940,7 +1034,7 @@ static int const_time_tests(void)
 		{ 0, ~0 },
 		{ 1, 0 },
 		{ 2, 0 },
-		{ 1 << (sizeof(unsigned int) * 8 - 1), 0 },
+		{ 1U << (sizeof(unsigned int) * 8 - 1), 0 },
 		{ ~0 - 1, 0 },
 		{ ~0, 0 }
 	};

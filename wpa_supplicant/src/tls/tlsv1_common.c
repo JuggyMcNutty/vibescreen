@@ -76,16 +76,8 @@ static const struct tls_cipher_suite tls_cipher_suites[] = {
 static const struct tls_cipher_data tls_ciphers[] = {
 	{ TLS_CIPHER_NULL,         TLS_CIPHER_STREAM,  0,  0,  0,
 	  CRYPTO_CIPHER_NULL },
-	{ TLS_CIPHER_IDEA_CBC,     TLS_CIPHER_BLOCK,  16, 16,  8,
-	  CRYPTO_CIPHER_NULL },
-	{ TLS_CIPHER_RC2_CBC_40,   TLS_CIPHER_BLOCK,   5, 16,  0,
-	  CRYPTO_CIPHER_ALG_RC2 },
-	{ TLS_CIPHER_RC4_40,       TLS_CIPHER_STREAM,  5, 16,  0,
-	  CRYPTO_CIPHER_ALG_RC4 },
 	{ TLS_CIPHER_RC4_128,      TLS_CIPHER_STREAM, 16, 16,  0,
 	  CRYPTO_CIPHER_ALG_RC4 },
-	{ TLS_CIPHER_DES40_CBC,    TLS_CIPHER_BLOCK,   5,  8,  8,
-	  CRYPTO_CIPHER_ALG_DES },
 	{ TLS_CIPHER_DES_CBC,      TLS_CIPHER_BLOCK,   8,  8,  8,
 	  CRYPTO_CIPHER_ALG_DES },
 	{ TLS_CIPHER_3DES_EDE_CBC, TLS_CIPHER_BLOCK,  24, 24,  8,
@@ -378,7 +370,7 @@ int tlsv12_key_x_server_params_hash(u16 tls_version, u8 hash_alg,
 int tls_key_x_server_params_hash(u16 tls_version, const u8 *client_random,
 				 const u8 *server_random,
 				 const u8 *server_params,
-				 size_t server_params_len, u8 *hash)
+				 size_t server_params_len, u8 *hash, size_t hsz)
 {
 	u8 *hpos;
 	size_t hlen;
@@ -393,6 +385,8 @@ int tls_key_x_server_params_hash(u16 tls_version, const u8 *client_random,
 	crypto_hash_update(ctx, server_random, TLS_RANDOM_LEN);
 	crypto_hash_update(ctx, server_params, server_params_len);
 	hlen = MD5_MAC_LEN;
+	if (hsz < hlen)
+		return -1;
 	if (crypto_hash_finish(ctx, hash, &hlen) < 0)
 		return -1;
 	hpos += hlen;
@@ -403,7 +397,7 @@ int tls_key_x_server_params_hash(u16 tls_version, const u8 *client_random,
 	crypto_hash_update(ctx, client_random, TLS_RANDOM_LEN);
 	crypto_hash_update(ctx, server_random, TLS_RANDOM_LEN);
 	crypto_hash_update(ctx, server_params, server_params_len);
-	hlen = hash + sizeof(hash) - hpos;
+	hlen = hsz - hlen;
 	if (crypto_hash_finish(ctx, hpos, &hlen) < 0)
 		return -1;
 	hpos += hlen;

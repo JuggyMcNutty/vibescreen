@@ -205,11 +205,28 @@ static struct wpabuf * p2p_group_encaps_probe_resp(struct wpabuf *subelems)
 }
 
 
+struct wpabuf * p2p_group_build_p2p2_ie(struct p2p_data *p2p,
+					struct wpabuf *p2p2_ie, int freq)
+{
+	u8 *len;
+
+	wpabuf_put_u8(p2p2_ie, WLAN_EID_VENDOR_SPECIFIC);
+	len = wpabuf_put(p2p2_ie, 1);
+	wpabuf_put_be32(p2p2_ie, P2P2_IE_VENDOR_TYPE);
+	wpa_printf(MSG_DEBUG, "P2P: * P2P2 IE header");
+	p2p_buf_add_pcea(p2p2_ie, p2p);
+	*len = (u8 *) wpabuf_put(p2p2_ie, 0) - len - 1;
+
+	return p2p2_ie;
+}
+
+
 static struct wpabuf * p2p_group_build_beacon_ie(struct p2p_group *group)
 {
 	struct wpabuf *ie;
 	u8 *len;
 	size_t extra = 0;
+	struct wpabuf *p2p2_ie;
 
 #ifdef CONFIG_WIFI_DISPLAY
 	if (group->p2p->wfd_ie_beacon)
@@ -220,7 +237,7 @@ static struct wpabuf * p2p_group_build_beacon_ie(struct p2p_group *group)
 	    group->p2p->vendor_elem[VENDOR_ELEM_BEACON_P2P_GO])
 		extra += wpabuf_len(group->p2p->vendor_elem[VENDOR_ELEM_BEACON_P2P_GO]);
 
-	ie = wpabuf_alloc(257 + extra);
+	ie = wpabuf_alloc(500 + extra);
 	if (ie == NULL)
 		return NULL;
 
@@ -239,6 +256,17 @@ static struct wpabuf * p2p_group_build_beacon_ie(struct p2p_group *group)
 	p2p_buf_add_device_id(ie, group->p2p->cfg->dev_addr);
 	p2p_group_add_noa(ie, group->noa);
 	p2p_buf_update_ie_hdr(ie, len);
+
+	if (group->cfg->p2p2) {
+		p2p2_ie = wpabuf_alloc(255);
+		if (!p2p2_ie) {
+			wpabuf_free(ie);
+			return NULL;
+		}
+
+		p2p_group_build_p2p2_ie(group->p2p, p2p2_ie, group->cfg->freq);
+		ie = wpabuf_concat(p2p2_ie, ie);
+	}
 
 	return ie;
 }
@@ -443,6 +471,7 @@ void p2p_group_buf_add_id(struct p2p_group *group, struct wpabuf *buf)
 static struct wpabuf * p2p_group_build_probe_resp_ie(struct p2p_group *group)
 {
 	struct wpabuf *p2p_subelems, *ie;
+	struct wpabuf *p2p2_ie;
 
 	p2p_subelems = wpabuf_alloc(500);
 	if (p2p_subelems == NULL)
@@ -474,7 +503,16 @@ static struct wpabuf * p2p_group_build_probe_resp_ie(struct p2p_group *group)
 		ie = wpabuf_concat(wfd, ie);
 	}
 #endif /* CONFIG_WIFI_DISPLAY */
+	if (group->cfg->p2p2) {
+		p2p2_ie = wpabuf_alloc(255);
+		if (!p2p2_ie) {
+			wpabuf_free(ie);
+			return NULL;
+		}
 
+		p2p_group_build_p2p2_ie(group->p2p, p2p2_ie, group->cfg->freq);
+		ie = wpabuf_concat(p2p2_ie, ie);
+	}
 	return ie;
 }
 
@@ -579,7 +617,7 @@ static int p2p_group_remove_member(struct p2p_group *group, const u8 *addr)
 	m = group->members;
 	prev = NULL;
 	while (m) {
-		if (os_memcmp(m->addr, addr, ETH_ALEN) == 0)
+		if (ether_addr_equal(m->addr, addr))
 			break;
 		prev = m;
 		m = m->next;
@@ -648,6 +686,7 @@ struct wpabuf * p2p_group_assoc_resp_ie(struct p2p_group *group, u8 status)
 	struct wpabuf *resp;
 	u8 *rlen;
 	size_t extra = 0;
+	struct wpabuf *p2p2_ie;
 
 #ifdef CONFIG_WIFI_DISPLAY
 	if (group->wfd_ie)
@@ -682,6 +721,17 @@ struct wpabuf * p2p_group_assoc_resp_ie(struct p2p_group *group, u8 status)
 	if (status != P2P_SC_SUCCESS)
 		p2p_buf_add_status(resp, status);
 	p2p_buf_update_ie_hdr(resp, rlen);
+
+	if (group->cfg->p2p2) {
+		p2p2_ie = wpabuf_alloc(255);
+		if (!p2p2_ie) {
+			wpabuf_free(resp);
+			return NULL;
+		}
+
+		p2p_group_build_p2p2_ie(group->p2p, p2p2_ie, group->cfg->freq);
+		resp = wpabuf_concat(p2p2_ie, resp);
+	}
 
 	return resp;
 }
@@ -785,11 +835,11 @@ int p2p_group_match_dev_id(struct p2p_group *group, struct wpabuf *p2p)
 	if (!msg.device_id)
 		return 1; /* No filter on Device ID */
 
-	if (os_memcmp(msg.device_id, group->p2p->cfg->dev_addr, ETH_ALEN) == 0)
+	if (ether_addr_equal(msg.device_id, group->p2p->cfg->dev_addr))
 		return 1; /* Match with our P2P Device Address */
 
 	for (m = group->members; m; m = m->next) {
-		if (os_memcmp(msg.device_id, m->dev_addr, ETH_ALEN) == 0)
+		if (ether_addr_equal(msg.device_id, m->dev_addr))
 			return 1; /* Match with group client P2P Device Address */
 	}
 
@@ -844,7 +894,7 @@ static struct p2p_group_member * p2p_group_get_client(struct p2p_group *group,
 	struct p2p_group_member *m;
 
 	for (m = group->members; m; m = m->next) {
-		if (os_memcmp(dev_id, m->dev_addr, ETH_ALEN) == 0)
+		if (ether_addr_equal(dev_id, m->dev_addr))
 			return m;
 	}
 
@@ -872,7 +922,7 @@ static struct p2p_group_member * p2p_group_get_client_iface(
 	struct p2p_group_member *m;
 
 	for (m = group->members; m; m = m->next) {
-		if (os_memcmp(interface_addr, m->addr, ETH_ALEN) == 0)
+		if (ether_addr_equal(interface_addr, m->addr))
 			return m;
 	}
 
@@ -1038,7 +1088,7 @@ int p2p_group_is_client_connected(struct p2p_group *group, const u8 *dev_addr)
 	struct p2p_group_member *m;
 
 	for (m = group->members; m; m = m->next) {
-		if (os_memcmp(m->dev_addr, dev_addr, ETH_ALEN) == 0)
+		if (ether_addr_equal(m->dev_addr, dev_addr))
 			return 1;
 	}
 
@@ -1051,7 +1101,7 @@ int p2p_group_is_group_id_match(struct p2p_group *group, const u8 *group_id,
 {
 	if (group_id_len != ETH_ALEN + group->cfg->ssid_len)
 		return 0;
-	if (os_memcmp(group_id, group->p2p->cfg->dev_addr, ETH_ALEN) != 0)
+	if (!ether_addr_equal(group_id, group->p2p->cfg->dev_addr))
 		return 0;
 	return os_memcmp(group_id + ETH_ALEN, group->cfg->ssid,
 			 group->cfg->ssid_len) == 0;

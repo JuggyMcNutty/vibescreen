@@ -1,25 +1,16 @@
-all: libap.a
-
-clean:
-	rm -f *~ *.o *.d *.gcno *.gcda *.gcov libap.a
-
-install:
-	@echo Nothing to be made.
-
-include ../lib.rules
-
 CFLAGS += -DHOSTAPD
 CFLAGS += -DNEED_AP_MLME
 CFLAGS += -DCONFIG_ETH_P_OUI
 CFLAGS += -DCONFIG_HS20
 CFLAGS += -DCONFIG_INTERWORKING
+CFLAGS += -DCONFIG_IEEE80211AC
+CFLAGS += -DCONFIG_IEEE80211AX
+CFLAGS += -DCONFIG_IEEE80211BE
 CFLAGS += -DCONFIG_IEEE80211R
 CFLAGS += -DCONFIG_IEEE80211R_AP
-CFLAGS += -DCONFIG_IEEE80211W
 CFLAGS += -DCONFIG_WPS
 CFLAGS += -DCONFIG_PROXYARP
 CFLAGS += -DCONFIG_IPV6
-CFLAGS += -DCONFIG_IAPP
 CFLAGS += -DCONFIG_AIRTIME_POLICY
 
 LIB_OBJS= \
@@ -42,13 +33,15 @@ LIB_OBJS= \
 	hostapd.o \
 	hs20.o \
 	hw_features.o \
-	iapp.o \
 	ieee802_11_auth.o \
 	ieee802_11.o \
+	ieee802_11_eht.o \
+	ieee802_11_he.o \
 	ieee802_11_ht.o \
 	ieee802_11_shared.o \
 	ieee802_11_vht.o \
 	ieee802_1x.o \
+	interference.o \
 	neighbor_db.o \
 	ndisc_snoop.o \
 	p2p_hostapd.o \
@@ -70,7 +63,4 @@ LIB_OBJS= \
 	wps_hostapd.o \
 	x_snoop.o
 
-libap.a: $(LIB_OBJS)
-	$(AR) crT $@ $?
-
--include $(OBJS:%.o=%.d)
+include ../lib.rules

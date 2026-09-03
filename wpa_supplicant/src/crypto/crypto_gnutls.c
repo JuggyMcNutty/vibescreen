@@ -439,14 +439,6 @@ struct crypto_cipher * crypto_cipher_init(enum crypto_cipher_alg alg,
 		res = gcry_cipher_open(&ctx->enc, a, GCRY_CIPHER_MODE_CBC, 0);
 		gcry_cipher_open(&ctx->dec, a, GCRY_CIPHER_MODE_CBC, 0);
 		break;
-	case CRYPTO_CIPHER_ALG_RC2:
-		if (key_len == 5)
-			a = GCRY_CIPHER_RFC2268_40;
-		else
-			a = GCRY_CIPHER_RFC2268_128;
-		res = gcry_cipher_open(&ctx->enc, a, GCRY_CIPHER_MODE_CBC, 0);
-		gcry_cipher_open(&ctx->dec, a, GCRY_CIPHER_MODE_CBC, 0);
-		break;
 	default:
 		os_free(ctx);
 		return NULL;
@@ -503,4 +495,9 @@ void crypto_cipher_deinit(struct crypto_cipher *ctx)
 	gcry_cipher_close(ctx->enc);
 	gcry_cipher_close(ctx->dec);
 	os_free(ctx);
+}
+
+
+void crypto_unload(void)
+{
 }

@@ -161,8 +161,12 @@ libspdlog.a:
 	@cmake -B $(SPDLOG_DIR)/build -S $(SPDLOG_DIR)/ -DCMAKE_CXX_COMPILER=$(CXX)
 	$(MAKE) -C $(SPDLOG_DIR)/build -j$(NPROC)
 
+# hostap 2.12 dropped CROSS_COMPILE from its build system: its Makefile no
+# longer derives CC from it, so a cross build now needs CC and AR passed in.
+# $(CC)/$(AR) are the cross tools under CROSS_COMPILE and plain cc/ar otherwise,
+# which is what the simulator wants.
 wpaclient:
-	$(MAKE) -C wpa_supplicant/wpa_supplicant -j$(NPROC) libwpa_client.a
+	$(MAKE) -C wpa_supplicant/wpa_supplicant -j$(NPROC) CC='$(CC)' AR='$(AR)' libwpa_client.a
 
 $(BUILD_OBJ_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)

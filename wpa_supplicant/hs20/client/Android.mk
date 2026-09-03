@@ -30,10 +30,7 @@ L_CFLAGS += -DCONFIG_CTRL_IFACE
 L_CFLAGS += -DCONFIG_CTRL_IFACE_UNIX
 L_CFLAGS += -DCONFIG_CTRL_IFACE_CLIENT_DIR=\"/data/misc/wifi/sockets\"
 
-OBJS = spp_client.c
-OBJS += oma_dm_client.c
-OBJS += osu_client.c
-OBJS += est.c
+OBJS = osu_client.c
 OBJS += ../../src/common/wpa_ctrl.c
 OBJS += ../../src/common/wpa_helpers.c
 OBJS += ../../src/utils/xml-utils.c
@@ -60,6 +57,10 @@ L_CFLAGS += -DEAP_TLS_OPENSSL
 
 L_CFLAGS += -Wno-unused-parameter
 
+ifeq ($(shell test $(PLATFORM_VERSION_LAST_STABLE) -ge 8 ; echo $$?), 0)
+L_CFLAGS += -DCONFIG_ANDROID_LOG
+L_CFLAGS += -DANDROID_LOG_NAME='"hs20-osu-client"'
+endif
 
 ########################
 include $(CLEAR_VARS)
@@ -68,9 +69,15 @@ LOCAL_MODULE_TAGS := optional
 
 LOCAL_SHARED_LIBRARIES := libc libcutils
 LOCAL_SHARED_LIBRARIES += libcrypto libssl
+ifeq ($(shell test $(PLATFORM_VERSION_LAST_STABLE) -ge 8 ; echo $$?), 0)
+LOCAL_VENDOR_MODULE := true
+LOCAL_SHARED_LIBRARIES += libxml2
+LOCAL_SHARED_LIBRARIES += liblog
+else
 #LOCAL_SHARED_LIBRARIES += libxml2
 LOCAL_STATIC_LIBRARIES += libxml2
 LOCAL_SHARED_LIBRARIES += libicuuc
+endif # End of check for platform version
 LOCAL_SHARED_LIBRARIES += libcurl
 
 LOCAL_CFLAGS := $(L_CFLAGS)

@@ -37,20 +37,28 @@ int wpas_p2p_connect(struct wpa_supplicant *wpa_s, const u8 *peer_addr,
 		     int persistent_group, int auto_join, int join, int auth,
 		     int go_intent, int freq, unsigned int vht_center_freq2,
 		     int persistent_id, int pd, int ht40, int vht,
-		     unsigned int vht_chwidth, int he, const u8 *group_ssid,
-		     size_t group_ssid_len);
+		     unsigned int vht_chwidth, int he, int edmg,
+		     const u8 *group_ssid, size_t group_ssid_len,
+		     bool allow_6ghz, bool p2p2, u16 bootstrap,
+		     const char *password, bool skip_prov);
 int wpas_p2p_handle_frequency_conflicts(struct wpa_supplicant *wpa_s,
                                           int freq, struct wpa_ssid *ssid);
 int wpas_p2p_group_add(struct wpa_supplicant *wpa_s, int persistent_group,
 		       int freq, int vht_center_freq2, int ht40, int vht,
-		       int max_oper_chwidth, int he);
+		       int max_oper_chwidth, int he, int edmg, bool allow_6ghz,
+		       bool p2p2, enum wpa_p2p_mode p2p_mode);
 int wpas_p2p_group_add_persistent(struct wpa_supplicant *wpa_s,
 				  struct wpa_ssid *ssid, int addr_allocated,
 				  int force_freq, int neg_freq,
-				  int vht_center_freq2, int ht40,
-				  int vht, int max_oper_chwidth, int he,
+				  int vht_center_freq2, int ht40, int vht,
+				  int max_oper_chwidth, int he, int edmg,
 				  const struct p2p_channels *channels,
-				  int connection_timeout, int force_scan);
+				  int connection_timeout, int force_scan,
+				  bool allow_6ghz, int retry_limit,
+				  const u8 *go_bssid, const u8 *dev_addr,
+				  const u8 *pmkid, const u8 *pmk,
+				  size_t pmk_len, bool join,
+				  bool is_invitation);
 struct p2p_group * wpas_p2p_group_init(struct wpa_supplicant *wpa_s,
 				       struct wpa_ssid *ssid);
 enum wpas_p2p_prov_disc_use {
@@ -60,7 +68,7 @@ enum wpas_p2p_prov_disc_use {
 	WPAS_P2P_PD_FOR_ASP
 };
 int wpas_p2p_prov_disc(struct wpa_supplicant *wpa_s, const u8 *peer_addr,
-		       const char *config_method,
+		       const char *config_method, u16 bootstrap,
 		       enum wpas_p2p_prov_disc_use use,
 		       struct p2ps_provision *p2ps_prov);
 void wpas_send_action_tx_status(struct wpa_supplicant *wpa_s, const u8 *dst,
@@ -73,7 +81,8 @@ int wpas_p2p_find(struct wpa_supplicant *wpa_s, unsigned int timeout,
 		  enum p2p_discovery_type type,
 		  unsigned int num_req_dev_types, const u8 *req_dev_types,
 		  const u8 *dev_id, unsigned int search_delay,
-		  u8 seek_cnt, const char **seek_string, int freq);
+		  u8 seek_cnt, const char **seek_string, int freq,
+		  bool include_6ghz);
 void wpas_p2p_stop_find(struct wpa_supplicant *wpa_s);
 int wpas_p2p_listen(struct wpa_supplicant *wpa_s, unsigned int timeout);
 int wpas_p2p_listen_start(struct wpa_supplicant *wpa_s, unsigned int timeout);
@@ -116,10 +125,12 @@ void wpas_sd_response(void *ctx, const u8 *sa, u16 update_indic,
 int wpas_p2p_reject(struct wpa_supplicant *wpa_s, const u8 *addr);
 int wpas_p2p_invite(struct wpa_supplicant *wpa_s, const u8 *peer_addr,
 		    struct wpa_ssid *ssid, const u8 *go_dev_addr, int freq,
-		    int vht_center_freq2, int ht40, int vht,
-		    int max_oper_chwidth, int pref_freq, int he);
+		    int vht_center_freq2, int ht40, int vht, int max_chwidth,
+		    int pref_freq, int he, int edmg, bool allow_6ghz,
+		    bool p2p2);
 int wpas_p2p_invite_group(struct wpa_supplicant *wpa_s, const char *ifname,
-			  const u8 *peer_addr, const u8 *go_dev_addr);
+			  const u8 *peer_addr, const u8 *go_dev_addr,
+			  bool allow_6ghz);
 int wpas_p2p_presence_req(struct wpa_supplicant *wpa_s, u32 duration1,
 			  u32 interval1, u32 duration2, u32 interval2);
 int wpas_p2p_ext_listen(struct wpa_supplicant *wpa_s, unsigned int period,
@@ -142,12 +153,18 @@ struct wpa_ssid * wpas_p2p_get_persistent(struct wpa_supplicant *wpa_s,
 void wpas_p2p_notify_ap_sta_authorized(struct wpa_supplicant *wpa_s,
 				       const u8 *addr);
 int wpas_p2p_scan_no_go_seen(struct wpa_supplicant *wpa_s);
-int wpas_p2p_get_ht40_mode(struct wpa_supplicant *wpa_s,
-			   struct hostapd_hw_modes *mode, u8 channel);
+void wpas_p2p_scan_freqs(struct wpa_supplicant *wpa_s,
+			 struct wpa_driver_scan_params *params,
+			 bool include_6ghz);
+int wpas_p2p_get_sec_channel_offset_40mhz(struct wpa_supplicant *wpa_s,
+					  struct hostapd_hw_modes *mode,
+					  u8 channel);
 int wpas_p2p_get_vht80_center(struct wpa_supplicant *wpa_s,
-			      struct hostapd_hw_modes *mode, u8 channel);
+			      struct hostapd_hw_modes *mode, u8 channel,
+			      u8 op_class);
 int wpas_p2p_get_vht160_center(struct wpa_supplicant *wpa_s,
-			       struct hostapd_hw_modes *mode, u8 channel);
+			       struct hostapd_hw_modes *mode, u8 channel,
+			       u8 op_class);
 unsigned int wpas_p2p_search_delay(struct wpa_supplicant *wpa_s);
 void wpas_p2p_new_psk_cb(struct wpa_supplicant *wpa_s, const u8 *mac_addr,
 			 const u8 *p2p_dev_addr,
@@ -165,6 +182,14 @@ int wpas_p2p_nfc_report_handover(struct wpa_supplicant *wpa_s, int init,
 				 const struct wpabuf *sel, int forced_freq);
 int wpas_p2p_nfc_tag_enabled(struct wpa_supplicant *wpa_s, int enabled);
 void wpas_p2p_pbc_overlap_cb(void *eloop_ctx, void *timeout_ctx);
+int wpas_p2p_try_edmg_channel(struct wpa_supplicant *wpa_s,
+			      struct p2p_go_neg_results *params);
+void wpas_p2p_process_usd_elems(struct wpa_supplicant *wpa_s, const u8 *buf,
+				u16 buf_len, const u8 *peer_addr,
+				unsigned int freq);
+int wpas_p2p_pasn_auth_tx_status(struct wpa_supplicant *wpa_s, const u8 *data,
+				 size_t data_len, bool acked);
+int wpas_p2p_remove_all_identity(struct wpa_supplicant *wpa_s);
 
 #ifdef CONFIG_P2P
 
@@ -194,9 +219,9 @@ void wpas_p2p_cancel_remain_on_channel_cb(struct wpa_supplicant *wpa_s,
 void wpas_p2p_interface_unavailable(struct wpa_supplicant *wpa_s);
 void wpas_p2p_notif_connected(struct wpa_supplicant *wpa_s);
 void wpas_p2p_notif_disconnected(struct wpa_supplicant *wpa_s);
-int wpas_p2p_notif_pbc_overlap(struct wpa_supplicant *wpa_s);
 int wpas_p2p_4way_hs_failed(struct wpa_supplicant *wpa_s);
 void wpas_p2p_ap_setup_failed(struct wpa_supplicant *wpa_s);
+bool wpas_p2p_retry_limit_exceeded(struct wpa_supplicant *wpa_s);
 void wpas_p2p_indicate_state_change(struct wpa_supplicant *wpa_s);
 void wpas_p2p_deinit_iface(struct wpa_supplicant *wpa_s);
 void wpas_p2p_ap_deinit(struct wpa_supplicant *wpa_s);
@@ -212,6 +237,18 @@ int wpas_p2p_lo_start(struct wpa_supplicant *wpa_s, unsigned int freq,
 		      unsigned int count);
 int wpas_p2p_lo_stop(struct wpa_supplicant *wpa_s);
 int wpas_p2p_mac_setup(struct wpa_supplicant *wpa_s);
+struct wpabuf * wpas_p2p_usd_elems(struct wpa_supplicant *wpa_s,
+				   const char *service_name);
+void wpas_p2p_update_dev_addr(struct wpa_supplicant *wpa_s);
+int wpas_p2p_pasn_auth_rx(struct wpa_supplicant *wpa_s,
+			  const struct ieee80211_mgmt *mgmt, size_t len,
+			  int freq);
+int wpas_p2p_get_pasn_ptk(struct wpa_supplicant *wpa_s, const u8 **ptk,
+			  size_t *ptk_len);
+int wpas_p2p_get_dira(struct wpa_supplicant *wpa_s, char *buf, size_t buf_len);
+int wpas_p2p_validate_dira(struct wpa_supplicant *wpa_s, const u8 *addr,
+			   u8 cipher, const u8 *nonce, const u8 *tag);
+void wpas_p2p_disabled_changed(struct wpa_supplicant *wpa_s);
 
 #else /* CONFIG_P2P */
 
@@ -291,11 +328,6 @@ static inline void wpas_p2p_notif_disconnected(struct wpa_supplicant *wpa_s)
 {
 }
 
-static inline int wpas_p2p_notif_pbc_overlap(struct wpa_supplicant *wpa_s)
-{
-	return 0;
-}
-
 static inline int wpas_p2p_4way_hs_failed(struct wpa_supplicant *wpa_s)
 {
 	return 0;
@@ -342,6 +374,24 @@ static inline int wpas_p2p_group_remove(struct wpa_supplicant *wpa_s,
 {
 	return 0;
 }
+
+static inline struct wpabuf * wpas_p2p_usd_elems(struct wpa_supplicant *wpa_s,
+						 const char *service_name)
+{
+	return NULL;
+}
+
+static inline void wpas_p2p_update_dev_addr(struct wpa_supplicant *wpa_s)
+{
+}
+
+#ifdef CONFIG_TESTING_OPTIONS
+static inline int wpas_p2p_get_pasn_ptk(struct wpa_supplicant *wpa_s,
+					const u8 **ptk, size_t *ptk_len)
+{
+	return 0;
+}
+#endif /* CONFIG_TESTING_OPTIONS */
 
 #endif /* CONFIG_P2P */
 

@@ -26,8 +26,8 @@ u8 * hostapd_eid_ht_capabilities(struct hostapd_data *hapd, u8 *eid)
 	struct ieee80211_ht_capabilities *cap;
 	u8 *pos = eid;
 
-	if (!hapd->iconf->ieee80211n || !hapd->iface->current_mode ||
-	    hapd->conf->disable_11n)
+	if (!hostapd_is_ht_enabled(hapd) || !hapd->iface->current_mode ||
+	    is_6ghz_op_class(hapd->iconf->op_class))
 		return eid;
 
 	*pos++ = WLAN_EID_HT_CAP;
@@ -79,12 +79,58 @@ u8 * hostapd_eid_ht_capabilities(struct hostapd_data *hapd, u8 *eid)
 }
 
 
+static void set_ht_param(struct hostapd_data *hapd,
+			 struct ieee80211_ht_operation *oper)
+{
+	int secondary_channel = hapd->iconf->secondary_channel;
+#ifdef CONFIG_IEEE80211BE
+	enum oper_chan_width chwidth = hostapd_get_oper_chwidth(hapd->iconf);
+	u16 bw = 0, punct_bitmap = hostapd_get_punct_bitmap(hapd);
+	u8 offset, chan_bit_pos;
+
+	switch (chwidth) {
+	case CONF_OPER_CHWIDTH_80MHZ:
+		bw = 80;
+		offset = 6;
+		break;
+	case CONF_OPER_CHWIDTH_160MHZ:
+		bw = 160;
+		offset = 14;
+		break;
+	case CONF_OPER_CHWIDTH_320MHZ:
+		bw = 320;
+		offset = 30;
+		break;
+	default:
+		goto no_update;
+	}
+
+	chan_bit_pos = (hapd->iconf->channel -
+			hostapd_get_oper_centr_freq_seg0_idx(hapd->iconf) +
+			offset) / 4;
+	/* Check if secondary channel is punctured */
+	if (bw >= 80 && punct_bitmap && secondary_channel &&
+	    (punct_bitmap & BIT(chan_bit_pos + secondary_channel)))
+		return; /* Do not indicate punctured secondary channel for HT */
+no_update:
+#endif /* CONFIG_IEEE80211BE */
+
+	if (secondary_channel == 1)
+		oper->ht_param |= HT_INFO_HT_PARAM_SECONDARY_CHNL_ABOVE |
+			HT_INFO_HT_PARAM_STA_CHNL_WIDTH;
+	if (secondary_channel == -1)
+		oper->ht_param |= HT_INFO_HT_PARAM_SECONDARY_CHNL_BELOW |
+			HT_INFO_HT_PARAM_STA_CHNL_WIDTH;
+}
+
+
 u8 * hostapd_eid_ht_operation(struct hostapd_data *hapd, u8 *eid)
 {
 	struct ieee80211_ht_operation *oper;
 	u8 *pos = eid;
 
-	if (!hapd->iconf->ieee80211n || hapd->conf->disable_11n)
+	if (!hostapd_is_ht_enabled(hapd) ||
+	    is_6ghz_op_class(hapd->iconf->op_class))
 		return eid;
 
 	*pos++ = WLAN_EID_HT_OPERATION;
@@ -95,12 +141,7 @@ u8 * hostapd_eid_ht_operation(struct hostapd_data *hapd, u8 *eid)
 
 	oper->primary_chan = hapd->iconf->channel;
 	oper->operation_mode = host_to_le16(hapd->iface->ht_op_mode);
-	if (hapd->iconf->secondary_channel == 1)
-		oper->ht_param |= HT_INFO_HT_PARAM_SECONDARY_CHNL_ABOVE |
-			HT_INFO_HT_PARAM_STA_CHNL_WIDTH;
-	if (hapd->iconf->secondary_channel == -1)
-		oper->ht_param |= HT_INFO_HT_PARAM_SECONDARY_CHNL_BELOW |
-			HT_INFO_HT_PARAM_STA_CHNL_WIDTH;
+	set_ht_param(hapd, oper);
 
 	pos += sizeof(*oper);
 
@@ -108,32 +149,9 @@ u8 * hostapd_eid_ht_operation(struct hostapd_data *hapd, u8 *eid)
 }
 
 
-u8 * hostapd_eid_secondary_channel(struct hostapd_data *hapd, u8 *eid)
-{
-	u8 sec_ch;
-
-	if (!hapd->cs_freq_params.channel ||
-	    !hapd->cs_freq_params.sec_channel_offset)
-		return eid;
-
-	if (hapd->cs_freq_params.sec_channel_offset == -1)
-		sec_ch = HT_INFO_HT_PARAM_SECONDARY_CHNL_BELOW;
-	else if (hapd->cs_freq_params.sec_channel_offset == 1)
-		sec_ch = HT_INFO_HT_PARAM_SECONDARY_CHNL_ABOVE;
-	else
-		return eid;
-
-	*eid++ = WLAN_EID_SECONDARY_CHANNEL_OFFSET;
-	*eid++ = 1;
-	*eid++ = sec_ch;
-
-	return eid;
-}
-
-
 /*
 op_mode
-Set to 0 (HT pure) under the followign conditions
+Set to 0 (HT pure) under the following conditions
 	- all STAs in the BSS are 20/40 MHz HT in 20/40 MHz BSS or
 	- all STAs in the BSS are 20 MHz HT in 20 MHz BSS
 Set to 1 (HT non-member protection) if there may be non-HT STAs
@@ -385,7 +403,7 @@ u16 copy_sta_ht_capab(struct hostapd_data *hapd, struct sta_info *sta,
 	 * frame.
 	 */
 	if (!ht_capab || !(sta->flags & WLAN_STA_WMM) ||
-	    !hapd->iconf->ieee80211n || hapd->conf->disable_11n) {
+	    !hostapd_is_ht_enabled(hapd)) {
 		sta->flags &= ~WLAN_STA_HT;
 		os_free(sta->ht_capabilities);
 		sta->ht_capabilities = NULL;
@@ -439,6 +457,7 @@ void ht40_intolerant_remove(struct hostapd_iface *iface, struct sta_info *sta)
 	iface->num_sta_ht40_intolerant--;
 
 	if (iface->num_sta_ht40_intolerant == 0 &&
+	    iface->conf->obss_interval &&
 	    (iface->conf->ht_capab & HT_CAP_INFO_SUPP_CHANNEL_WIDTH_SET) &&
 	    (iface->drv_flags & WPA_DRIVER_FLAGS_HT_2040_COEX)) {
 		unsigned int delay_time = OVERLAPPING_BSS_TRANS_DELAY_FACTOR *
@@ -501,15 +520,14 @@ static void update_sta_no_ht(struct hostapd_data *hapd, struct sta_info *sta)
 }
 
 
-void update_ht_state(struct hostapd_data *hapd, struct sta_info *sta)
+int update_ht_state(struct hostapd_data *hapd, struct sta_info *sta)
 {
 	if ((sta->flags & WLAN_STA_HT) && sta->ht_capabilities)
 		update_sta_ht(hapd, sta);
 	else
 		update_sta_no_ht(hapd, sta);
 
-	if (hostapd_ht_operation_update(hapd->iface) > 0)
-		ieee802_11_set_beacons(hapd->iface);
+	return hostapd_ht_operation_update(hapd->iface);
 }
 
 

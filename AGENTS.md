@@ -61,6 +61,11 @@ architecture, which is all libhv, spdlog and libwpa_client care about, and
 `.build-flags` for architecture plus theme plus small screen, since those change
 `-D` defines that affect every object of ours.
 
+`.vendor-target` keys on architecture only, not on which version of a vendored
+library is checked in, so re-vendoring `wpa_supplicant` in place does not
+invalidate a same-architecture `libwpa_client.a`. Run `scripts/build.sh
+<target> --clean` once after a bump.
+
 ## CI
 
 One workflow, `.github/workflows/build.yml`. It builds the same four variants
@@ -241,7 +246,7 @@ lv_drivers/           submodule, v8.3.0, upstream is dead
 libhv/                submodule, websocket and http client
 mbedtls/              submodule, the TLS backend libhv is built against
 spdlog/               submodule, logging
-wpa_supplicant/       vendored hostap copy, built only for libwpa_client.a
+wpa_supplicant/       vendored hostap 2.12, built only for libwpa_client.a, see below
 lv_touch_calibration/ in-tree, not a submodule, touch calibration screens
 patches/              four patches applied to submodules, see below
 k1/                   payload installed onto the printer, init scripts and klippy modules
@@ -402,6 +407,45 @@ disconnected.
 `IP:127.0.0.1` in its SAN is still rejected for a `wss://127.0.0.1` URL, which
 was measured, not assumed. Anyone putting a real certificate in front of
 Moonraker has to reach it by the name on the certificate.
+
+### Which wpa_supplicant we are on
+
+A full in-tree copy of `wpa_supplicant-2.12.tar.gz` (2026-08-07), from
+`w1.fi/releases/`. On 2.9 (2019-08-07) from the first commit until 2026-09-03.
+
+Not a submodule, unlike the other five. `git.w1.fi` is a single host with no CDN
+and is now behind an anti-bot gateway that blocks a plain clone, there is no
+canonical GitHub mirror, and a submodule cannot carry the two-line `.config` the
+build needs. A tarball import keeps CI hermetic.
+
+Only `libwpa_client.a` is built, from four objects: `wpa_ctrl.o`, `os_unix.o`,
+`common.o`, `wpa_debug.o`. That library is a control-socket client and nothing
+more: it speaks wpa_supplicant's text protocol to whatever daemon owns the
+socket, which on a K1 is Creality's own. So this copy is client-side only and
+bumping it changes nothing on the printer. wpa 2.9's CVEs (SAE and EAP-pwd side
+channels, P2P, FragAttacks) are all in code we do not compile, so the bump is
+provenance and minor parser hardening, not a security fix.
+
+`.config` is two lines, `CONFIG_CTRL_IFACE=y` and `CONFIG_CTRL_IFACE_UNIX=y`,
+committed with `git add -f` because 2.12 ships a `.gitignore` that lists it.
+Without it `wpa_ctrl.c` builds none of its Unix entry points and the
+`guppyscreen` link fails on undefined `wpa_ctrl_*`.
+
+2.12 dropped `CROSS_COMPILE` from its build system and moved object output under
+a `build/` tree, so the top-level `Makefile`'s `wpaclient` target passes `CC`
+and `AR` in explicitly. A cross build that skips that quietly compiles the four
+objects with the host compiler, and the link then rejects the archive as
+incompatible.
+
+Refresh procedure: download `wpa_supplicant-<ver>.tar.gz` and `.asc` from
+`w1.fi/releases`, verify the signature against Jouni Malinen's key
+(`EC4AA0A991A5F2464582D52D2B6EF432EFC895FA`, the fingerprint Arch packaging
+pins) and the SHA256 against two distro packaging repos (Void, Buildroot,
+Gentoo). Then `git rm -r wpa_supplicant`, unpack in place, re-add the two-line
+`.config` with `git add -f`, `git add wpa_supplicant`. The 2.12 tarball SHA256
+is `08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6`.
+`.vendor-target` does not track the wpa version, so run `scripts/build.sh
+<target> --clean` once after.
 
 ### `lv_conf.h` is two configs, not one
 
