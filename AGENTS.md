@@ -344,7 +344,7 @@ lever if the size ever matters, but getting one wrong quietly drops the
 ciphersuite some real server needed, so it wants measuring against a real
 handshake rather than guessing.
 
-Three things about the build are not obvious:
+Four things about the build are not obvious:
 
 - **mbedtls has a submodule of its own** and `git submodule update --init` does
   not fetch a nested one. Use `--recursive`. The 3.6 branch commits every file
@@ -361,6 +361,16 @@ Three things about the build are not obvious:
 - **mbedtls is built `-fPIC`.** Not for us, we link it statically: libhv's own
   target builds `TARGET_TYPE="SHARED|STATIC"` and the shared half links
   `-lmbedtls`, which fails against non-PIC archives.
+- **mbedtls reads `/dev/urandom`, not its default `/dev/random`.** It only
+  calls `getrandom()` under glibc, so on the musl mips build every entropy read
+  goes to `MBEDTLS_PLATFORM_DEV_RANDOM`, and 3.6.6 changed that default to
+  `/dev/random`. On a 4.4 kernel that blocks until the kernel has credited
+  entropy for the whole read, and seeding libhv's DRBG reads 2048 bits. On the
+  K1 Max `KTls::init` took 8.3 seconds at boot; on a Nebula Pad the screen
+  never left the boot logo, which is issue #6. The `libmbedtls.a` rule sets it
+  back, and `KTls::init` first waits on `getrandom()` for the kernel's CRNG to
+  be seeded, which is the one case `/dev/random` was guarding against. See
+  `docs/audit.md` B9, and never drop either half on its own.
 
 `patches/0004-libhv-mbedtls-ca.patch` is what makes verification work at all.
 libhv's mbedTLS backend ignores `ca_file` and `ca_path` entirely, so without the

@@ -6,14 +6,41 @@
 
 #include "spdlog/spdlog.h"
 
+#include <cerrno>
 #include <cstring>
 #include <experimental/filesystem>
 #include <string>
 #include <vector>
 
+#include <sys/random.h>
+
 namespace fs = std::experimental::filesystem;
 
 namespace {
+
+  // mbedtls reads /dev/urandom on the musl build, see the libmbedtls.a rule in
+  // the Makefile. That never blocks, and it is only predictable before the
+  // kernel has seeded its CRNG for the first time since boot. getrandom()
+  // blocks until exactly that and never again, which is all mbedtls does for
+  // itself on a glibc build. The K1 Max's 4.4 kernel logs the seeding 1.2
+  // seconds after boot, long before this runs, so it normally returns at once.
+  // When it does have to wait it says so first, so the log names the stall.
+  void wait_for_kernel_crng() {
+    unsigned char byte;
+    ssize_t got = getrandom(&byte, sizeof(byte), GRND_NONBLOCK);
+
+    // Only EAGAIN means not seeded yet. Anything else is either seeded, which
+    // is the usual case, or a kernel before 3.17 with no getrandom() at all.
+    if (got >= 0 || errno != EAGAIN) {
+      return;
+    }
+
+    spdlog::info("waiting for the kernel to seed its random number generator");
+    do {
+      got = getrandom(&byte, sizeof(byte), 0);
+    } while (got < 0 && errno == EINTR);
+    spdlog::info("kernel random number generator seeded");
+  }
 
   // Searched in order. The first two are where a distribution puts its trust
   // store, so the simulator and the Debian package find one without being
@@ -74,6 +101,8 @@ namespace KTls {
     if (!ca_file.empty()) {
       param.ca_file = ca_file.c_str();
     }
+
+    wait_for_kernel_crng();
 
     if (hssl_ctx_init(&param) == NULL) {
       spdlog::error("could not initialise TLS, https and wss urls will not connect");

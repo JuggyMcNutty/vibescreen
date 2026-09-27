@@ -143,8 +143,18 @@ libhv.a: libmbedtls.a
 # libhv's shared library, which would otherwise fail to link against these
 # archives; libhv compiles itself -fPIC for the same reason, and the binary we
 # ship is static either way.
+#
+# mbedtls only calls getrandom() under glibc, so on the musl mips build every
+# entropy read goes to MBEDTLS_PLATFORM_DEV_RANDOM, which 3.6.6 changed from
+# /dev/urandom to /dev/random. On the printers' 4.4 kernel /dev/random blocks
+# until the kernel has credited entropy for the whole read, and seeding a DRBG
+# reads 2048 bits from a pool that idles under 900. That held startup for 8
+# seconds on a K1 Max and kept a Nebula Pad on its boot logo, issue #6.
+# KTls::init waits for the kernel's CRNG to be seeded before this is read,
+# which is the one case /dev/random was guarding against.
 libmbedtls.a:
-	$(MAKE) -C mbedtls -j$(NPROC) lib CC=$(CC) AR=$(AR) CFLAGS="-O2 -fPIC"
+	$(MAKE) -C mbedtls -j$(NPROC) lib CC=$(CC) AR=$(AR) \
+		CFLAGS="-O2 -fPIC -DMBEDTLS_PLATFORM_DEV_RANDOM='\"/dev/urandom\"'"
 
 libspdlog.a:
 	@mkdir -p $(SPDLOG_DIR)/build

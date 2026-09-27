@@ -130,11 +130,15 @@ FLAG_STAMP="$REPO_ROOT/.build-flags"
 prev_arch="$(cat "$ARCH_STAMP" 2>/dev/null || echo none)"
 prev_flags="$(cat "$FLAG_STAMP" 2>/dev/null || echo none)"
 
-# The "-tls" suffix is not decoration. It invalidates every tree stamped before
-# mbedTLS was compiled in, where libhv/lib/libhv.a exists and looks fresh but was
-# built without -DWITH_MBEDTLS, so the link would go looking for a backend that
-# archive does not contain.
-arch_stamp="$target-tls"
+# The suffixes are not decoration. The checks below only ask whether an archive
+# exists, so a change to how a vendored lib is compiled has to invalidate the
+# trees built before it here. "-tls" is for trees from before mbedTLS was
+# compiled in, where libhv/lib/libhv.a exists and looks fresh but was built
+# without -DWITH_MBEDTLS, so the link would go looking for a backend that
+# archive does not contain. "-urandom" is for the entropy device set in the
+# Makefile's libmbedtls.a rule: an older libmbedcrypto.a still reads
+# /dev/random and still stalls startup on a printer.
+arch_stamp="$target-tls-urandom"
 
 if [ "$prev_arch" != "$arch_stamp" ] || [ "$do_clean" = true ]; then
     if [ "$prev_arch" != "$arch_stamp" ] && [ "$prev_arch" != none ]; then
