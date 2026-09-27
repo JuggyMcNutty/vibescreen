@@ -928,7 +928,9 @@ Checked by building: the mips `entropy_poll.o` names `/dev/urandom` and not
 `/dev/random`, and `tls.o` calls `getrandom`. The waiting branch was run in the
 simulator with `getrandom` preloaded to report an unseeded pool: it logged the
 wait, carried on when the call returned two seconds later, and nothing else in
-the process called it. Not yet run on a printer.
+the process called it. On the development K1 Max, `2026.09.27-0eaa5eb4` spends
+63 ms in `KTls::init` when `update.sh` restarts it and 142 ms at boot, against
+1.58 and 8.3 seconds before, and neither start logged a wait.
 
 ### B10. The installer and `reinstall-creality.sh` claim more than they check (open)
 

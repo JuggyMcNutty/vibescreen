@@ -207,8 +207,10 @@ bytes and dated 2024-03-15. `KTls::init` finds it and parses it on every start.
 
 Our own log shows what that cost before the fix. From the `DPI` line to the next
 one took 11 ms on `2026.08.16-c722ed54`. With mbedTLS compiled in, `KTls::init`
-took 1.6 seconds on a restart and 8.3 at boot. How much of that was the bundle
-and how much the entropy was not separated.
+took 1.6 seconds on a restart and 8.3 at boot. With the fix,
+`2026.09.27-0eaa5eb4` takes 63 ms on a restart and 142 ms at boot, bundle
+included, so nearly all of the old figure was the wait on `/dev/random`.
+Neither start waited for the CRNG.
 
 ## Raw excerpts
 

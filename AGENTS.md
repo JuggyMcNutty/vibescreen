@@ -385,11 +385,11 @@ K1 Max**: Creality's firmware carries `/etc/ssl/certs/ca-certificates.crt`,
 195 KB and dated 2024-03-15, and every start of our build logs that it is
 verifying against it. This file used to say a K1 had none of them, which was
 wrong for the development printer, measured 2026-09-27. Nobody has looked on a
-KE or a Nebula Pad. The bundle is parsed on every start, which is part of what
-`KTls::init` costs on the K1 Max. Vendoring a 230 KB Mozilla bundle with an
-expiry date on it, for a feature no URL in the tree uses, is a maintenance
-obligation without a working feature behind it. Ship one as part of whatever
-first needs it.
+KE or a Nebula Pad. The bundle is parsed on every start, and with it included
+`KTls::init` takes 63 ms on a restart and 142 ms at boot on the K1 Max.
+Vendoring a 230 KB Mozilla bundle with an expiry date on it, for a feature no
+URL in the tree uses, is a maintenance obligation without a working feature
+behind it. Ship one as part of whatever first needs it.
 
 When nothing is found it still sets `verify_peer` and logs every path it tried.
 That is deliberate: leaving `g_ssl_ctx` unset sends libhv down its
