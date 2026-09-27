@@ -42,11 +42,12 @@ namespace {
     spdlog::info("kernel random number generator seeded");
   }
 
-  // Searched in order. The first two are where a distribution puts its trust
-  // store, so the simulator and the Debian package find one without being
-  // told. A K1 has none of them, which is why the directory beside the binary
-  // is searched first: dropping a bundle into /usr/data/guppyscreen is then
-  // the whole of the setup.
+  // Searched in order. The configured file and the one beside the binary come
+  // first, so a bundle someone chose wins over the system's: dropping one into
+  // /usr/data/guppyscreen is the whole of the setup. The rest are where
+  // distributions keep their trust store, which is how the simulator and the
+  // Debian package find one without being told. The K1 Max's firmware has one
+  // at the first of those too.
   std::vector<std::string> candidates() {
     std::vector<std::string> paths;
 

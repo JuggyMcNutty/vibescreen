@@ -323,7 +323,7 @@ It cost about 155 KB in the simulator binary. The stripped mips binary is
 `master` is a further 42 commits ahead with no release behind it. Prefer the
 tag until there is a specific fix worth chasing.
 
-### mbedTLS, and why there is no trust store
+### mbedTLS, and why we ship no trust store
 
 libhv is built `WITH_MBEDTLS=yes` against the `mbedtls` submodule, pinned to
 **v3.6.7**, the head of the 3.6 LTS line. So `wss://` and `https://` work, with
@@ -380,12 +380,16 @@ patch a client either verifies nothing or fails every handshake. Read
 **No CA bundle is shipped.** `src/tls.cpp` looks for one at, in order: the
 `ca_file` key in `guppyconfig.json`, `cacert.pem` beside the binary, then
 `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt` and
-`/etc/ssl/cert.pem`. A desktop and a Debian install find one; **a K1 has none of
-them**, so on a printer TLS is compiled in and inert until someone drops a
-bundle into `/usr/data/guppyscreen/cacert.pem`. Vendoring a 230 KB Mozilla
-bundle with an expiry date on it, for a feature no URL in the tree uses, is a
-maintenance obligation without a working feature behind it. Ship one as part of
-whatever first needs it.
+`/etc/ssl/cert.pem`. A desktop and a Debian install find one, and **so does the
+K1 Max**: Creality's firmware carries `/etc/ssl/certs/ca-certificates.crt`,
+195 KB and dated 2024-03-15, and every start of our build logs that it is
+verifying against it. This file used to say a K1 had none of them, which was
+wrong for the development printer, measured 2026-09-27. Nobody has looked on a
+KE or a Nebula Pad. The bundle is parsed on every start, which is part of what
+`KTls::init` costs on the K1 Max. Vendoring a 230 KB Mozilla bundle with an
+expiry date on it, for a feature no URL in the tree uses, is a maintenance
+obligation without a working feature behind it. Ship one as part of whatever
+first needs it.
 
 When nothing is found it still sets `verify_peer` and logs every path it tried.
 That is deliberate: leaving `g_ssl_ctx` unset sends libhv down its
