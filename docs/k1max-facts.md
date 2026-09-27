@@ -21,6 +21,7 @@ Re-run the probe if you need fresh values.
 | SoC | Ingenic X2000E, XBurst2 dual core | MIPS32r2 little endian, `mips32el` toolchain |
 | ISA | `mips1 mips2 mips32r2`, MSA ASE | Do not emit MIPS r6. MIPS32 or MIPS32r2 both run |
 | Kernel | 4.4.94 SMP PREEMPT, built 2024-05-11 | Old. Bootlin headers are 5.4, musl handles the fallbacks |
+| Entropy | CRNG seeded 1.2 s after boot, no hardware RNG, input pool idles under 900 bits | `/dev/random` blocks. See the entropy section below |
 | Firmware | `1.3.3.29`, board `CR4CU220812S11` | K1 Max |
 | Rootfs | Buildroot 2020.02.1, overlayfs, `/rom` 100% full | Only `/usr/data` (6.5G, 45% used) has room |
 | libc | glibc 2.29, loader `/lib/ld-linux-mipsn8.so.1` | We link static musl, so this does not constrain us |
@@ -171,6 +172,43 @@ braces here rather than the thing that fixes it.
 
 Creality's fork also adds `layer` and `layer_count` to `virtual_sdcard`. Both
 read 0 after that 123 layer print, so nothing fills those either.
+
+## Entropy, and a trust store after all
+
+Read 2026-09-27 over SSH, read only, ten days after the last boot. This is the
+evidence behind issue #6 and `docs/audit.md` B9.
+
+```
+[    1.171274] random: nonblocking pool is initialized
+
+/proc/sys/kernel/random/entropy_avail           865
+/proc/sys/kernel/random/poolsize                4096
+/proc/sys/kernel/random/read_wakeup_threshold   64
+/proc/sys/kernel/random/write_wakeup_threshold  896
+
+/proc/<guppyscreen pid>/stat starttime          1295 ticks, 12.95 s after boot
+```
+
+There is no `/dev/hwrng`, no `hw_random` in sysfs, and neither `rngd` nor
+`haveged` running, so interrupt timing is all that feeds the pool.
+
+The first line is what `getrandom()` waits for. It comes 1.2 seconds after
+boot and guppyscreen starts at 13, so waiting on it costs nothing here.
+
+The pool figures are why `/dev/random` blocked. On 4.4 it hands out only what
+the kernel has credited, and the input pool passes entropy on to the output
+pools once it holds more than 896 bits, so it idles below that. mbedTLS seeding
+one DRBG reads 2048 bits, so a start asks for more than the input pool ever
+holds and waits for the rest to be credited, however long the machine has been
+up.
+
+The firmware carries a CA bundle, `/etc/ssl/certs/ca-certificates.crt`, 195453
+bytes and dated 2024-03-15. `KTls::init` finds it and parses it on every start.
+
+Our own log shows what that cost before the fix. From the `DPI` line to the next
+one took 11 ms on `2026.08.16-c722ed54`. With mbedTLS compiled in, `KTls::init`
+took 1.6 seconds on a restart and 8.3 at boot. How much of that was the bundle
+and how much the entropy was not separated.
 
 ## Raw excerpts
 

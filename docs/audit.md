@@ -880,6 +880,78 @@ Failing closed then comes for free. `src/tls.cpp` always sets `verify_peer`,
 including when it found no trust store, because leaving `g_ssl_ctx` unset would
 send libhv down its `hssl_ctx_new(NULL)` fallback and back to verifying nothing.
 
+### B9. mbedTLS read its entropy from `/dev/random`, and startup waited on it (fixed)
+
+Reported as issue #6 from a Nebula Pad. After installing, the screen stayed on
+Creality's UI or its boot logo and never became ours, while upstream's
+`0.0.26-beta` installed over the top worked. Our installer reported success
+every time, see B10.
+
+The log attached to the report shows where by what is missing. Every start of
+`2026.09.02-f5df8289` logs its version and `DPI: 90` and nothing after, where
+`0.0.26-beta` on the same pad goes straight on to `resolution 480 x 272`. The
+next call after that line is `KTls::init`, which on any printer logs before it
+returns: the trust store it chose, or a warning that it found none. So it never
+returned.
+
+Inside it, libhv's `hssl_ctx_new` seeds a CTR_DRBG, which asks mbedTLS's
+platform entropy source for 128 bytes twice, once for the seed and once for the
+nonce. mbedTLS only uses `getrandom()` when `__GLIBC__` is defined, so on our
+musl build the source is `fopen` and `fread` on `MBEDTLS_PLATFORM_DEV_RANDOM`,
+and it rejects a short read. 3.6.6 changed that default from `/dev/urandom` to
+`/dev/random`, and its changelog says it "may block needlessly on Linux <= 5.6".
+Compiled for mips, `entropy_poll.o` references `fopen` and `fread` and no
+`syscall` at all, which settles which branch runs.
+
+On the printers' 4.4 kernel `/dev/random` hands out only what the kernel has
+credited, so every start waited for 2048 bits. `docs/k1max-facts.md` has the K1
+Max's pool, which idles under 900 with no hardware RNG. There `KTls::init` took
+8.3 seconds at boot and nobody noticed. On the Nebula Pad the screen never left
+the boot logo in the minutes anyone watched.
+
+It may also be why the reporter's first install "Runs Good": a pad that has
+been up a while can have enough pooled for one start, and the reinstall found
+it spent. That part is inference, not measured.
+
+Fixed in two halves that only work together. The `libmbedtls.a` rule sets
+`MBEDTLS_PLATFORM_DEV_RANDOM` back to `/dev/urandom`, a documented option rather
+than a patch. That never blocks, and is only weak before the kernel has seeded
+its CRNG for the first time since boot, which is the case 3.6.6 was guarding
+against. So `KTls::init` first waits for exactly that with `getrandom()`, which
+is what a glibc build of mbedTLS already does for itself, and logs before it
+waits so a stall there names itself. On the K1 Max the CRNG is seeded 1.2
+seconds after boot and guppyscreen starts at 13, so the wait is free.
+`scripts/build.sh` moved its vendor stamp to `-tls-urandom`, because an existing
+`libmbedcrypto.a` looks fresh and still reads `/dev/random`.
+
+Checked by building: the mips `entropy_poll.o` names `/dev/urandom` and not
+`/dev/random`, and `tls.o` calls `getrandom`. The waiting branch was run in the
+simulator with `getrandom` preloaded to report an unseeded pool: it logged the
+wait, carried on when the call returned two seconds later, and nothing else in
+the process called it. Not yet run on a printer.
+
+### B10. The installer and `reinstall-creality.sh` claim more than they check (open)
+
+Three things issue #6 ran into. None of them caused it, and all are inherited
+from upstream.
+
+- `installer.sh` decides a start succeeded when the process is still alive one
+  second later. A binary stuck before drawing anything passes, so it printed
+  `Successfully installed` over B9 rather than rolling back. Something that
+  proves the display came up, such as a log line written after `hal_init`,
+  would catch it.
+- `zbolt` is dropped on a small screen without a word. The small screen branch
+  assigns `ASSET_NAME="guppyscreen-smallscreen"` after the theme was appended
+  to it.
+- `reinstall-creality.sh` brings Creality's screen back and nothing more. It
+  leaves `/usr/data/guppyscreen`, which is why `update.sh` still reported a
+  version afterwards, the klippy extras and their symlinks, `GuppyScreen/` and
+  its `[include]` in `printer.cfg`, the `libeinfo` and `librc` symlinks in
+  `/lib`, and our `ft2font`. Its prompt reads "delete the BackupDir at ?"
+  because the path was never put in the string. And since it does not put
+  Creality's `ft2font` back, answering yes means the next install backs up
+  ours as if it were the original.
+
 ---
 
 ## Maintainability
@@ -1073,16 +1145,19 @@ from elsewhere again.
 
 ## Suggested order
 
-Done: everything except C7, C22, M2 and M9. C1 to C6, C8 to C21, C23, B1 to B8,
-M1, M3 to M8, and the `KUtils` parse helpers.
+Done: everything except C7, C22, B10, M2 and M9. C1 to C6, C8 to C21, C23, B1
+to B9, M1, M3 to M8, and the `KUtils` parse helpers.
 
 Remaining:
 
 1. C7, the non-blocking heat change. Behavioural, wants its own discussion, and
    the only correctness finding left open.
-2. C22, the abandoned resonance run that does not say what went wrong. Wording
+2. B10, the installer's check that cannot tell a stuck binary from a started
+   one, and the uninstaller that leaves most of the install behind. The first
+   would have rolled issue #6 back instead of reporting success.
+3. C22, the abandoned resonance run that does not say what went wrong. Wording
    and status text, not a mechanism.
-3. M9, `sort_map_values` copying its map. Cosmetic now that the one call site
+4. M9, `sort_map_values` copying its map. Cosmetic now that the one call site
    where it was expensive is gone.
 
 M2, the four leaked singletons, is harmless and stays open.
