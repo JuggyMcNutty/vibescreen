@@ -1163,6 +1163,47 @@ The maps there are small and the copies are of json values rather than trees, so
 this is a cleanup rather than a bug. Taking the map by const reference and
 pushing pointers, or taking `std::vector<U*>`, would fix all of them at once.
 
+### M10. Consumers write into the notification they all share (open)
+
+`KWebSocketClient::drain` hands every `NotifyConsumer` the same `json` for a
+`notify_status_update`. Most of them read it as `j["/params/0/..."_json_pointer]`
+on a non-const reference, 32 times across 12 files in that literal form alone.
+nlohmann's non-const `operator[]` creates whatever the pointer names when it is
+missing: a null for an object key, and an array padded with nulls for an index.
+So each consumer sees keys that only the consumers before it asked about.
+
+Measured 2026-10-26: a temperature-only update from the fake reached
+`ManualZPanel` carrying `bed_mesh: null`, `heater_bed: {target: null, ...}` and
+`gcode_move: {homing_origin: [null, null, null], ...}`.
+
+Most code never notices. The values stay null, so the usual `is_null()` checks
+behave. `State` is registered first, so what it stores is what the printer
+sent. What breaks is any test of whether a key is present, and that is how it
+was found: Manual Z's first version checked `contains("gcode_move")` and so
+cleared its message on every temperature update.
+
+`ManualZPanel::consume` now reads through a const reference and tests leaf
+values. The same const read would fix every other consumer. It is cosmetic
+until someone else writes a presence check, which is why it is recorded here
+rather than left in a comment.
+
+### M11. Two-line prompts run under their buttons on a small screen (open)
+
+`ButtonContainer::handle_prompt` sizes every confirmation box at a fixed 50% by
+35% of the screen and floats its buttons at the bottom. At 800x480 that holds
+two lines. At 480x272, the `--small` build, the text wraps to three or four
+lines and the last of them is drawn behind Confirm and Cancel.
+
+Measured in the small simulator on 2026-10-26 with Input Shaper's Save: "Save
+these shapers to printer.cfg? Klipper restarts, which stops any print." The
+half that says Klipper restarts is the half that cannot be read. TMC
+Autotune's Save prompt has the same shape. Manual Z's first Start prompt did
+too, and it is one line now for that reason.
+
+Sizing the box to its content would fix all of them. The buttons float, so
+that needs them back in the layout, or the text height measured, rather than
+just a different percentage.
+
 ## On mining `pellcorp/grumpyscreen`
 
 Worth recalibrating the expectation here. The fork is 233 commits ahead and 0
