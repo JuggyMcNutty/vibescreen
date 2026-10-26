@@ -27,6 +27,11 @@ static const char *move_if_homed() {
   return KUtils::is_homed() ? " MOVE=1" : "";
 }
 
+// Typing an offset is bounded where the buttons are not. A slipped decimal
+// point, -1.5 for -0.15, sent with MOVE=1 drives the nozzle 1.5mm into the bed,
+// while a button only ever moves one step past what the user has just watched.
+static constexpr double MAX_TYPED_Z_OFFSET = 1.0;
+
 FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   : NotifyConsumer(l)
   , ws(websocket_client)
@@ -53,6 +58,7 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   , pa(values_cont, &pa_plus_img, 150, 100, 15, "0.0 mm/s")
   , speed_factor(values_cont, &speed_up_img, 150, 100, 15 ,"100%")
   , flow_factor(values_cont, &flow_up_img, 150, 100, 15, "100%")
+  , numpad(panel_cont, true)
 {
   lv_obj_move_background(panel_cont);
   
@@ -97,6 +103,15 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   // col 5
   lv_obj_set_grid_cell(values_cont, LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 0, 3);  
   lv_obj_set_grid_cell(back_btn.get_container(), LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 3, 1);
+
+  // Tapping the Z value types an exact offset, for when the strain gauge's own
+  // Z is off and the right number is already known. Issue #7.
+  lv_obj_add_event_cb(z_offset.get_container(), &FineTunePanel::_handle_zoffset,
+		      LV_EVENT_CLICKED, this);
+  numpad.set_range(-MAX_TYPED_Z_OFFSET, MAX_TYPED_Z_OFFSET);
+  numpad.set_callback([this](double v) {
+    ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z={:.3f}{}", v, move_if_homed()));
+  });
 
   ws.register_notify_update(this);
 }
@@ -204,7 +219,9 @@ void FineTunePanel::handle_zoffset(lv_event_t *e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     lv_obj_t *btn = lv_event_get_current_target(e);
 
-    if (btn == zreset_btn.get_container()) {
+    if (btn == z_offset.get_container()) {
+      numpad.foreground_reset();
+    } else if (btn == zreset_btn.get_container()) {
       spdlog::trace("clicked zoffset reset");
       ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z=0{}", move_if_homed()));
     } else {

@@ -6,6 +6,7 @@
 #include "button_container.h"
 #include "selector.h"
 #include "image_label.h"
+#include "numpad.h"
 #include "websocket_client.h"
 #include "notify_consumer.h"
 
@@ -82,6 +83,9 @@ class FineTunePanel : public NotifyConsumer {
   ImageLabel pa;
   ImageLabel speed_factor;
   ImageLabel flow_factor;
+  // Its own rather than MainPanel's, which lives in the Home tab and would draw
+  // behind this panel. Declared last so it is created over everything else.
+  Numpad numpad;
 };
 
 #endif  // __FINETINE_PANEL_H__

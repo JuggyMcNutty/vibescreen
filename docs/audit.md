@@ -756,11 +756,12 @@ Not fixed in `pellcorp/grumpyscreen` either; they moved the identical code to
 - `src/wifi_panel.cpp:300` parses the signal level out of a wpa_supplicant
   `SCAN_RESULTS` line. Correctly guarded by `wifi_parts.size() == 5` first, and
   the field is always numeric in practice, so low risk.
-- `src/numpad.cpp:86` `std::stod` on textarea contents. Worth noting that this
-  looked alarming and is not: the numpad installs a custom keymap of digits,
-  backspace and OK only (`src/numpad.cpp:31`), so the only way to throw is to
-  enter 300-plus digits and overflow a double. The `// input validation, e.g.
-  range` comment directly above it is still an unkept promise.
+- `src/numpad.cpp` `std::stod` on textarea contents. This looked alarming and
+  was not, while the only keymap was digits, backspace and OK: the one way to
+  throw was 300-plus digits overflowing a double. Fine Tune's Z offset then
+  needed a sign and a decimal point, which make a bare `-` or `.` one tap away.
+  **Fixed for issue #7:** the pad parses with `KUtils::parse_double`, takes an
+  optional range, and refuses a bad value by clearing it and staying open.
 
 The helpers now exist: `KUtils::parse_int`, `parse_double` and `parse_hex`
 (`src/utils.cpp`), which log and return a fallback, and additionally reject
