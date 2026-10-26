@@ -83,6 +83,8 @@ class FineTunePanel : public NotifyConsumer {
   ImageLabel pa;
   ImageLabel speed_factor;
   ImageLabel flow_factor;
+  // Under the Z value: whether this printer keeps a gcode offset over a restart.
+  lv_obj_t *zoffset_note;
   // Its own rather than MainPanel's, which lives in the Home tab and would draw
   // behind this panel. Declared last so it is created over everything else.
   Numpad numpad;

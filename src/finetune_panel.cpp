@@ -32,6 +32,24 @@ static const char *move_if_homed() {
 // while a button only ever moves one step past what the user has just watched.
 static constexpr double MAX_TYPED_Z_OFFSET = 1.0;
 
+// Plain Klipper forgets a gcode offset on restart. Helper-Script's "save
+// z-offset" option keeps it by renaming SET_GCODE_OFFSET and wrapping it in a
+// macro that ends with SAVE_VARIABLE, then reapplying the saved value from a
+// delayed_gcode at boot. That is the shape on the development K1 Max, measured
+// 2026-10-26, so a wrapper that saves is what is looked for.
+static bool offset_is_saved() {
+  auto &gcode = State::get_instance()->get_data(
+      "/printer_state/configfile/settings/gcode_macro set_gcode_offset/gcode"_json_pointer);
+  if (!gcode.is_string()) {
+    return false;
+  }
+
+  std::string body = gcode.template get<std::string>();
+  std::transform(body.begin(), body.end(), body.begin(),
+		 [](unsigned char c) { return std::toupper(c); });
+  return body.find("SAVE_VARIABLE") != std::string::npos;
+}
+
 FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   : NotifyConsumer(l)
   , ws(websocket_client)
@@ -58,6 +76,7 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   , pa(values_cont, &pa_plus_img, 150, 100, 15, "0.0 mm/s")
   , speed_factor(values_cont, &speed_up_img, 150, 100, 15 ,"100%")
   , flow_factor(values_cont, &flow_up_img, 150, 100, 15, "100%")
+  , zoffset_note(lv_label_create(values_cont))
   , numpad(panel_cont, true)
 {
   lv_obj_move_background(panel_cont);
@@ -70,6 +89,14 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   lv_obj_set_style_pad_all(values_cont, 0, 0);
   lv_obj_set_flex_flow(values_cont, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(values_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+  lv_obj_set_style_text_font(zoffset_note, &lv_font_montserrat_12, LV_STATE_DEFAULT);
+  lv_label_set_text(zoffset_note, "");
+  lv_obj_move_to_index(zoffset_note, 1);
+  // Pulled up towards the Z tile. Spaced evenly it sits halfway to the PA tile
+  // and reads as belonging to either.
+  auto hscale = (double)lv_disp_get_physical_ver_res(NULL) / 480.0;
+  lv_obj_set_style_translate_y(zoffset_note, -14 * hscale, 0);
 
   static lv_coord_t grid_main_row_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
     LV_GRID_TEMPLATE_LAST};
@@ -130,6 +157,7 @@ void FineTunePanel::foreground() {
   if (!v.is_null()) {
     z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
+  lv_label_set_text(zoffset_note, offset_is_saved() ? "Kept on restart" : "Lost on restart");
 
   v = State::get_instance()->get_data(
 		"/printer_state/extruder/pressure_advance"_json_pointer);
