@@ -61,7 +61,14 @@ Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
 
 SET_GCODE_OFFSET is always acted on: it moves gcode_move.homing_origin, and
 MOVE=1 on an unhomed Z fails after applying the offset, as Klipper's does.
+Motion is acted on too, in script order: G28, M84, G90 and G91,
+SAVE_GCODE_STATE and RESTORE_GCODE_STATE, G0 and G1 against the K1 Max's
+axis limits and homed axes, and SET_KINEMATIC_POSITION, which marks all three
+axes homed as Creality's does. A refused move abandons the rest of the script.
 --unhomed starts with nothing homed, and G28 and M84 then home and release axes.
+--no-force-move takes SET_KINEMATIC_POSITION away. --no-print-prepared takes
+away Creality's PRINT_PREPARED and START_PRINT's prepare flag, which the fake
+otherwise serves and acts on.
 --zoffset-macro serves Helper-Script's saving SET_GCODE_OFFSET wrapper and
 save_variables, as the development K1 Max has them.
 
@@ -100,6 +107,15 @@ EXTRA_OBJECTS = ["gcode_macro WIPE_NOZZLE"] if "--wiper" in sys.argv else []
 # Motor Off. Klipper refuses any move on an unhomed axis, and a fake that always
 # claims to be homed cannot show a panel getting that wrong.
 UNHOMED = "--unhomed" in sys.argv
+
+# The K1 Max has [force_move] enabled, which is what registers
+# SET_KINEMATIC_POSITION, and Creality's START_PRINT skips homing Z and the
+# bed mesh once PRINT_PREPARED has set its prepare variable. Manual Z depends
+# on both. These take them away, the way another printer would lack them.
+FORCE_MOVE = "--no-force-move" not in sys.argv
+PRINT_PREPARED = "--no-print-prepared" not in sys.argv
+if PRINT_PREPARED:
+    EXTRA_OBJECTS += ["gcode_macro PRINT_PREPARED", "gcode_macro PRINT_PREPARE_CLEAR"]
 
 # Pretend Helper-Script's "save z-offset" option is installed, which the
 # development K1 Max has. It renames SET_GCODE_OFFSET and wraps it in a macro
@@ -439,11 +455,16 @@ STATUS = {
                    # Leading underscore, so the panel should hide it.
                    "gcode_macro _GUPPY_INTERNAL": {"gcode": "M117 internal"}},
     },
+    # Limits are the development K1 Max's, measured 2026-10-26. Z's minimum is
+    # below zero there, so a nozzle can be driven into the bed on purpose.
     "toolhead": {"max_velocity": 800.0, "max_accel": 20000.0,
-                 "homed_axes": "" if UNHOMED else "xyz", "position": [0, 0, 0, 0]},
+                 "homed_axes": "" if UNHOMED else "xyz",
+                 "position": [0.0, 0.0, 0.0, 0.0] if UNHOMED else [150.0, 150.0, 10.0, 0.0],
+                 "axis_minimum": [-2.0, -2.0, -10.0, 0.0],
+                 "axis_maximum": [306.5, 306.0, 305.0, 0.0]},
     "print_stats": {"state": "standby", "filename": "", "print_duration": 0.0},
     "virtual_sdcard": {"is_active": False, "progress": 0.0},
-    "gcode_move": {"speed_factor": 1.0, "extrude_factor": 1.0,
+    "gcode_move": {"speed_factor": 1.0, "extrude_factor": 1.0, "absolute_coordinates": True,
                    "homing_origin": [0, 0, 0, 0], "gcode_position": [0, 0, 0, 0]},
     "idle_timeout": {"state": "Idle"},
     "display_status": {"progress": 0.0, "message": None},
@@ -482,6 +503,13 @@ STATUS["configfile"]["settings"].update({
                                     "target_temp": 75.0},
     "temperature_fan soc_fan": {"sensor_type": "temperature_mcu", "target_temp": 45.0},
 })
+
+if FORCE_MOVE:
+    STATUS["configfile"]["settings"]["force_move"] = {"enable_force_move": True}
+if PRINT_PREPARED:
+    # Macros are not subscribed as a rule, but the UI makes an exception for
+    # this one so Manual Z can say what the next print will do.
+    STATUS["gcode_macro START_PRINT"] = {"prepare": 0}
 
 # The K1 Max's four TMC2209s, X and Y homing on stallguard, which is what puts
 # a sensorless threshold on their rows in the TMC Autotune panel.
@@ -797,28 +825,116 @@ def result_for(method, params):
     return {}
 
 
-def homing_effect_of(script):
-    """Status deltas G28 and Motor Off would produce, applied to STATUS too.
+# Where each axis ends up after the K1 Max's homing_override: _HOME_X backs off
+# 10mm from its endstop at 306.5, _HOME_Y moves 10mm off its endstop at -2, and
+# Z homes to 0.
+HOMED_POSITION = {"x": 296.5, "y": 8.0, "z": 0.0}
 
-    Only matters with --unhomed, where it is how the printer gets homed at all.
-    G28 with no axes homes all three, and M84 or M18 forgets every one of them,
-    which is what Klipper does when the steppers are released.
+
+def motion_effect_of(script):
+    """Status deltas and any error the script's motion would produce.
+
+    Run line by line in order, because the order is the point: Manual Z homes X
+    and Y, marks Z with SET_KINEMATIC_POSITION, then jogs, and every one of
+    those is only legal after the one before. Klipper refuses a move on an axis
+    it has not homed and one past the axis limits, and abandons the rest of the
+    script at the first refusal, so this does too.
+
+    SET_KINEMATIC_POSITION marks X, Y and Z homed whichever it is given. That is
+    Creality's force_move.py, read 2026-10-26, and why Manual Z will not mark Z
+    until X and Y really are homed. G28 homes the axes it names, or all three,
+    and M84 or M18 releases them all.
     """
-    homed = STATUS["toolhead"]["homed_axes"]
+    th = STATUS["toolhead"]
+    gm = STATUS["gcode_move"]
+    homed, pos = th["homed_axes"], list(th["position"])
+    absolute = gm["absolute_coordinates"]
+    saved = {}
+    error = None
+
+    def fmt_pos(p):
+        return "%.3f %.3f %.3f [%.3f]" % tuple(p)
+
     for line in script.splitlines():
-        words = line.upper().split()
+        words = line.split()
         if not words:
             continue
-        if words[0] == "G28":
-            axes = "".join(a for a in "XYZ" if any(w.startswith(a) for w in words[1:]))
-            homed += (axes or "XYZ").lower()
-        elif words[0] in ("M84", "M18"):
-            homed = ""
+        cmd = words[0].upper()
+        args = {}
+        for w in words[1:]:
+            if "=" in w:
+                k, v = w.split("=", 1)
+                args[k.upper()] = v
+            elif w[0].isalpha():
+                args[w[0].upper()] = w[1:]
+        try:
+            if cmd == "G28":
+                axes = [a for a in "xyz" if a.upper() in args] or list("xyz")
+                for a in axes:
+                    pos["xyz".index(a)] = HOMED_POSITION[a]
+                homed += "".join(axes)
+            elif cmd in ("M84", "M18"):
+                homed = ""
+            elif cmd == "G90":
+                absolute = True
+            elif cmd == "G91":
+                absolute = False
+            elif cmd == "SAVE_GCODE_STATE":
+                saved[args.get("NAME", "default")] = absolute
+            elif cmd == "RESTORE_GCODE_STATE":
+                absolute = saved.get(args.get("NAME", "default"), absolute)
+            elif cmd == "SET_KINEMATIC_POSITION":
+                if not FORCE_MOVE:
+                    error = 'Unknown command:"SET_KINEMATIC_POSITION"'
+                    break
+                for i, a in enumerate("XYZ"):
+                    if a in args:
+                        pos[i] = float(args[a])
+                homed = "xyz"
+            elif cmd in ("G0", "G1"):
+                target = list(pos)
+                for i, a in enumerate("XYZ"):
+                    if a in args and args[a] != "":
+                        v = float(args[a])
+                        target[i] = v if absolute else pos[i] + v
+                for i, a in enumerate("xyz"):
+                    if target[i] == pos[i]:
+                        continue
+                    if a not in homed:
+                        error = "Must home axis first: " + fmt_pos(target)
+                        break
+                    if not th["axis_minimum"][i] <= target[i] <= th["axis_maximum"][i]:
+                        error = "Move out of range: " + fmt_pos(target)
+                        break
+                if error:
+                    break
+                pos = target
+        except ValueError:
+            continue
+
     homed = "".join(a for a in "xyz" if a in homed)
-    if homed == STATUS["toolhead"]["homed_axes"]:
+    delta = {}
+    if homed != th["homed_axes"]:
+        th["homed_axes"] = delta["homed_axes"] = homed
+    if pos != th["position"]:
+        th["position"] = delta["position"] = pos
+    gm["absolute_coordinates"] = absolute
+    return ([{"toolhead": delta}] if delta else []), error
+
+
+def macro_effect_of(script):
+    """Status deltas Creality's prepare flag macros would produce."""
+    if not PRINT_PREPARED:
         return []
-    STATUS["toolhead"]["homed_axes"] = homed
-    return [{"toolhead": {"homed_axes": homed}}]
+    macro = STATUS["gcode_macro START_PRINT"]
+    before = macro["prepare"]
+    for line in script.splitlines():
+        cmd = line.strip().upper()
+        if cmd in ("PRINT_PREPARED", "PRINT_PREPARE_CLEAR"):
+            macro["prepare"] = 1 if cmd == "PRINT_PREPARED" else 0
+    if macro["prepare"] == before:
+        return []
+    return [{"gcode_macro START_PRINT": {"prepare": macro["prepare"]}}]
 
 
 SET_GCODE_OFFSET_RE = re.compile(r"^\s*SET_GCODE_OFFSET\b(.*)$", re.I | re.M)
@@ -1219,13 +1335,14 @@ async def handler(ws):
                 print("=== GCODE RECEIVED ===\n" + script, flush=True)
                 with open(GCODE_LOG, "a") as f:
                     f.write("--- press ---\n" + script + "\n")
-                # Homing first, so a script that homes and then moves is judged
-                # against the axes it has just homed.
-                deltas = homing_effect_of(script)
-                offset_deltas, gcode_error = gcode_offset_effect_of(script)
-                gcode_error = gcode_error or guppy_module_effect_of(script)
+                # Motion first, so a script that homes and then changes the
+                # offset is judged against the axes it has just homed.
+                deltas, gcode_error = motion_effect_of(script)
+                offset_deltas, offset_error = gcode_offset_effect_of(script)
+                gcode_error = (gcode_error or offset_error
+                               or guppy_module_effect_of(script))
                 deltas += (bed_mesh_effect_of(script) + set_pin_effect_of(script)
-                           + offset_deltas)
+                           + offset_deltas + macro_effect_of(script))
                 for delta in deltas:
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "method": "notify_status_update",

@@ -764,6 +764,7 @@ python3 tools/fake_moonraker.py --files 30 --drop-every 6 --announce-every 4
 python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshake
 python3 tools/fake_moonraker.py --unhomed --zoffset-macro   # Fine Tune's Z, see below
 python3 tools/fake_moonraker.py --tmc-autotune    # or no-loader, no-helper
+python3 tools/fake_moonraker.py --unhomed         # Manual Z, see below
 ```
 
 That second line is the file panel's hard case, and every part of it earns its
@@ -795,6 +796,15 @@ for `motor_database.cfg` on the local disk under `printer.info`'s
 or to `$FAKE_KLIPPER_ROOT`, and reports that path. Whatever the flags,
 `_GUPPY_SAVE_CONFIG` is an unknown command until `_GUPPY_LOAD_MODULE` has loaded
 `guppy_config_helper`, which is the state of a real K1. See `docs/audit.md` C25.
+
+Manual Z is driven with `--unhomed`, since homing by hand is the whole point
+of it. The fake acts on motion in script order: G28, M84, G90 and G91, the
+gcode state macros, G0 and G1 checked against the K1 Max's axis limits and
+homed axes, and `SET_KINEMATIC_POSITION`. Like Klipper, a refused move
+abandons the rest of the script, so a jog refused after `G91` leaves the fake in
+relative mode. It also serves Creality's `PRINT_PREPARED` and the `prepare`
+flag on `START_PRINT`. `--no-force-move` and `--no-print-prepared` take those
+away, the way a printer without them would be.
 
 **The wifi panel does not go through Moonraker at all**, so the fake above
 cannot reach it: it opens wpa_supplicant's control socket and speaks its text
