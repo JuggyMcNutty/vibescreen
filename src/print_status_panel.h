@@ -47,6 +47,8 @@ class PrintStatusPanel : public NotifyConsumer {
   FineTunePanel &get_finetune_panel();
 
  private:
+  void place_aux_and_fan(bool has_aux);
+
   KWebSocketClient &ws;
   FineTunePanel finetune_panel;
   MiniPrintStatus mini_print_status;
