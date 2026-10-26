@@ -1,4 +1,5 @@
 #include "tmc_status_panel.h"
+#include "utils.h"
 #include "spdlog/spdlog.h"
 
 LV_IMG_DECLARE(back);
@@ -92,9 +93,9 @@ void TmcStatusPanel::init(json &j) {
   
 }
 
-void TmcStatusPanel::consume(json &j) {
+void TmcStatusPanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
-  auto tmc_status = j["/params/0/tmcstatus"_json_pointer];
+  auto tmc_status = KUtils::value_at(j, "/params/0/tmcstatus"_json_pointer);
   if (!tmc_status.is_null()) {
     for (auto &el : tmc_status.items()) {
       const auto &s = metrics.find(el.key());

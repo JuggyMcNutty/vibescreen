@@ -17,7 +17,7 @@ class PrintPanel : public NotifyConsumer {
   PrintPanel(KWebSocketClient &ws, std::mutex &lv_lock, PrintStatusPanel &ps);
   ~PrintPanel();
 
-  void consume(json &data);
+  void consume(const json &data);
   void subscribe();
   void handle_filelist_changed(json &j);
   void foreground();

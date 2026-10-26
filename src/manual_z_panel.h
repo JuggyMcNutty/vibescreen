@@ -25,7 +25,7 @@ class ManualZPanel : public NotifyConsumer {
   ~ManualZPanel();
 
   void foreground();
-  void consume(json &j);
+  void consume(const json &j);
   void handle_callback(lv_event_t *event);
   void handle_selector(lv_event_t *event);
 

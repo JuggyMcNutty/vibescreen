@@ -193,16 +193,16 @@ void ExtruderPanel::enable_spoolman() {
   spoolman_btn.enable();
 }
 
-void ExtruderPanel::consume(json& j) {
+void ExtruderPanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
-  auto target_value = j["/params/0/extruder/target"_json_pointer];
+  auto target_value = KUtils::value_at(j, "/params/0/extruder/target"_json_pointer);
   if (!target_value.is_null()) {
     int target = target_value.template get<int>();
     current_target = target;
     extruder_temp.update_target(target);
   }
 
-  auto temp_value = j["/params/0/extruder/temperature"_json_pointer];
+  auto temp_value = KUtils::value_at(j, "/params/0/extruder/temperature"_json_pointer);
   if (!temp_value.is_null()) {
     int value = temp_value.template get<int>();
     current_temp = value;

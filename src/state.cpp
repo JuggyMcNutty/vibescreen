@@ -47,11 +47,13 @@ void State::reset() {
   data.clear();
 }
 
-void State::set_data(const std::string &key, json &j, const std::string &json_path) {
+void State::set_data(const std::string &key, const json &j, const std::string &json_path) {
   std::lock_guard<std::mutex> guard(lock);
-  auto patch = j[json::json_pointer(json_path)];
-  if (!patch.is_null()) {
-    data[key].merge_patch(patch);
+  // A const read, because j is the notification every consumer after this one
+  // is handed. See docs/audit.md M10.
+  json::json_pointer ptr(json_path);
+  if (j.contains(ptr) && !j.at(ptr).is_null()) {
+    data[key].merge_patch(j.at(ptr));
   }
 }
 
@@ -68,8 +70,8 @@ const json &State::get_data(const json::json_pointer& ptr) {
   return data.contains(ptr) ? data.at(ptr) : absent;
 }
 
-void State::consume(json &j) {
-  if (j.contains("params") && !j["params"].empty()) {
+void State::consume(const json &j) {
+  if (j.contains("params") && !j.at("params").empty()) {
     set_data("printer_state", j, "/params/0");
   }
 }

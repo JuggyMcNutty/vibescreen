@@ -23,7 +23,7 @@ class FineTunePanel : public NotifyConsumer {
   void handle_speed(lv_event_t *event);
   void handle_flow(lv_event_t *event);
 
-  void consume(json &j);  
+  void consume(const json &j);  
   
   static void _handle_callback(lv_event_t *event) {
     KGuard::event("FineTunePanel::_handle_callback", [&] {

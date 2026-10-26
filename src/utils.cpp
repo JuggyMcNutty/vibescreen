@@ -25,6 +25,11 @@ namespace fs = std::experimental::filesystem;
 
 namespace KUtils {
 
+  const json &value_at(const json &j, const json::json_pointer &ptr) {
+    static const json absent;
+    return j.contains(ptr) ? j.at(ptr) : absent;
+  }
+
   bool is_homed() {
     auto v = State::get_instance()
       ->get_data("/printer_state/toolhead/homed_axes"_json_pointer);

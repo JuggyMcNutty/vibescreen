@@ -367,10 +367,10 @@ void PrintStatusPanel::handle_metadata(const std::string &gcode_file, json &j) {
 }
 
 
-void PrintStatusPanel::consume(json &j) {
+void PrintStatusPanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
 
-  auto printfile = j["/params/0/print_stats/filename"_json_pointer];
+  auto printfile = KUtils::value_at(j, "/params/0/print_stats/filename"_json_pointer);
   if (!printfile.is_null()) {
     // A filename we have not already got is the start of a print. Testing for
     // the key alone was not enough: Klipper clears the filename when a print is
@@ -389,7 +389,7 @@ void PrintStatusPanel::consume(json &j) {
     }
   }
 
-  auto& pstate = j["/params/0/print_stats/state"_json_pointer];
+  auto pstate = KUtils::value_at(j, "/params/0/print_stats/state"_json_pointer);
   if (!pstate.is_null()) {
     auto print_status = pstate.template get<std::string>();
     if (print_status != "printing" && print_status != "paused") {
@@ -416,17 +416,17 @@ void PrintStatusPanel::consume(json &j) {
     mini_print_status.update_status(print_status);
   }
 
-  auto v = j["/params/0/extruder/target"_json_pointer];
+  auto v = KUtils::value_at(j, "/params/0/extruder/target"_json_pointer);
   if (!v.is_null()) {
     extruder_target = v.template get<int>();
   }
 
-  v = j["/params/0/heater_bed/target"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/heater_bed/target"_json_pointer);
   if (!v.is_null()) {
     heater_bed_target = v.template get<int>();
   }  
   
-  v = j["/params/0/extruder/temperature"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/extruder/temperature"_json_pointer);
   if (!v.is_null()) {
     if (extruder_target > 0) {
       extruder_temp.update_label(fmt::format("{} / {}", v.template get<int>(), extruder_target).c_str());
@@ -435,7 +435,7 @@ void PrintStatusPanel::consume(json &j) {
     }
   }
 
-  v = j["/params/0/heater_bed/temperature"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/heater_bed/temperature"_json_pointer);
   if (!v.is_null()) {
     if (heater_bed_target > 0) {
       bed_temp.update_label(fmt::format("{} / {}", v.template get<int>(), heater_bed_target).c_str());
@@ -445,14 +445,14 @@ void PrintStatusPanel::consume(json &j) {
   }
 
   // speed
-  auto speed = j["/params/0/motion_report/live_velocity"_json_pointer];
+  auto speed = KUtils::value_at(j, "/params/0/motion_report/live_velocity"_json_pointer);
   if (!speed.is_null()) {
     int s = static_cast<int>(speed.template get<double>());
     print_speed.update_label((std::to_string(s) + " mm/s").c_str());
   }
   
   // zoffset
-  v = j["/params/0/gcode_move/homing_origin/2"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/gcode_move/homing_origin/2"_json_pointer);
   if (!v.is_null()) {
     z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
@@ -462,13 +462,13 @@ void PrintStatusPanel::consume(json &j) {
     std::string fan_name = f.first;
 
     int fv = f.second;
-    auto fan_value = j[json::json_pointer(fmt::format("/params/0/{}/value", fan_name))];
+    auto fan_value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/value", fan_name)));
     if (!fan_value.is_null()) {
       fv = KUtils::fan_value_to_pct(fan_name, fan_value.template get<double>());
       f.second = fv;
     }
 
-    fan_value = j[json::json_pointer(fmt::format("/params/0/{}/speed", fan_name))];
+    fan_value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/speed", fan_name)));
     if (!fan_value.is_null()) {
       fv = static_cast<int>(fan_value.template get<double>() * 100);
       f.second = fv;
@@ -479,32 +479,32 @@ void PrintStatusPanel::consume(json &j) {
   fan0.update_label(fmt::format("{}", fmt::join(values, ", ")).c_str());
 
   // progress
-  v = j["/params/0/print_stats/print_duration"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/print_stats/print_duration"_json_pointer);
   if (!v.is_null()) {
     uint32_t passed = static_cast<uint32_t>(v.template get<float>());
     update_time_progress(passed);
   }
 
   if (!aux_sensor.empty()) {
-    v = j[json::json_pointer(fmt::format("/params/0/{}/temperature", aux_sensor))];
+    v = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/temperature", aux_sensor)));
     if (!v.is_null()) {
       aux_temp.update_label(fmt::format("{}", (int)v.template get<double>()).c_str());
     }
   }
 
   // progress percentage
-  v = j["/params/0/virtual_sdcard/progress"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/virtual_sdcard/progress"_json_pointer);
   if (!v.is_null()) {
     update_progress(static_cast<int>(v.template get<double>() * 100));
   }
 
-  v = j["/params/0/motion_report/live_extruder_velocity"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/motion_report/live_extruder_velocity"_json_pointer);
   if (!v.is_null()) {
     double flow = pi() / 4 * std::pow(filament_diameter, 2) * v.template get<double>();
     flow_rate.update_label(fmt::format("{:.1f} mm3/s", flow > 0.0 ? flow : 0.0).c_str());
   }
 
-  v = j["/params/0/pause_resume/is_paused"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/pause_resume/is_paused"_json_pointer);
   if (!v.is_null()) {
     bool is_paused = v.template get<bool>();
     if (is_paused) {
@@ -535,7 +535,7 @@ void PrintStatusPanel::consume(json &j) {
   // and gcode_position, which arrive in deltas of their own. What changes is
   // that the last reported info is remembered and passed back in, so a delta
   // that says nothing about layers can no longer lose them.
-  v = j["/params/0/print_stats/info"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/print_stats/info"_json_pointer);
   if (!v.is_null()) {
     last_layer_info = v;
   }

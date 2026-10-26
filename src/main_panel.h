@@ -33,7 +33,7 @@ class MainPanel : public NotifyConsumer {
 	    SpoolmanPanel &sm);
 
   ~MainPanel();
-  void consume(json &data);
+  void consume(const json &data);
   void init(json &data);
   void subscribe();
   PrinterTunePanel& get_tune_panel();

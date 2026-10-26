@@ -40,17 +40,17 @@ LedPanel::~LedPanel() {
   ws.unregister_notify_update(this);
 }
 
-void LedPanel::consume(json &j) {
+void LedPanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
   for (auto &l : leds) {
     // hack for output_pin leds
-    auto value = j[json::json_pointer(fmt::format("/params/0/{}/value", l.first))];
+    auto value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/value", l.first)));
     if (!value.is_null()) {
       int v = static_cast<int>(value.template get<double>() * 100);
       l.second->update_value(v);
     }
 
-    value = j[json::json_pointer(fmt::format("/params/0/{}/color_data", l.first))];
+    value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/color_data", l.first)));
     if (!value.is_null() && value.size() > 0) {
       // color_data = [[r,b,g,w]]
       value =  value.at(0);

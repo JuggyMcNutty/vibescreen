@@ -20,7 +20,7 @@ class TmcStatusPanel : public NotifyConsumer {
   void background();
 
   void init(json &);
-  void consume(json &j);
+  void consume(const json &j);
 
  private:
   KWebSocketClient &ws;

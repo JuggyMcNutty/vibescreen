@@ -1,4 +1,5 @@
 #include "homing_panel.h"
+#include "utils.h"
 #include "state.h"
 #include "spdlog/spdlog.h"
 #include "config.h"
@@ -74,8 +75,8 @@ HomingPanel::HomingPanel(KWebSocketClient &websocket_client, std::mutex &lock)
 HomingPanel::~HomingPanel() {
 }
 
-void HomingPanel::consume(json &j) {
-  auto v = j["/params/0/toolhead/homed_axes"_json_pointer];
+void HomingPanel::consume(const json &j) {
+  auto v = KUtils::value_at(j, "/params/0/toolhead/homed_axes"_json_pointer);
   if (!v.is_null()) {
     std::string homed_axes = v.template get<std::string>();
     std::lock_guard<std::mutex> lock(lv_lock);

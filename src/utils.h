@@ -12,6 +12,12 @@
 using json = nlohmann::json;
 
 namespace KUtils {
+  // The value at ptr, or a null when j has none there. For reading a
+  // notification every consumer shares: the non-const operator[] inserts a
+  // null for a missing key, so the next consumer sees keys the printer never
+  // sent, and the const one asserts. See docs/audit.md M10.
+  const json &value_at(const json &j, const json::json_pointer &ptr);
+
   bool is_homed();
 
   // Whether the printer defines a gcode macro of this name. Nothing checks

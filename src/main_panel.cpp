@@ -1,4 +1,5 @@
 #include "main_panel.h"
+#include "utils.h"
 #include "state.h"
 #include "lvgl/lvgl.h"
 #include "spdlog/spdlog.h"
@@ -108,16 +109,16 @@ void MainPanel::init(json &j) {
   extruder_panel.init(j);
 }
 
-void MainPanel::consume(json &j) {  
+void MainPanel::consume(const json &j) {  
   std::lock_guard<std::mutex> lock(lv_lock);
   for (const auto &el : sensors) {
-    auto target_value = j[json::json_pointer(fmt::format("/params/0/{}/target", el.first))];
+    auto target_value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/target", el.first)));
     if (!target_value.is_null()) {
       int target = target_value.template get<int>();
       el.second->update_target(target);
     }
 
-    auto temp_value = j[json::json_pointer(fmt::format("/params/0/{}/temperature", el.first))];
+    auto temp_value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/temperature", el.first)));
     if (!temp_value.is_null()) {
       int value = temp_value.template get<int>();
       el.second->update_series(value);

@@ -106,13 +106,9 @@ void ManualZPanel::foreground() {
   lv_obj_move_foreground(panel_cont);
 }
 
-void ManualZPanel::consume(json &j) {
-  // Every consumer gets this same object, and the others read it with the
-  // non-const operator[], which inserts a null for each key they look up. By
-  // the time it gets here a temperature update carries gcode_move and toolhead
-  // entries the printer never sent, so a key being present means nothing. Only
-  // a real value does, and it is read through a const reference so this does
-  // not add to the problem. See docs/audit.md M10.
+void ManualZPanel::consume(const json &j) {
+  // Only what the panel shows. Temperatures arrive every second, and redrawing
+  // on those would clear a refused jog's message before it could be read.
   static const json::json_pointer watched[] = {
     "/params/0/toolhead/homed_axes"_json_pointer,
     "/params/0/toolhead/position/2"_json_pointer,
@@ -120,9 +116,8 @@ void ManualZPanel::consume(json &j) {
     "/params/0/gcode_move/homing_origin/2"_json_pointer,
     "/params/0/gcode_macro START_PRINT/prepare"_json_pointer,
   };
-  const json &n = j;
   for (const auto &ptr : watched) {
-    if (n.contains(ptr) && !n.at(ptr).is_null()) {
+    if (!KUtils::value_at(j, ptr).is_null()) {
       std::lock_guard<std::mutex> lock(lv_lock);
       jog_refusal.clear();
       refresh();

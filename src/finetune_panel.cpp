@@ -195,25 +195,25 @@ void FineTunePanel::foreground() {
   lv_obj_move_foreground(panel_cont);
 }
 
-void FineTunePanel::consume(json &j) {
+void FineTunePanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
-  auto v = j["/params/0/gcode_move/homing_origin/2"_json_pointer];
+  auto v = KUtils::value_at(j, "/params/0/gcode_move/homing_origin/2"_json_pointer);
   if (!v.is_null()) {
     z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
 
-  v = j["/params/0/extruder/pressure_advance"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/extruder/pressure_advance"_json_pointer);
   if (!v.is_null()) {
     pa.update_label(KUtils::short_measure(v.template get<double>(), "mm/s").c_str());
   }
 
-  v = j["/params/0/gcode_move/speed_factor"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/gcode_move/speed_factor"_json_pointer);
   if (!v.is_null()) {
     speed_factor.update_label(fmt::format("{}%",
 	   static_cast<int>(v.template get<double>() * 100)).c_str());
   }
 
-  v = j["/params/0/gcode_move/extrude_factor"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/gcode_move/extrude_factor"_json_pointer);
   if (!v.is_null()) {
     flow_factor.update_label(fmt::format("{}%",
 	   static_cast<int>(v.template get<double>() * 100)).c_str());

@@ -942,6 +942,14 @@ rather than looping until empty: handlers send requests whose replies come back
 onto the same queue, so draining to empty would run for as long as the printer
 keeps answering.
 
+**Every consumer is handed the same notification, so read it, never write it.**
+`consume` takes a `const json &`. Read it with `KUtils::value_at(j, ptr)`, which
+returns a null for a missing pointer. Do not use `j[ptr]`, and the const
+signature does not save you from that: nlohmann's const `operator[]` with a
+JSON pointer still compiles, and on a missing key it asserts or reads past the
+end of a map. The non-const one used to insert nulls that every later consumer
+then saw. See `docs/audit.md` M10.
+
 `State` has its own separate mutex, and per `docs/audit.md` C1 that mutex does
 not actually protect the reference-returning accessors. Read C1 before touching
 anything in `src/state.cpp` or adding a new `get_data` caller.

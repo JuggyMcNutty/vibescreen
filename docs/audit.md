@@ -1163,29 +1163,45 @@ The maps there are small and the copies are of json values rather than trees, so
 this is a cleanup rather than a bug. Taking the map by const reference and
 pushing pointers, or taking `std::vector<U*>`, would fix all of them at once.
 
-### M10. Consumers write into the notification they all share (open)
+### M10. Consumers wrote into the notification they all share (fixed)
 
 `KWebSocketClient::drain` hands every `NotifyConsumer` the same `json` for a
 `notify_status_update`. Most of them read it as `j["/params/0/..."_json_pointer]`
-on a non-const reference, 32 times across 12 files in that literal form alone.
-nlohmann's non-const `operator[]` creates whatever the pointer names when it is
-missing: a null for an object key, and an array padded with nulls for an index.
-So each consumer sees keys that only the consumers before it asked about.
+on a non-const reference: 36 reads across 11 consumers. nlohmann's non-const
+`operator[]` creates whatever the pointer names when it is missing, a null for
+an object key and an array padded with nulls for an index. So each consumer saw
+keys that only the consumers before it had asked about.
 
 Measured 2026-10-26: a temperature-only update from the fake reached
 `ManualZPanel` carrying `bed_mesh: null`, `heater_bed: {target: null, ...}` and
 `gcode_move: {homing_origin: [null, null, null], ...}`.
 
-Most code never notices. The values stay null, so the usual `is_null()` checks
-behave. `State` is registered first, so what it stores is what the printer
-sent. What breaks is any test of whether a key is present, and that is how it
-was found: Manual Z's first version checked `contains("gcode_move")` and so
+Most code never noticed. The values stayed null, so the usual `is_null()`
+checks behaved, and `State` is registered first, so it stored only what the
+printer sent. What broke was any test of whether a key is present. That is how
+it was found: Manual Z's first version checked `contains("gcode_move")` and so
 cleared its message on every temperature update.
 
-`ManualZPanel::consume` now reads through a const reference and tests leaf
-values. The same const read would fix every other consumer. It is cosmetic
-until someone else writes a presence check, which is why it is recorded here
-rather than left in a comment.
+`consume` now takes a `const json &`, and so does `State::set_data`, so nothing
+handed a notification can write to it. Every read goes through
+`KUtils::value_at`, which returns a null for a missing pointer the way
+`State::get_data` already did.
+
+The compiler does not enforce that second half. nlohmann's const `operator[]`
+with a JSON pointer still compiles, and on a missing key it asserts or reads
+past the end of a map. Making the signature const without replacing the reads
+would have turned harmless nulls into crashes. Every `consume` body was checked
+for bracket access after the change, and none is left.
+
+Measured after the fix, the same way: a temperature update reaches
+`ManualZPanel` as `{"extruder": {"target": 240.0, "temperature": 240.0}}`,
+which is all the fake sent.
+
+Not converted: `register_method_callback` handlers for one method also share a
+`json &`. The four on `notify_gcode_response` (console, input shaper, belts,
+prompt) all read `/params/0`, which every gcode response carries, so none of
+them inserts anything today. The console iterates every element of `params` as
+a string, so a handler that read `/params/1` would make it throw.
 
 ### M11. Two-line prompts run under their buttons on a small screen (open)
 

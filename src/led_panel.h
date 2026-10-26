@@ -16,7 +16,7 @@ class LedPanel : public NotifyConsumer {
   LedPanel(KWebSocketClient &, std::mutex &);
   ~LedPanel();
 
-  void consume(json &j);
+  void consume(const json &j);
 
   lv_obj_t *get_container();
   void init(json&);
