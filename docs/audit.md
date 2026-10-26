@@ -394,6 +394,29 @@ And `show_dir` went through `KUtils::sort_map_values`, which takes its
 `std::map` **by value**, deep copying every `Tree` in the directory and all of
 their metadata on every redraw; it sorts pointers now. See M9.
 
+### C24. Fine Tune's Z offset failed on an unhomed printer, and skipped the save (fixed)
+
+Found while looking at issue #7, which asks for a way to set the Z offset by
+hand. Fine Tune is that already, reachable from the Tune tab with nothing
+printing, but every Z button sent `SET_GCODE_OFFSET ... MOVE=1`.
+
+Klipper's `cmd_SET_GCODE_OFFSET` applies the offset and only then makes the
+move, and the move fails with `Must home axis first` on an unhomed Z. So the
+offset changed, the label showed it, and a rejection dialog came up over it.
+
+The development K1 Max makes that worse. Helper-Script's "save z-offset" option
+renames the builtin to `_SET_GCODE_OFFSET` and wraps it in a macro that ends
+with `SAVE_VARIABLE VARIABLE=zoffset`, then a `delayed_gcode` reapplies the
+saved value at boot. Measured 2026-10-26, see `docs/k1max-facts.md`. The builtin
+failing abandons the macro before the save. The printer therefore ran with an
+offset that the next restart would quietly replace with the previous one.
+
+`MOVE=1` now goes out only when `KUtils::is_homed()`. A print is always homed,
+so a nudge mid-print still moves the nozzle at once. Measured against the fake,
+which now models both halves with `--unhomed --zoffset-macro`. Before, Z+ on
+an unhomed printer read 0.010 mm behind the rejection. After, it sends
+`SET_GCODE_OFFSET Z_ADJUST=+0.01` and nothing is rejected.
+
 ### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget

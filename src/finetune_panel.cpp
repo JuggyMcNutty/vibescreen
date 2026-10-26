@@ -18,6 +18,15 @@ LV_IMG_DECLARE(flow_up_img);
 LV_IMG_DECLARE(flow_down_img);
 LV_IMG_DECLARE(back);
 
+// MOVE=1 is what makes a nudge show up in the first layer straight away, but
+// Klipper applies the offset before it makes that move, and the move fails on a
+// printer that is not homed. Helper-Script's SET_GCODE_OFFSET wrapper saves the
+// offset only once the builtin has returned, so the failure left the new offset
+// in effect, put up a rejection, and skipped the save. See docs/audit.md C24.
+static const char *move_if_homed() {
+  return KUtils::is_homed() ? " MOVE=1" : "";
+}
+
 FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   : NotifyConsumer(l)
   , ws(websocket_client)
@@ -197,14 +206,14 @@ void FineTunePanel::handle_zoffset(lv_event_t *e) {
 
     if (btn == zreset_btn.get_container()) {
       spdlog::trace("clicked zoffset reset");
-      ws.gcode_script("SET_GCODE_OFFSET Z=0 MOVE=1");
+      ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z=0{}", move_if_homed()));
     } else {
       const char * step = lv_btnmatrix_get_btn_text(zoffset_selector.get_selector(),
 						    zoffset_selector.get_selected_idx());
       spdlog::trace("clicked z {}", step);
-      ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z_ADJUST={}{} MOVE=1",
+      ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z_ADJUST={}{}{}",
 				  btn == zup_btn.get_container() ? "+" : "-",
-				  step));
+				  step, move_if_homed()));
     }
   }
 }
