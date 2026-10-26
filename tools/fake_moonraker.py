@@ -58,6 +58,12 @@ sweeps and its analysis, ending the way the mode says.
 --api-key <key> refuses the websocket handshake unless X-Api-Key matches, the
 way Moonraker does with its authorization component enforcing one.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
+
+SET_GCODE_OFFSET is always acted on: it moves gcode_move.homing_origin, and
+MOVE=1 on an unhomed Z fails after applying the offset, as Klipper's does.
+--unhomed starts with nothing homed, and G28 and M84 then home and release axes.
+--zoffset-macro serves Helper-Script's saving SET_GCODE_OFFSET wrapper and
+save_variables, as the development K1 Max has them.
 """
 import asyncio, json, math, os, re, shlex, struct, sys, tempfile, time, zlib
 import websockets
@@ -83,6 +89,18 @@ GCODE_LOG = os.environ.get("GCODE_LOG", "/tmp/guppy_gcode_received.txt")
 # Pretend the ProWiper mod is installed, so the bed mesh panel's check for it
 # can be exercised both ways round.
 EXTRA_OBJECTS = ["gcode_macro WIPE_NOZZLE"] if "--wiper" in sys.argv else []
+
+# Start with nothing homed, which is where a printer is after a restart or a
+# Motor Off. Klipper refuses any move on an unhomed axis, and a fake that always
+# claims to be homed cannot show a panel getting that wrong.
+UNHOMED = "--unhomed" in sys.argv
+
+# Pretend Helper-Script's "save z-offset" option is installed, which the
+# development K1 Max has. It renames SET_GCODE_OFFSET and wraps it in a macro
+# that writes every change to save_variables.
+ZOFFSET_MACRO = "--zoffset-macro" in sys.argv
+if ZOFFSET_MACRO:
+    EXTRA_OBJECTS += ["gcode_macro SET_GCODE_OFFSET", "save_variables"]
 
 # Walk a print from standby through to a finish, so the print status panel can
 # be watched doing the thing it gets wrong: reaching the end and staying there.
@@ -399,7 +417,7 @@ STATUS = {
                    "gcode_macro _GUPPY_INTERNAL": {"gcode": "M117 internal"}},
     },
     "toolhead": {"max_velocity": 800.0, "max_accel": 20000.0,
-                 "homed_axes": "xyz", "position": [0, 0, 0, 0]},
+                 "homed_axes": "" if UNHOMED else "xyz", "position": [0, 0, 0, 0]},
     "print_stats": {"state": "standby", "filename": "", "print_duration": 0.0},
     "virtual_sdcard": {"is_active": False, "progress": 0.0},
     "gcode_move": {"speed_factor": 1.0, "extrude_factor": 1.0,
@@ -441,6 +459,37 @@ STATUS["configfile"]["settings"].update({
                                     "target_temp": 75.0},
     "temperature_fan soc_fan": {"sensor_type": "temperature_mcu", "target_temp": 45.0},
 })
+
+# Helper-Script's macro as it reads on the development K1 Max, measured
+# 2026-10-26. The gcode body is served verbatim because SAVE_VARIABLE in it is
+# what tells Fine Tune an offset will survive a restart.
+if ZOFFSET_MACRO:
+    STATUS["configfile"]["settings"].update({
+        "gcode_macro set_gcode_offset": {
+            "description": "Saving Z-Offset",
+            "rename_existing": "_SET_GCODE_OFFSET",
+            "gcode": (
+                "\n{% if printer.save_variables.variables.zoffset %}\n"
+                "{% set zoffset = printer.save_variables.variables.zoffset %}\n"
+                "{% else %}\n"
+                "{% set zoffset = {'z': None} %}\n"
+                "{% endif %}\n"
+                "{% set ns = namespace(zoffset={'z': zoffset.z}) %}\n"
+                "_SET_GCODE_OFFSET {% for p in params %}{'%s=%s '% (p, params[p])}{% endfor %}\n"
+                "{%if 'Z' in params %}\n"
+                "{% set null = ns.zoffset.update({'z': params.Z|float}) %}\n"
+                "{% endif %}\n"
+                "{%if 'Z_ADJUST' in params %}\n"
+                "{%if ns.zoffset.z == None %}\n"
+                "{% set null = ns.zoffset.update({'z': 0}) %}\n"
+                "{% endif %}\n"
+                "{% set null = ns.zoffset.update({'z': (ns.zoffset.z | float) + (params.Z_ADJUST | float)}) %}\n"
+                "{% endif %}\n"
+                "SAVE_VARIABLE VARIABLE=zoffset VALUE=\"{ns.zoffset}\""),
+        },
+        "save_variables": {
+            "filename": "/usr/data/printer_data/config/Helper-Script/variables.cfg"},
+    })
 
 # The sections the panel checks before offering to calibrate or save. Neither
 # resonance_tester nor adxl345 appears in printer.objects.list on a real
@@ -657,6 +706,71 @@ def result_for(method, params):
     if method == "machine.system_info":
         return {"system_info": {"cpu_info": {"cpu_count": 2}}}
     return {}
+
+
+def homing_effect_of(script):
+    """Status deltas G28 and Motor Off would produce, applied to STATUS too.
+
+    Only matters with --unhomed, where it is how the printer gets homed at all.
+    G28 with no axes homes all three, and M84 or M18 forgets every one of them,
+    which is what Klipper does when the steppers are released.
+    """
+    homed = STATUS["toolhead"]["homed_axes"]
+    for line in script.splitlines():
+        words = line.upper().split()
+        if not words:
+            continue
+        if words[0] == "G28":
+            axes = "".join(a for a in "XYZ" if any(w.startswith(a) for w in words[1:]))
+            homed += (axes or "XYZ").lower()
+        elif words[0] in ("M84", "M18"):
+            homed = ""
+    homed = "".join(a for a in "xyz" if a in homed)
+    if homed == STATUS["toolhead"]["homed_axes"]:
+        return []
+    STATUS["toolhead"]["homed_axes"] = homed
+    return [{"toolhead": {"homed_axes": homed}}]
+
+
+SET_GCODE_OFFSET_RE = re.compile(r"^\s*SET_GCODE_OFFSET\b(.*)$", re.I | re.M)
+
+
+def gcode_offset_effect_of(script):
+    """Status deltas and any error a SET_GCODE_OFFSET would produce.
+
+    Klipper applies the offset first and only then makes the MOVE=1 move, so on
+    a printer whose Z is not homed the offset changes and the command still
+    fails. Helper-Script's wrapper saves the offset after the builtin returns,
+    so that failure also costs the save. Both halves are reproduced: the delta
+    goes out, and the error comes back as the reply.
+    """
+    deltas = []
+    for m in SET_GCODE_OFFSET_RE.finditer(script):
+        args = {}
+        for word in m.group(1).split():
+            if "=" in word:
+                key, value = word.split("=", 1)
+                args[key.upper()] = value
+        origin = STATUS["gcode_move"]["homing_origin"]
+        before = origin[2]
+        try:
+            if "Z" in args:
+                origin[2] = float(args["Z"])
+            elif "Z_ADJUST" in args:
+                origin[2] += float(args["Z_ADJUST"])
+            else:
+                continue
+        except ValueError:
+            continue
+        deltas.append({"gcode_move": {"homing_origin": list(origin)}})
+
+        # A move of zero length returns before Klipper checks the axis limits,
+        # so resetting an offset that is already zero succeeds unhomed.
+        if (args.get("MOVE") == "1" and origin[2] != before
+                and "z" not in STATUS["toolhead"]["homed_axes"]):
+            # Klipper abandons the rest of the script at the first error.
+            return deltas, "Must home axis first: 0.000 0.000 %.3f [0.000]" % origin[2]
+    return deltas, None
 
 
 SET_PIN_RE = re.compile(r"SET_PIN\s+PIN=(\S+)\s+VALUE=(\S+)", re.I)
@@ -1009,13 +1123,20 @@ async def handler(ws):
             msg = json.loads(raw)
             method = msg.get("method", "")
             params = msg.get("params", {}) or {}
+            gcode_error = None
 
             if method == "printer.gcode.script":
                 script = params.get("script", "")
                 print("=== GCODE RECEIVED ===\n" + script, flush=True)
                 with open(GCODE_LOG, "a") as f:
                     f.write("--- press ---\n" + script + "\n")
-                for delta in bed_mesh_effect_of(script) + set_pin_effect_of(script):
+                # Homing first, so a script that homes and then moves is judged
+                # against the axes it has just homed.
+                deltas = homing_effect_of(script)
+                offset_deltas, gcode_error = gcode_offset_effect_of(script)
+                deltas += (bed_mesh_effect_of(script) + set_pin_effect_of(script)
+                           + offset_deltas)
+                for delta in deltas:
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "method": "notify_status_update",
                         "params": [delta, time.time()]}))
@@ -1027,6 +1148,11 @@ async def handler(ws):
                     task.add_done_callback(tasks.discard)
 
             if "id" in msg:
+                if gcode_error:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": msg["id"],
+                        "error": {"code": -32602, "message": gcode_error}}))
+                    continue
                 if method == "printer.gcode.script" and REJECT_GCODE:
                     # Reply the way Moonraker does when Klipper refuses a command.
                     # The burst counter is only worth showing when bursting, so a

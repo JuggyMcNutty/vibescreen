@@ -762,6 +762,7 @@ python3 tools/fake_moonraker.py --belts fail      # or slow, timeout, empty
 python3 tools/fake_moonraker.py --drop-file 20    # announce an upload
 python3 tools/fake_moonraker.py --files 30 --drop-every 6 --announce-every 4
 python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshake
+python3 tools/fake_moonraker.py --unhomed --zoffset-macro   # Fine Tune's Z, see below
 ```
 
 That second line is the file panel's hard case, and every part of it earns its
@@ -779,6 +780,13 @@ numbers in `print_stats.info`, and our K1 Max never does, because no file on it
 calls `SET_PRINT_STATS_INFO`. So the default exercises the one path that printer
 never takes, and the layer counter there runs entirely on the estimate from file
 metadata and Z. Measured 2026-08-20, detail in `docs/k1max-facts.md`.
+
+`--unhomed` and `--zoffset-macro` are for Fine Tune's Z offset. The fake always
+acts on `SET_GCODE_OFFSET`, and like Klipper it applies the offset before
+failing a `MOVE=1` on an unhomed Z. `--unhomed` starts the printer in that
+state, and G28 and M84 then home and release it. `--zoffset-macro` adds the
+Helper-Script wrapper the development K1 Max has, which saves the offset only
+when the builtin underneath it succeeds. See `docs/audit.md` C24.
 
 **The wifi panel does not go through Moonraker at all**, so the fake above
 cannot reach it: it opens wpa_supplicant's control socket and speaks its text
