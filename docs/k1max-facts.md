@@ -212,6 +212,46 @@ took 1.6 seconds on a restart and 8.3 at boot. With the fix,
 included, so nearly all of the old figure was the wait on `/dev/random`.
 Neither start waited for the CRNG.
 
+## Z homing and the Z offset
+
+Read 2026-10-26 from `printer/objects/query` and `printer/gcode/help`, idle,
+for issue #7. Nothing was sent to the printer.
+
+Z has no switch. `stepper_z` homes on `tmc2209_stepper_z:virtual_endstop` with
+`position_endstop: 0`, and the strain gauge is Creality's `[prtouch_v2]`, a
+closed module that also registers itself as the `probe` object:
+
+| What | Value |
+| --- | --- |
+| `prtouch_v2` `z_offset` | `-0.025` |
+| `probe` status | `{"z_offset": -0.025, "last_z_result": 0.0}` |
+| `homing_override` | `_HOME_Z` for Z, then `BED_MESH_PROFILE LOAD="default"` |
+| `START_PRINT` | `CX_ROUGH_G28`, then `ACCURATE_G28`, which is `ACCURATE_HOME_Z` |
+| `gcode_move.homing_origin` | `[0, 0, 0, 0]` |
+
+`PROBE_CALIBRATE`, `Z_OFFSET_APPLY_PROBE`, `Z_OFFSET_APPLY_ENDSTOP`,
+`MANUAL_PROBE` and `SAVE_CONFIG` all exist. Whether `ACCURATE_HOME_Z` honours a
+`prtouch_v2` `z_offset` saved through them was not tested, and is why Fine Tune
+works through the gcode offset instead.
+
+**`SET_GCODE_OFFSET` is a macro here.** Helper-Script's "save z-offset" option
+is installed:
+
+- `gcode_macro SET_GCODE_OFFSET` has `rename_existing: _SET_GCODE_OFFSET`.
+  It passes its parameters to the builtin, then ends with
+  `SAVE_VARIABLE VARIABLE=zoffset`.
+- `delayed_gcode LOAD_GCODE_OFFSETS` runs two seconds after start and
+  reapplies the saved value.
+- `save_variables` holds `{"zoffset": {"z": 0}}`.
+
+So an offset set from the screen survives a restart on this machine, but only
+if the builtin succeeds. A `MOVE=1` the builtin rejects, which it does on an
+unhomed Z, abandons the macro before the save. See `docs/audit.md` C24.
+
+`configfile.settings` carries the macro as `gcode_macro set_gcode_offset`, with
+`description`, `gcode` and `rename_existing`. Fine Tune looks for
+`SAVE_VARIABLE` in that `gcode` to say whether an offset is kept.
+
 ## Raw excerpts
 
 ### CPU
