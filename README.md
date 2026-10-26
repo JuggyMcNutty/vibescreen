@@ -52,6 +52,20 @@ temperature update.
 
 ![Print status with the model preview, layer count and chamber temperature](screenshots/print_status.png)
 
+**Z can be homed by hand.** A K1 homes Z on the load cell in its bed, so
+when that fails the printer cannot home Z or print. Manual Z, in the Tune menu,
+gets it printing again:
+
+1. It homes X and Y, which do not use the load cell.
+2. You raise the bed to a sheet of paper and set Z=0 there.
+3. It can tell the next print to keep that zero instead of homing Z again.
+
+![Manual Z part way up, with the steps in order and the next one explained](screenshots/manual_z.png)
+
+**Fine Tune's Z offset works with nothing printing.** It used to fail on an
+unhomed printer. You can now type an exact value, and it says whether the
+offset survives a restart.
+
 **The file list refreshes when a file is uploaded**, rather than waiting for
 someone to press Reload.
 
