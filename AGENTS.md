@@ -763,6 +763,7 @@ python3 tools/fake_moonraker.py --drop-file 20    # announce an upload
 python3 tools/fake_moonraker.py --files 30 --drop-every 6 --announce-every 4
 python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshake
 python3 tools/fake_moonraker.py --unhomed --zoffset-macro   # Fine Tune's Z, see below
+python3 tools/fake_moonraker.py --tmc-autotune    # or no-loader, no-helper
 ```
 
 That second line is the file panel's hard case, and every part of it earns its
@@ -787,6 +788,13 @@ failing a `MOVE=1` on an unhomed Z. `--unhomed` starts the printer in that
 state, and G28 and M84 then home and release it. `--zoffset-macro` adds the
 Helper-Script wrapper the development K1 Max has, which saves the offset only
 when the builtin underneath it succeeds. See `docs/audit.md` C24.
+
+`--tmc-autotune` is what opens the TMC Autotune panel at all. The panel looks
+for `motor_database.cfg` on the local disk under `printer.info`'s
+`klipper_path`, so the fake writes a small klipper tree to the temp directory,
+or to `$FAKE_KLIPPER_ROOT`, and reports that path. Whatever the flags,
+`_GUPPY_SAVE_CONFIG` is an unknown command until `_GUPPY_LOAD_MODULE` has loaded
+`guppy_config_helper`, which is the state of a real K1. See `docs/audit.md` C25.
 
 **The wifi panel does not go through Moonraker at all**, so the fake above
 cannot reach it: it opens wpa_supplicant's control socket and speaks its text

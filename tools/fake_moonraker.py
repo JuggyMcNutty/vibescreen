@@ -64,6 +64,12 @@ MOVE=1 on an unhomed Z fails after applying the offset, as Klipper's does.
 --unhomed starts with nothing homed, and G28 and M84 then home and release axes.
 --zoffset-macro serves Helper-Script's saving SET_GCODE_OFFSET wrapper and
 save_variables, as the development K1 Max has them.
+
+--tmc-autotune [ok|no-loader|no-helper] writes a klipper tree with a
+motor_database.cfg, reports it as klipper_path, and serves four TMC2209s, so the
+TMC Autotune panel opens. _GUPPY_SAVE_CONFIG is refused as an unknown command
+until _GUPPY_LOAD_MODULE has loaded guppy_config_helper, as on a real K1, with
+or without this flag. no-loader and no-helper take away what saving needs.
 """
 import asyncio, json, math, os, re, shlex, struct, sys, tempfile, time, zlib
 import websockets
@@ -131,6 +137,23 @@ def _mode_value(name, default, choices):
               f"choices: {', '.join(choices)}", flush=True)
         return default
     return value
+
+
+# Pretend klipper_tmc_autotune is installed, which the TMC Autotune panel
+# checks for by looking for its motor_database.cfg on the local disk under
+# printer.info's klipper_path. So this writes a small klipper tree and reports
+# it. The modes take away what saving needs: no-loader drops the
+# [guppy_module_loader] section, no-helper leaves guppy_config_helper.py out of
+# klippy/extras, as on a Debian install.
+TMC_AUTOTUNE_MODES = ("ok", "no-loader", "no-helper")
+TMC_AUTOTUNE = _mode_value("--tmc-autotune", "ok", TMC_AUTOTUNE_MODES)
+KLIPPER_PATH = (os.environ.get("FAKE_KLIPPER_ROOT",
+                               os.path.join(tempfile.gettempdir(), "guppy_fake_klipper"))
+                if TMC_AUTOTUNE else "/usr/share/klipper")
+# Our klippy extras that _GUPPY_LOAD_MODULE has loaded. The loader itself is
+# assumed declared, as guppy_cmd.cfg does on a K1, unless --tmc-autotune
+# no-loader says otherwise.
+LOADED_MODULES = set()
 
 
 EXTRUDER_SETTINGS = {
@@ -460,6 +483,21 @@ STATUS["configfile"]["settings"].update({
     "temperature_fan soc_fan": {"sensor_type": "temperature_mcu", "target_temp": 45.0},
 })
 
+# The K1 Max's four TMC2209s, X and Y homing on stallguard, which is what puts
+# a sensorless threshold on their rows in the TMC Autotune panel.
+if TMC_AUTOTUNE:
+    STATUS["configfile"]["config"].update({
+        "stepper_x": {"endstop_pin": "tmc2209_stepper_x:virtual_endstop"},
+        "stepper_y": {"endstop_pin": "tmc2209_stepper_y:virtual_endstop"},
+        "stepper_z": {"endstop_pin": "tmc2209_stepper_z:virtual_endstop"},
+        "tmc2209 stepper_x": {"uart_pin": "PA9", "run_current": "1.5"},
+        "tmc2209 stepper_y": {"uart_pin": "PA10", "run_current": "1.5"},
+        "tmc2209 stepper_z": {"uart_pin": "PA11", "run_current": "0.8"},
+        "tmc2209 extruder": {"uart_pin": "PA12", "run_current": "0.6"},
+    })
+    if TMC_AUTOTUNE != "no-loader":
+        STATUS["configfile"]["config"]["guppy_module_loader"] = {}
+
 # Helper-Script's macro as it reads on the development K1 Max, measured
 # 2026-10-26. The gcode body is served verbatim because SAVE_VARIABLE in it is
 # what tells Fine Tune an offset will survive a restart.
@@ -664,6 +702,57 @@ def write_thumbnails():
                     fh.write(_thumbnail_png(thumb["width"]))
 
 
+def write_klipper_tree():
+    """The files under klipper_path that the TMC Autotune panel reads locally."""
+    extras = os.path.join(KLIPPER_PATH, "klippy", "extras")
+    os.makedirs(extras, exist_ok=True)
+    with open(os.path.join(extras, "motor_database.cfg"), "w") as fh:
+        for name, r, l, t, i in (("ldo-42sth48-2004mah", 1.4, 0.003, 0.42, 2.0),
+                                 ("creality-42-40", 1.6, 0.0028, 0.4, 1.5),
+                                 ("creality-42-34", 2.1, 0.0033, 0.3, 1.0)):
+            fh.write(f"[motor_constants {name}]\nresistance: {r}\ninductance: {l}\n"
+                     f"holding_torque: {t}\nmax_current: {i}\n"
+                     f"steps_per_revolution: 200\n\n")
+    helper = os.path.join(extras, "guppy_config_helper.py")
+    if TMC_AUTOTUNE == "no-helper":
+        if os.path.exists(helper):
+            os.remove(helper)
+    else:
+        with open(helper, "w") as fh:
+            fh.write("# stands in for the K1 install's link to k1_mods\n")
+
+
+def guppy_module_effect_of(script):
+    """The error Klipper would give for our klippy extras, or None.
+
+    _GUPPY_SAVE_CONFIG only exists once guppy_config_helper has been loaded,
+    and nothing in guppy_cmd.cfg declares it, so on a real K1 the TMC Autotune
+    panel's Save was refused as an unknown command until something loaded it at
+    runtime. Klipper abandons the rest of the script at the first error, so
+    this stops there too.
+    """
+    for line in script.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        cmd = words[0].upper()
+        args = dict(w.split("=", 1) for w in words[1:] if "=" in w)
+        if cmd in ("_GUPPY_LOAD_MODULE", "_GUPPY_UNLOAD_MODULE"):
+            if TMC_AUTOTUNE == "no-loader":
+                return 'Unknown command:"%s"' % cmd
+            section = args.get("SECTION", "")
+            if cmd == "_GUPPY_UNLOAD_MODULE":
+                LOADED_MODULES.discard(section)
+            elif section == "guppy_config_helper" and TMC_AUTOTUNE == "no-helper":
+                return "Unable to load module '%s'" % section
+            else:
+                LOADED_MODULES.add(section)
+        elif (cmd in ("_GUPPY_SAVE_CONFIG", "_GUPPY_DELETE_CONFIG")
+              and "guppy_config_helper" not in LOADED_MODULES):
+            return 'Unknown command:"%s"' % cmd
+    return None
+
+
 def result_for(method, params):
     if method == "server.info":
         return {"klippy_connected": True, "klippy_state": "ready",
@@ -671,7 +760,7 @@ def result_for(method, params):
                 "moonraker_version": "fake"}
     if method == "printer.info":
         return {"state": "ready", "state_message": "ready",
-                "klipper_path": "/usr/share/klipper",
+                "klipper_path": KLIPPER_PATH,
                 "config_file": "/usr/data/printer_data/config/printer.cfg"}
     if method == "printer.objects.subscribe" or method == "printer.objects.query":
         return {"eventtime": time.time(), "status": STATUS}
@@ -1134,6 +1223,7 @@ async def handler(ws):
                 # against the axes it has just homed.
                 deltas = homing_effect_of(script)
                 offset_deltas, gcode_error = gcode_offset_effect_of(script)
+                gcode_error = gcode_error or guppy_module_effect_of(script)
                 deltas += (bed_mesh_effect_of(script) + set_pin_effect_of(script)
                            + offset_deltas)
                 for delta in deltas:
@@ -1201,6 +1291,8 @@ async def main():
     # asyncio.Lock binds to whatever loop is current when it is constructed.
     SHAPER_LOCK = asyncio.Lock()
     write_thumbnails()
+    if TMC_AUTOTUNE:
+        write_klipper_tree()
     shaper = f", shaper {SHAPER}" if SHAPER else ""
     print(f"fake moonraker on 7125, extruder {TEMP}/{TARGET}, "
           f"mesh {MESH_SHAPE}{shaper}", flush=True)
