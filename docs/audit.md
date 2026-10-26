@@ -417,6 +417,52 @@ which now models both halves with `--unhomed --zoffset-macro`. Before, Z+ on
 an unhomed printer read 0.010 mm behind the rejection. After, it sends
 `SET_GCODE_OFFSET Z_ADJUST=+0.01` and nothing is rejected.
 
+### C25. TMC Autotune's Save never saved anything (fixed)
+
+Save sends one `_GUPPY_SAVE_CONFIG` or `_GUPPY_DELETE_CONFIG` per stepper, then
+`SAVE_CONFIG`. Those two commands are registered by `guppy_config_helper.py`.
+`installer.sh` links that file into `klippy/extras`, but no config anywhere has
+ever declared a `[guppy_config_helper]` section, so Klipper never loaded it.
+Upstream added the file in `a20edd7` and never wired it in either. Klipper
+refused the first line as an unknown command and abandoned the rest, so Save
+changed nothing and restarted nothing.
+
+Checked read-only on the development K1 Max on 2026-10-26: `configfile.config`
+has `guppy_module_loader` and no `guppy_config_helper`. That printer cannot show
+the bug itself, because it has no klipper_tmc_autotune. The panel is only
+offered when `klippy/extras/motor_database.cfg` exists, and there it does not.
+
+Save now loads the helper first with `_GUPPY_LOAD_MODULE
+SECTION=guppy_config_helper`, the way TMC Metrics loads `tmcstatus`. That needs
+no config change and no restart. The loader skips a module that is already
+loaded, so a second Save is fine. Declaring the section in `guppy_cmd.cfg` was
+the other option, but it would stop Klipper starting on any install that lacks
+the file. `update.sh` refreshes that cfg on existing installs, so the risk is
+real.
+
+Two more things in the same path, both fixed with it:
+
+- Save sent `SAVE_CONFIG` on one tap. That restarts Klipper and ends any print,
+  so it now sits behind a prompt that the emergency stop setting cannot turn
+  off, as Input Shaper's Save does.
+- Save is disabled when either piece is missing, and the panel names which:
+  `[guppy_module_loader]` from the raw config, `guppy_config_helper.py` from
+  the local disk beside the motor database. A Debian install has neither.
+
+Measured against the fake. `--tmc-autotune` serves the panel, and the fake
+refuses `_GUPPY_SAVE_CONFIG` until the helper is loaded, as Klipper does.
+
+- Before: Save went out unprompted and came back `Unknown
+  command:"_GUPPY_DELETE_CONFIG"`.
+- After: Save opens the prompt, and Cancel sends nothing. Confirm sends the load
+  line, the per-stepper lines and `SAVE_CONFIG`, all accepted.
+- With `no-helper` or `no-loader`, Save is greyed out, the reason is shown, and
+  tapping it does nothing.
+
+**Still open:** TMC Metrics sends `_GUPPY_LOAD_MODULE SECTION=tmcstatus` and has
+no such check, so on a Debian install its toggle is refused as an unknown
+command.
+
 ### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget

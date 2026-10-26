@@ -60,6 +60,9 @@ class TmcTunePanel {
   KWebSocketClient &ws;
   lv_obj_t *cont;
   lv_obj_t *controls_cont;
+  // Says what saving needs when the printer lacks it. Empty and hidden
+  // otherwise.
+  lv_obj_t *status_label;
   lv_obj_t *btns_cont;
   ButtonContainer save_btn;
   ButtonContainer back_btn;
