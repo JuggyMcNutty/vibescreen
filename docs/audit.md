@@ -394,6 +394,75 @@ And `show_dir` went through `KUtils::sort_map_values`, which takes its
 `std::map` **by value**, deep copying every `Tree` in the directory and all of
 their metadata on every redraw; it sorts pointers now. See M9.
 
+### C24. Fine Tune's Z offset failed on an unhomed printer, and skipped the save (fixed)
+
+Found while looking at issue #7, which asks for a way to set the Z offset by
+hand. Fine Tune is that already, reachable from the Tune tab with nothing
+printing, but every Z button sent `SET_GCODE_OFFSET ... MOVE=1`.
+
+Klipper's `cmd_SET_GCODE_OFFSET` applies the offset and only then makes the
+move, and the move fails with `Must home axis first` on an unhomed Z. So the
+offset changed, the label showed it, and a rejection dialog came up over it.
+
+The development K1 Max makes that worse. Helper-Script's "save z-offset" option
+renames the builtin to `_SET_GCODE_OFFSET` and wraps it in a macro that ends
+with `SAVE_VARIABLE VARIABLE=zoffset`, then a `delayed_gcode` reapplies the
+saved value at boot. Measured 2026-10-26, see `docs/k1max-facts.md`. The builtin
+failing abandons the macro before the save. The printer therefore ran with an
+offset that the next restart would quietly replace with the previous one.
+
+`MOVE=1` now goes out only when `KUtils::is_homed()`. A print is always homed,
+so a nudge mid-print still moves the nozzle at once. Measured against the fake,
+which now models both halves with `--unhomed --zoffset-macro`. Before, Z+ on
+an unhomed printer read 0.010 mm behind the rejection. After, it sends
+`SET_GCODE_OFFSET Z_ADJUST=+0.01` and nothing is rejected.
+
+### C25. TMC Autotune's Save never saved anything (fixed)
+
+Save sends one `_GUPPY_SAVE_CONFIG` or `_GUPPY_DELETE_CONFIG` per stepper, then
+`SAVE_CONFIG`. Those two commands are registered by `guppy_config_helper.py`.
+`installer.sh` links that file into `klippy/extras`, but no config anywhere has
+ever declared a `[guppy_config_helper]` section, so Klipper never loaded it.
+Upstream added the file in `a20edd7` and never wired it in either. Klipper
+refused the first line as an unknown command and abandoned the rest, so Save
+changed nothing and restarted nothing.
+
+Checked read-only on the development K1 Max on 2026-10-26: `configfile.config`
+has `guppy_module_loader` and no `guppy_config_helper`. That printer cannot show
+the bug itself, because it has no klipper_tmc_autotune. The panel is only
+offered when `klippy/extras/motor_database.cfg` exists, and there it does not.
+
+Save now loads the helper first with `_GUPPY_LOAD_MODULE
+SECTION=guppy_config_helper`, the way TMC Metrics loads `tmcstatus`. That needs
+no config change and no restart. The loader skips a module that is already
+loaded, so a second Save is fine. Declaring the section in `guppy_cmd.cfg` was
+the other option, but it would stop Klipper starting on any install that lacks
+the file. `update.sh` refreshes that cfg on existing installs, so the risk is
+real.
+
+Two more things in the same path, both fixed with it:
+
+- Save sent `SAVE_CONFIG` on one tap. That restarts Klipper and ends any print,
+  so it now sits behind a prompt that the emergency stop setting cannot turn
+  off, as Input Shaper's Save does.
+- Save is disabled when either piece is missing, and the panel names which:
+  `[guppy_module_loader]` from the raw config, `guppy_config_helper.py` from
+  the local disk beside the motor database. A Debian install has neither.
+
+Measured against the fake. `--tmc-autotune` serves the panel, and the fake
+refuses `_GUPPY_SAVE_CONFIG` until the helper is loaded, as Klipper does.
+
+- Before: Save went out unprompted and came back `Unknown
+  command:"_GUPPY_DELETE_CONFIG"`.
+- After: Save opens the prompt, and Cancel sends nothing. Confirm sends the load
+  line, the per-stepper lines and `SAVE_CONFIG`, all accepted.
+- With `no-helper` or `no-loader`, Save is greyed out, the reason is shown, and
+  tapping it does nothing.
+
+**Still open:** TMC Metrics sends `_GUPPY_LOAD_MODULE SECTION=tmcstatus` and has
+no such check, so on a Debian install its toggle is refused as an unknown
+command.
+
 ### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget
@@ -733,11 +802,12 @@ Not fixed in `pellcorp/grumpyscreen` either; they moved the identical code to
 - `src/wifi_panel.cpp:300` parses the signal level out of a wpa_supplicant
   `SCAN_RESULTS` line. Correctly guarded by `wifi_parts.size() == 5` first, and
   the field is always numeric in practice, so low risk.
-- `src/numpad.cpp:86` `std::stod` on textarea contents. Worth noting that this
-  looked alarming and is not: the numpad installs a custom keymap of digits,
-  backspace and OK only (`src/numpad.cpp:31`), so the only way to throw is to
-  enter 300-plus digits and overflow a double. The `// input validation, e.g.
-  range` comment directly above it is still an unkept promise.
+- `src/numpad.cpp` `std::stod` on textarea contents. This looked alarming and
+  was not, while the only keymap was digits, backspace and OK: the one way to
+  throw was 300-plus digits overflowing a double. Fine Tune's Z offset then
+  needed a sign and a decimal point, which make a bare `-` or `.` one tap away.
+  **Fixed for issue #7:** the pad parses with `KUtils::parse_double`, takes an
+  optional range, and refuses a bad value by clearing it and staying open.
 
 The helpers now exist: `KUtils::parse_int`, `parse_double` and `parse_hex`
 (`src/utils.cpp`), which log and return a fallback, and additionally reject
@@ -1092,6 +1162,63 @@ included, on each redraw; that call site is gone, see C23.
 The maps there are small and the copies are of json values rather than trees, so
 this is a cleanup rather than a bug. Taking the map by const reference and
 pushing pointers, or taking `std::vector<U*>`, would fix all of them at once.
+
+### M10. Consumers wrote into the notification they all share (fixed)
+
+`KWebSocketClient::drain` hands every `NotifyConsumer` the same `json` for a
+`notify_status_update`. Most of them read it as `j["/params/0/..."_json_pointer]`
+on a non-const reference: 36 reads across 11 consumers. nlohmann's non-const
+`operator[]` creates whatever the pointer names when it is missing, a null for
+an object key and an array padded with nulls for an index. So each consumer saw
+keys that only the consumers before it had asked about.
+
+Measured 2026-10-26: a temperature-only update from the fake reached
+`ManualZPanel` carrying `bed_mesh: null`, `heater_bed: {target: null, ...}` and
+`gcode_move: {homing_origin: [null, null, null], ...}`.
+
+Most code never noticed. The values stayed null, so the usual `is_null()`
+checks behaved, and `State` is registered first, so it stored only what the
+printer sent. What broke was any test of whether a key is present. That is how
+it was found: Manual Z's first version checked `contains("gcode_move")` and so
+cleared its message on every temperature update.
+
+`consume` now takes a `const json &`, and so does `State::set_data`, so nothing
+handed a notification can write to it. Every read goes through
+`KUtils::value_at`, which returns a null for a missing pointer the way
+`State::get_data` already did.
+
+The compiler does not enforce that second half. nlohmann's const `operator[]`
+with a JSON pointer still compiles, and on a missing key it asserts or reads
+past the end of a map. Making the signature const without replacing the reads
+would have turned harmless nulls into crashes. Every `consume` body was checked
+for bracket access after the change, and none is left.
+
+Measured after the fix, the same way: a temperature update reaches
+`ManualZPanel` as `{"extruder": {"target": 240.0, "temperature": 240.0}}`,
+which is all the fake sent.
+
+Not converted: `register_method_callback` handlers for one method also share a
+`json &`. The four on `notify_gcode_response` (console, input shaper, belts,
+prompt) all read `/params/0`, which every gcode response carries, so none of
+them inserts anything today. The console iterates every element of `params` as
+a string, so a handler that read `/params/1` would make it throw.
+
+### M11. Two-line prompts run under their buttons on a small screen (open)
+
+`ButtonContainer::handle_prompt` sizes every confirmation box at a fixed 50% by
+35% of the screen and floats its buttons at the bottom. At 800x480 that holds
+two lines. At 480x272, the `--small` build, the text wraps to three or four
+lines and the last of them is drawn behind Confirm and Cancel.
+
+Measured in the small simulator on 2026-10-26 with Input Shaper's Save: "Save
+these shapers to printer.cfg? Klipper restarts, which stops any print." The
+half that says Klipper restarts is the half that cannot be read. TMC
+Autotune's Save prompt has the same shape. Manual Z's first Start prompt did
+too, and it is one line now for that reason.
+
+Sizing the box to its content would fix all of them. The buttons float, so
+that needs them back in the layout, or the text height measured, rather than
+just a different percentage.
 
 ## On mining `pellcorp/grumpyscreen`
 

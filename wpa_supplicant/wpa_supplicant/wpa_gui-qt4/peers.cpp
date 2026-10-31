@@ -403,7 +403,7 @@ void Peers::ctx_p2p_start_group()
 
 void Peers::add_station(QString info)
 {
-	QStringList lines = info.split(QRegExp("\\n"));
+	QStringList lines = info.split(QRegularExpression("\\n"));
 	QString name;
 
 	for (QStringList::Iterator it = lines.begin();
@@ -476,7 +476,9 @@ void Peers::add_stations()
 		add_station(info);
 
 		reply_len = sizeof(reply) - 1;
-		snprintf(cmd, sizeof(cmd), "STA-NEXT %s", reply);
+		res = snprintf(cmd, sizeof(cmd), "STA-NEXT %s", reply);
+		if (res < 0 || (size_t) res >= sizeof(cmd))
+			break;
 		res = wpagui->ctrlRequest(cmd, reply, &reply_len);
 	} while (res >= 0);
 }
@@ -516,7 +518,7 @@ void Peers::add_p2p_group_client(QStandardItem * /*parent*/, QString params)
 	 */
 
 	QStringList items =
-		params.split(QRegExp(" (?=[^']*('[^']*'[^']*)*$)"));
+		params.split(QRegularExpression(" (?=[^']*('[^']*'[^']*)*$)"));
 	QString addr = "";
 	QString name = "";
 	int config_methods = 0;
@@ -589,7 +591,7 @@ bool Peers::add_bss(const char *cmd)
 	QString ssid, bssid, flags, wps_name, pri_dev_type;
 	int id = -1;
 
-	QStringList lines = bss.split(QRegExp("\\n"));
+	QStringList lines = bss.split(QRegularExpression("\\n"));
 	for (QStringList::Iterator it = lines.begin();
 	     it != lines.end(); it++) {
 		int pos = (*it).indexOf('=') + 1;
@@ -641,7 +643,7 @@ bool Peers::add_bss(const char *cmd)
 			item->setData(ssid, peer_role_ssid);
 		model.appendRow(item);
 
-		lines = bss.split(QRegExp("\\n"));
+		lines = bss.split(QRegularExpression("\\n"));
 		for (QStringList::Iterator it = lines.begin();
 		     it != lines.end(); it++) {
 			if ((*it).startsWith("p2p_group_client:"))
@@ -901,7 +903,7 @@ void Peers::event_notify(WpaMsg msg)
 		 * group_capab=0x0
 		 */
 		QStringList items =
-			text.split(QRegExp(" (?=[^']*('[^']*'[^']*)*$)"));
+			text.split(QRegularExpression(" (?=[^']*('[^']*'[^']*)*$)"));
 		QString addr = items[1];
 		QString name = "";
 		QString pri_dev_type;

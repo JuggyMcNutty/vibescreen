@@ -22,7 +22,7 @@ class PromptPanel : public NotifyConsumer {
         ~PromptPanel();
 
         void handle_macro_response(json &j);
-        void consume(json &j);
+        void consume(const json &j);
 
         lv_obj_t *get_container();
         void handle_callback(lv_event_t *event);

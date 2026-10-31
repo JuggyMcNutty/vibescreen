@@ -118,6 +118,11 @@ void InitPanel::connected(KWebSocketClient &ws) {
 	      // minimum value each fan will actually turn at in its variables, and
 	      // the fan sliders are wrong without them. See KUtils::fan_pct_to_raw.
 	      sub_objs[obj_name] = nullptr;
+	    } else if (obj_name == "gcode_macro START_PRINT") {
+	      // Creality's START_PRINT skips homing Z while its prepare variable
+	      // is set, which is how Manual Z keeps a hand-set zero for a print.
+	      // Subscribed so that panel can say what the next print will do.
+	      sub_objs[obj_name] = nullptr;
 	    }
 	  }
 

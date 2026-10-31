@@ -127,7 +127,7 @@ PromptPanel::PromptPanel(KWebSocketClient &websocket_client, std::mutex &lock, l
 }
 
 
-void PromptPanel::consume(json &j) {
+void PromptPanel::consume(const json &j) {
 }
 
 PromptPanel::~PromptPanel() {

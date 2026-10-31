@@ -18,7 +18,7 @@ class BedMeshPanel : public NotifyConsumer {
   BedMeshPanel(KWebSocketClient &c, std::mutex &l);
   ~BedMeshPanel();
 
-  void consume(json &j);
+  void consume(const json &j);
   void foreground();
   void refresh_views_with_lock(json &);
   void refresh_views(json &);

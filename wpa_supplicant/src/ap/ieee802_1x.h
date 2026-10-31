@@ -19,7 +19,7 @@ struct radius_msg;
 
 
 void ieee802_1x_receive(struct hostapd_data *hapd, const u8 *sa, const u8 *buf,
-			size_t len);
+			size_t len, enum frame_encryption encrypted);
 void ieee802_1x_new_station(struct hostapd_data *hapd, struct sta_info *sta);
 void ieee802_1x_free_station(struct hostapd_data *hapd, struct sta_info *sta);
 
@@ -42,10 +42,9 @@ const u8 * ieee802_1x_get_key(struct eapol_state_machine *sm, size_t *len);
 const u8 * ieee802_1x_get_session_id(struct eapol_state_machine *sm,
 				     size_t *len);
 void ieee802_1x_notify_port_enabled(struct eapol_state_machine *sm,
-				    int enabled);
-void ieee802_1x_notify_port_valid(struct eapol_state_machine *sm,
-				  int valid);
-void ieee802_1x_notify_pre_auth(struct eapol_state_machine *sm, int pre_auth);
+				    bool enabled);
+void ieee802_1x_notify_port_valid(struct eapol_state_machine *sm, bool valid);
+void ieee802_1x_notify_pre_auth(struct eapol_state_machine *sm, bool pre_auth);
 int ieee802_1x_get_mib(struct hostapd_data *hapd, char *buf, size_t buflen);
 int ieee802_1x_get_mib_sta(struct hostapd_data *hapd, struct sta_info *sta,
 			   char *buf, size_t buflen);
@@ -67,4 +66,6 @@ void ieee802_1x_encapsulate_radius(struct hostapd_data *hapd,
 struct eapol_state_machine *
 ieee802_1x_alloc_eapol_sm(struct hostapd_data *hapd, struct sta_info *sta);
 
+void ieee802_1x_eapol_sm_set_port_enabled(struct eapol_state_machine *sm,
+					  bool value);
 #endif /* IEEE802_1X_H */

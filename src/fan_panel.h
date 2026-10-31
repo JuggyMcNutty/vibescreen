@@ -17,7 +17,7 @@ class FanPanel : public NotifyConsumer {
   FanPanel(KWebSocketClient &ws, std::mutex &lock);
   ~FanPanel();
 
-  void consume(json &j);
+  void consume(const json &j);
   
   lv_obj_t *get_container();
   void create_fans(json &f);

@@ -16,6 +16,7 @@ struct json_token {
 		JSON_ARRAY,
 		JSON_STRING,
 		JSON_NUMBER,
+		JSON_DOUBLE,
 		JSON_BOOLEAN,
 		JSON_NULL,
 	} type;
@@ -28,6 +29,7 @@ struct json_token {
 	char *name;
 	char *string;
 	int number;
+	double dnumber;
 	struct json_token *parent, *child, *sibling;
 };
 
@@ -37,6 +39,22 @@ void json_free(struct json_token *json);
 struct json_token * json_get_member(struct json_token *json, const char *name);
 struct wpabuf * json_get_member_base64url(struct json_token *json,
 					  const char *name);
+struct wpabuf * json_get_member_base64(struct json_token *json,
+				       const char *name);
 void json_print_tree(struct json_token *root, char *buf, size_t buflen);
+void json_add_int(struct wpabuf *json, const char *name, int val);
+void json_add_double(struct wpabuf *json, const char *name, double val);
+void json_add_string(struct wpabuf *json, const char *name, const char *val);
+int json_add_string_escape(struct wpabuf *json, const char *name,
+			   const void *val, size_t len);
+int json_add_base64url(struct wpabuf *json, const char *name, const void *val,
+		       size_t len);
+int json_add_base64(struct wpabuf *json, const char *name, const void *val,
+		    size_t len);
+void json_start_object(struct wpabuf *json, const char *name);
+void json_end_object(struct wpabuf *json);
+void json_start_array(struct wpabuf *json, const char *name);
+void json_end_array(struct wpabuf *json);
+void json_value_sep(struct wpabuf *json);
 
 #endif /* JSON_H */

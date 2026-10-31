@@ -15,7 +15,7 @@ class HomingPanel : public NotifyConsumer {
   HomingPanel(KWebSocketClient &ws, std::mutex &);
   ~HomingPanel();
 
-  void consume(json &data);
+  void consume(const json &data);
   lv_obj_t * get_container();
   void foreground();
   void handle_callback(lv_event_t *event);

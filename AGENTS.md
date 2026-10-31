@@ -61,6 +61,11 @@ architecture, which is all libhv, spdlog and libwpa_client care about, and
 `.build-flags` for architecture plus theme plus small screen, since those change
 `-D` defines that affect every object of ours.
 
+`.vendor-target` keys on architecture only, not on which version of a vendored
+library is checked in, so re-vendoring `wpa_supplicant` in place does not
+invalidate a same-architecture `libwpa_client.a`. Run `scripts/build.sh
+<target> --clean` once after a bump.
+
 ## CI
 
 One workflow, `.github/workflows/build.yml`. It builds the same four variants
@@ -241,7 +246,7 @@ lv_drivers/           submodule, v8.3.0, upstream is dead
 libhv/                submodule, websocket and http client
 mbedtls/              submodule, the TLS backend libhv is built against
 spdlog/               submodule, logging
-wpa_supplicant/       vendored hostap copy, built only for libwpa_client.a
+wpa_supplicant/       vendored hostap 2.12, built only for libwpa_client.a, see below
 lv_touch_calibration/ in-tree, not a submodule, touch calibration screens
 patches/              four patches applied to submodules, see below
 k1/                   payload installed onto the printer, init scripts and klippy modules
@@ -402,6 +407,45 @@ disconnected.
 `IP:127.0.0.1` in its SAN is still rejected for a `wss://127.0.0.1` URL, which
 was measured, not assumed. Anyone putting a real certificate in front of
 Moonraker has to reach it by the name on the certificate.
+
+### Which wpa_supplicant we are on
+
+A full in-tree copy of `wpa_supplicant-2.12.tar.gz` (2026-08-07), from
+`w1.fi/releases/`. On 2.9 (2019-08-07) from the first commit until 2026-09-03.
+
+Not a submodule, unlike the other five. `git.w1.fi` is a single host with no CDN
+and is now behind an anti-bot gateway that blocks a plain clone, there is no
+canonical GitHub mirror, and a submodule cannot carry the two-line `.config` the
+build needs. A tarball import keeps CI hermetic.
+
+Only `libwpa_client.a` is built, from four objects: `wpa_ctrl.o`, `os_unix.o`,
+`common.o`, `wpa_debug.o`. That library is a control-socket client and nothing
+more: it speaks wpa_supplicant's text protocol to whatever daemon owns the
+socket, which on a K1 is Creality's own. So this copy is client-side only and
+bumping it changes nothing on the printer. wpa 2.9's CVEs (SAE and EAP-pwd side
+channels, P2P, FragAttacks) are all in code we do not compile, so the bump is
+provenance and minor parser hardening, not a security fix.
+
+`.config` is two lines, `CONFIG_CTRL_IFACE=y` and `CONFIG_CTRL_IFACE_UNIX=y`,
+committed with `git add -f` because 2.12 ships a `.gitignore` that lists it.
+Without it `wpa_ctrl.c` builds none of its Unix entry points and the
+`guppyscreen` link fails on undefined `wpa_ctrl_*`.
+
+2.12 dropped `CROSS_COMPILE` from its build system and moved object output under
+a `build/` tree, so the top-level `Makefile`'s `wpaclient` target passes `CC`
+and `AR` in explicitly. A cross build that skips that quietly compiles the four
+objects with the host compiler, and the link then rejects the archive as
+incompatible.
+
+Refresh procedure: download `wpa_supplicant-<ver>.tar.gz` and `.asc` from
+`w1.fi/releases`, verify the signature against Jouni Malinen's key
+(`EC4AA0A991A5F2464582D52D2B6EF432EFC895FA`, the fingerprint Arch packaging
+pins) and the SHA256 against two distro packaging repos (Void, Buildroot,
+Gentoo). Then `git rm -r wpa_supplicant`, unpack in place, re-add the two-line
+`.config` with `git add -f`, `git add wpa_supplicant`. The 2.12 tarball SHA256
+is `08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6`.
+`.vendor-target` does not track the wpa version, so run `scripts/build.sh
+<target> --clean` once after.
 
 ### `lv_conf.h` is two configs, not one
 
@@ -718,6 +762,9 @@ python3 tools/fake_moonraker.py --belts fail      # or slow, timeout, empty
 python3 tools/fake_moonraker.py --drop-file 20    # announce an upload
 python3 tools/fake_moonraker.py --files 30 --drop-every 6 --announce-every 4
 python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshake
+python3 tools/fake_moonraker.py --unhomed --zoffset-macro   # Fine Tune's Z, see below
+python3 tools/fake_moonraker.py --tmc-autotune    # or no-loader, no-helper
+python3 tools/fake_moonraker.py --unhomed         # Manual Z, see below
 ```
 
 That second line is the file panel's hard case, and every part of it earns its
@@ -735,6 +782,29 @@ numbers in `print_stats.info`, and our K1 Max never does, because no file on it
 calls `SET_PRINT_STATS_INFO`. So the default exercises the one path that printer
 never takes, and the layer counter there runs entirely on the estimate from file
 metadata and Z. Measured 2026-08-20, detail in `docs/k1max-facts.md`.
+
+`--unhomed` and `--zoffset-macro` are for Fine Tune's Z offset. The fake always
+acts on `SET_GCODE_OFFSET`, and like Klipper it applies the offset before
+failing a `MOVE=1` on an unhomed Z. `--unhomed` starts the printer in that
+state, and G28 and M84 then home and release it. `--zoffset-macro` adds the
+Helper-Script wrapper the development K1 Max has, which saves the offset only
+when the builtin underneath it succeeds. See `docs/audit.md` C24.
+
+`--tmc-autotune` is what opens the TMC Autotune panel at all. The panel looks
+for `motor_database.cfg` on the local disk under `printer.info`'s
+`klipper_path`, so the fake writes a small klipper tree to the temp directory,
+or to `$FAKE_KLIPPER_ROOT`, and reports that path. Whatever the flags,
+`_GUPPY_SAVE_CONFIG` is an unknown command until `_GUPPY_LOAD_MODULE` has loaded
+`guppy_config_helper`, which is the state of a real K1. See `docs/audit.md` C25.
+
+Manual Z is driven with `--unhomed`, since homing by hand is the whole point
+of it. The fake acts on motion in script order: G28, M84, G90 and G91, the
+gcode state macros, G0 and G1 checked against the K1 Max's axis limits and
+homed axes, and `SET_KINEMATIC_POSITION`. Like Klipper, a refused move
+abandons the rest of the script, so a jog refused after `G91` leaves the fake in
+relative mode. It also serves Creality's `PRINT_PREPARED` and the `prepare`
+flag on `START_PRINT`. `--no-force-move` and `--no-print-prepared` take those
+away, the way a printer without them would be.
 
 **The wifi panel does not go through Moonraker at all**, so the fake above
 cannot reach it: it opens wpa_supplicant's control socket and speaks its text
@@ -871,6 +941,14 @@ it deadlocks on the first consumer. It also takes only what is queued at entry
 rather than looping until empty: handlers send requests whose replies come back
 onto the same queue, so draining to empty would run for as long as the printer
 keeps answering.
+
+**Every consumer is handed the same notification, so read it, never write it.**
+`consume` takes a `const json &`. Read it with `KUtils::value_at(j, ptr)`, which
+returns a null for a missing pointer. Do not use `j[ptr]`, and the const
+signature does not save you from that: nlohmann's const `operator[]` with a
+JSON pointer still compiles, and on a missing key it asserts or reads past the
+end of a map. The non-const one used to insert nulls that every later consumer
+then saw. See `docs/audit.md` M10.
 
 `State` has its own separate mutex, and per `docs/audit.md` C1 that mutex does
 not actually protect the reference-returning accessors. Read C1 before touching

@@ -58,6 +58,25 @@ sweeps and its analysis, ending the way the mode says.
 --api-key <key> refuses the websocket handshake unless X-Api-Key matches, the
 way Moonraker does with its authorization component enforcing one.
 Point the simulator at it with moonraker_host 127.0.0.1 in guppyconfig.json.
+
+SET_GCODE_OFFSET is always acted on: it moves gcode_move.homing_origin, and
+MOVE=1 on an unhomed Z fails after applying the offset, as Klipper's does.
+Motion is acted on too, in script order: G28, M84, G90 and G91,
+SAVE_GCODE_STATE and RESTORE_GCODE_STATE, G0 and G1 against the K1 Max's
+axis limits and homed axes, and SET_KINEMATIC_POSITION, which marks all three
+axes homed as Creality's does. A refused move abandons the rest of the script.
+--unhomed starts with nothing homed, and G28 and M84 then home and release axes.
+--no-force-move takes SET_KINEMATIC_POSITION away. --no-print-prepared takes
+away Creality's PRINT_PREPARED and START_PRINT's prepare flag, which the fake
+otherwise serves and acts on.
+--zoffset-macro serves Helper-Script's saving SET_GCODE_OFFSET wrapper and
+save_variables, as the development K1 Max has them.
+
+--tmc-autotune [ok|no-loader|no-helper] writes a klipper tree with a
+motor_database.cfg, reports it as klipper_path, and serves four TMC2209s, so the
+TMC Autotune panel opens. _GUPPY_SAVE_CONFIG is refused as an unknown command
+until _GUPPY_LOAD_MODULE has loaded guppy_config_helper, as on a real K1, with
+or without this flag. no-loader and no-helper take away what saving needs.
 """
 import asyncio, json, math, os, re, shlex, struct, sys, tempfile, time, zlib
 import websockets
@@ -83,6 +102,27 @@ GCODE_LOG = os.environ.get("GCODE_LOG", "/tmp/guppy_gcode_received.txt")
 # Pretend the ProWiper mod is installed, so the bed mesh panel's check for it
 # can be exercised both ways round.
 EXTRA_OBJECTS = ["gcode_macro WIPE_NOZZLE"] if "--wiper" in sys.argv else []
+
+# Start with nothing homed, which is where a printer is after a restart or a
+# Motor Off. Klipper refuses any move on an unhomed axis, and a fake that always
+# claims to be homed cannot show a panel getting that wrong.
+UNHOMED = "--unhomed" in sys.argv
+
+# The K1 Max has [force_move] enabled, which is what registers
+# SET_KINEMATIC_POSITION, and Creality's START_PRINT skips homing Z and the
+# bed mesh once PRINT_PREPARED has set its prepare variable. Manual Z depends
+# on both. These take them away, the way another printer would lack them.
+FORCE_MOVE = "--no-force-move" not in sys.argv
+PRINT_PREPARED = "--no-print-prepared" not in sys.argv
+if PRINT_PREPARED:
+    EXTRA_OBJECTS += ["gcode_macro PRINT_PREPARED", "gcode_macro PRINT_PREPARE_CLEAR"]
+
+# Pretend Helper-Script's "save z-offset" option is installed, which the
+# development K1 Max has. It renames SET_GCODE_OFFSET and wraps it in a macro
+# that writes every change to save_variables.
+ZOFFSET_MACRO = "--zoffset-macro" in sys.argv
+if ZOFFSET_MACRO:
+    EXTRA_OBJECTS += ["gcode_macro SET_GCODE_OFFSET", "save_variables"]
 
 # Walk a print from standby through to a finish, so the print status panel can
 # be watched doing the thing it gets wrong: reaching the end and staying there.
@@ -113,6 +153,23 @@ def _mode_value(name, default, choices):
               f"choices: {', '.join(choices)}", flush=True)
         return default
     return value
+
+
+# Pretend klipper_tmc_autotune is installed, which the TMC Autotune panel
+# checks for by looking for its motor_database.cfg on the local disk under
+# printer.info's klipper_path. So this writes a small klipper tree and reports
+# it. The modes take away what saving needs: no-loader drops the
+# [guppy_module_loader] section, no-helper leaves guppy_config_helper.py out of
+# klippy/extras, as on a Debian install.
+TMC_AUTOTUNE_MODES = ("ok", "no-loader", "no-helper")
+TMC_AUTOTUNE = _mode_value("--tmc-autotune", "ok", TMC_AUTOTUNE_MODES)
+KLIPPER_PATH = (os.environ.get("FAKE_KLIPPER_ROOT",
+                               os.path.join(tempfile.gettempdir(), "guppy_fake_klipper"))
+                if TMC_AUTOTUNE else "/usr/share/klipper")
+# Our klippy extras that _GUPPY_LOAD_MODULE has loaded. The loader itself is
+# assumed declared, as guppy_cmd.cfg does on a K1, unless --tmc-autotune
+# no-loader says otherwise.
+LOADED_MODULES = set()
 
 
 EXTRUDER_SETTINGS = {
@@ -398,11 +455,16 @@ STATUS = {
                    # Leading underscore, so the panel should hide it.
                    "gcode_macro _GUPPY_INTERNAL": {"gcode": "M117 internal"}},
     },
+    # Limits are the development K1 Max's, measured 2026-10-26. Z's minimum is
+    # below zero there, so a nozzle can be driven into the bed on purpose.
     "toolhead": {"max_velocity": 800.0, "max_accel": 20000.0,
-                 "homed_axes": "xyz", "position": [0, 0, 0, 0]},
+                 "homed_axes": "" if UNHOMED else "xyz",
+                 "position": [0.0, 0.0, 0.0, 0.0] if UNHOMED else [150.0, 150.0, 10.0, 0.0],
+                 "axis_minimum": [-2.0, -2.0, -10.0, 0.0],
+                 "axis_maximum": [306.5, 306.0, 305.0, 0.0]},
     "print_stats": {"state": "standby", "filename": "", "print_duration": 0.0},
     "virtual_sdcard": {"is_active": False, "progress": 0.0},
-    "gcode_move": {"speed_factor": 1.0, "extrude_factor": 1.0,
+    "gcode_move": {"speed_factor": 1.0, "extrude_factor": 1.0, "absolute_coordinates": True,
                    "homing_origin": [0, 0, 0, 0], "gcode_position": [0, 0, 0, 0]},
     "idle_timeout": {"state": "Idle"},
     "display_status": {"progress": 0.0, "message": None},
@@ -441,6 +503,59 @@ STATUS["configfile"]["settings"].update({
                                     "target_temp": 75.0},
     "temperature_fan soc_fan": {"sensor_type": "temperature_mcu", "target_temp": 45.0},
 })
+
+if FORCE_MOVE:
+    STATUS["configfile"]["settings"]["force_move"] = {"enable_force_move": True}
+if PRINT_PREPARED:
+    # Macros are not subscribed as a rule, but the UI makes an exception for
+    # this one so Manual Z can say what the next print will do.
+    STATUS["gcode_macro START_PRINT"] = {"prepare": 0}
+
+# The K1 Max's four TMC2209s, X and Y homing on stallguard, which is what puts
+# a sensorless threshold on their rows in the TMC Autotune panel.
+if TMC_AUTOTUNE:
+    STATUS["configfile"]["config"].update({
+        "stepper_x": {"endstop_pin": "tmc2209_stepper_x:virtual_endstop"},
+        "stepper_y": {"endstop_pin": "tmc2209_stepper_y:virtual_endstop"},
+        "stepper_z": {"endstop_pin": "tmc2209_stepper_z:virtual_endstop"},
+        "tmc2209 stepper_x": {"uart_pin": "PA9", "run_current": "1.5"},
+        "tmc2209 stepper_y": {"uart_pin": "PA10", "run_current": "1.5"},
+        "tmc2209 stepper_z": {"uart_pin": "PA11", "run_current": "0.8"},
+        "tmc2209 extruder": {"uart_pin": "PA12", "run_current": "0.6"},
+    })
+    if TMC_AUTOTUNE != "no-loader":
+        STATUS["configfile"]["config"]["guppy_module_loader"] = {}
+
+# Helper-Script's macro as it reads on the development K1 Max, measured
+# 2026-10-26. The gcode body is served verbatim because SAVE_VARIABLE in it is
+# what tells Fine Tune an offset will survive a restart.
+if ZOFFSET_MACRO:
+    STATUS["configfile"]["settings"].update({
+        "gcode_macro set_gcode_offset": {
+            "description": "Saving Z-Offset",
+            "rename_existing": "_SET_GCODE_OFFSET",
+            "gcode": (
+                "\n{% if printer.save_variables.variables.zoffset %}\n"
+                "{% set zoffset = printer.save_variables.variables.zoffset %}\n"
+                "{% else %}\n"
+                "{% set zoffset = {'z': None} %}\n"
+                "{% endif %}\n"
+                "{% set ns = namespace(zoffset={'z': zoffset.z}) %}\n"
+                "_SET_GCODE_OFFSET {% for p in params %}{'%s=%s '% (p, params[p])}{% endfor %}\n"
+                "{%if 'Z' in params %}\n"
+                "{% set null = ns.zoffset.update({'z': params.Z|float}) %}\n"
+                "{% endif %}\n"
+                "{%if 'Z_ADJUST' in params %}\n"
+                "{%if ns.zoffset.z == None %}\n"
+                "{% set null = ns.zoffset.update({'z': 0}) %}\n"
+                "{% endif %}\n"
+                "{% set null = ns.zoffset.update({'z': (ns.zoffset.z | float) + (params.Z_ADJUST | float)}) %}\n"
+                "{% endif %}\n"
+                "SAVE_VARIABLE VARIABLE=zoffset VALUE=\"{ns.zoffset}\""),
+        },
+        "save_variables": {
+            "filename": "/usr/data/printer_data/config/Helper-Script/variables.cfg"},
+    })
 
 # The sections the panel checks before offering to calibrate or save. Neither
 # resonance_tester nor adxl345 appears in printer.objects.list on a real
@@ -615,6 +730,57 @@ def write_thumbnails():
                     fh.write(_thumbnail_png(thumb["width"]))
 
 
+def write_klipper_tree():
+    """The files under klipper_path that the TMC Autotune panel reads locally."""
+    extras = os.path.join(KLIPPER_PATH, "klippy", "extras")
+    os.makedirs(extras, exist_ok=True)
+    with open(os.path.join(extras, "motor_database.cfg"), "w") as fh:
+        for name, r, l, t, i in (("ldo-42sth48-2004mah", 1.4, 0.003, 0.42, 2.0),
+                                 ("creality-42-40", 1.6, 0.0028, 0.4, 1.5),
+                                 ("creality-42-34", 2.1, 0.0033, 0.3, 1.0)):
+            fh.write(f"[motor_constants {name}]\nresistance: {r}\ninductance: {l}\n"
+                     f"holding_torque: {t}\nmax_current: {i}\n"
+                     f"steps_per_revolution: 200\n\n")
+    helper = os.path.join(extras, "guppy_config_helper.py")
+    if TMC_AUTOTUNE == "no-helper":
+        if os.path.exists(helper):
+            os.remove(helper)
+    else:
+        with open(helper, "w") as fh:
+            fh.write("# stands in for the K1 install's link to k1_mods\n")
+
+
+def guppy_module_effect_of(script):
+    """The error Klipper would give for our klippy extras, or None.
+
+    _GUPPY_SAVE_CONFIG only exists once guppy_config_helper has been loaded,
+    and nothing in guppy_cmd.cfg declares it, so on a real K1 the TMC Autotune
+    panel's Save was refused as an unknown command until something loaded it at
+    runtime. Klipper abandons the rest of the script at the first error, so
+    this stops there too.
+    """
+    for line in script.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        cmd = words[0].upper()
+        args = dict(w.split("=", 1) for w in words[1:] if "=" in w)
+        if cmd in ("_GUPPY_LOAD_MODULE", "_GUPPY_UNLOAD_MODULE"):
+            if TMC_AUTOTUNE == "no-loader":
+                return 'Unknown command:"%s"' % cmd
+            section = args.get("SECTION", "")
+            if cmd == "_GUPPY_UNLOAD_MODULE":
+                LOADED_MODULES.discard(section)
+            elif section == "guppy_config_helper" and TMC_AUTOTUNE == "no-helper":
+                return "Unable to load module '%s'" % section
+            else:
+                LOADED_MODULES.add(section)
+        elif (cmd in ("_GUPPY_SAVE_CONFIG", "_GUPPY_DELETE_CONFIG")
+              and "guppy_config_helper" not in LOADED_MODULES):
+            return 'Unknown command:"%s"' % cmd
+    return None
+
+
 def result_for(method, params):
     if method == "server.info":
         return {"klippy_connected": True, "klippy_state": "ready",
@@ -622,7 +788,7 @@ def result_for(method, params):
                 "moonraker_version": "fake"}
     if method == "printer.info":
         return {"state": "ready", "state_message": "ready",
-                "klipper_path": "/usr/share/klipper",
+                "klipper_path": KLIPPER_PATH,
                 "config_file": "/usr/data/printer_data/config/printer.cfg"}
     if method == "printer.objects.subscribe" or method == "printer.objects.query":
         return {"eventtime": time.time(), "status": STATUS}
@@ -657,6 +823,159 @@ def result_for(method, params):
     if method == "machine.system_info":
         return {"system_info": {"cpu_info": {"cpu_count": 2}}}
     return {}
+
+
+# Where each axis ends up after the K1 Max's homing_override: _HOME_X backs off
+# 10mm from its endstop at 306.5, _HOME_Y moves 10mm off its endstop at -2, and
+# Z homes to 0.
+HOMED_POSITION = {"x": 296.5, "y": 8.0, "z": 0.0}
+
+
+def motion_effect_of(script):
+    """Status deltas and any error the script's motion would produce.
+
+    Run line by line in order, because the order is the point: Manual Z homes X
+    and Y, marks Z with SET_KINEMATIC_POSITION, then jogs, and every one of
+    those is only legal after the one before. Klipper refuses a move on an axis
+    it has not homed and one past the axis limits, and abandons the rest of the
+    script at the first refusal, so this does too.
+
+    SET_KINEMATIC_POSITION marks X, Y and Z homed whichever it is given. That is
+    Creality's force_move.py, read 2026-10-26, and why Manual Z will not mark Z
+    until X and Y really are homed. G28 homes the axes it names, or all three,
+    and M84 or M18 releases them all.
+    """
+    th = STATUS["toolhead"]
+    gm = STATUS["gcode_move"]
+    homed, pos = th["homed_axes"], list(th["position"])
+    absolute = gm["absolute_coordinates"]
+    saved = {}
+    error = None
+
+    def fmt_pos(p):
+        return "%.3f %.3f %.3f [%.3f]" % tuple(p)
+
+    for line in script.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        cmd = words[0].upper()
+        args = {}
+        for w in words[1:]:
+            if "=" in w:
+                k, v = w.split("=", 1)
+                args[k.upper()] = v
+            elif w[0].isalpha():
+                args[w[0].upper()] = w[1:]
+        try:
+            if cmd == "G28":
+                axes = [a for a in "xyz" if a.upper() in args] or list("xyz")
+                for a in axes:
+                    pos["xyz".index(a)] = HOMED_POSITION[a]
+                homed += "".join(axes)
+            elif cmd in ("M84", "M18"):
+                homed = ""
+            elif cmd == "G90":
+                absolute = True
+            elif cmd == "G91":
+                absolute = False
+            elif cmd == "SAVE_GCODE_STATE":
+                saved[args.get("NAME", "default")] = absolute
+            elif cmd == "RESTORE_GCODE_STATE":
+                absolute = saved.get(args.get("NAME", "default"), absolute)
+            elif cmd == "SET_KINEMATIC_POSITION":
+                if not FORCE_MOVE:
+                    error = 'Unknown command:"SET_KINEMATIC_POSITION"'
+                    break
+                for i, a in enumerate("XYZ"):
+                    if a in args:
+                        pos[i] = float(args[a])
+                homed = "xyz"
+            elif cmd in ("G0", "G1"):
+                target = list(pos)
+                for i, a in enumerate("XYZ"):
+                    if a in args and args[a] != "":
+                        v = float(args[a])
+                        target[i] = v if absolute else pos[i] + v
+                for i, a in enumerate("xyz"):
+                    if target[i] == pos[i]:
+                        continue
+                    if a not in homed:
+                        error = "Must home axis first: " + fmt_pos(target)
+                        break
+                    if not th["axis_minimum"][i] <= target[i] <= th["axis_maximum"][i]:
+                        error = "Move out of range: " + fmt_pos(target)
+                        break
+                if error:
+                    break
+                pos = target
+        except ValueError:
+            continue
+
+    homed = "".join(a for a in "xyz" if a in homed)
+    delta = {}
+    if homed != th["homed_axes"]:
+        th["homed_axes"] = delta["homed_axes"] = homed
+    if pos != th["position"]:
+        th["position"] = delta["position"] = pos
+    gm["absolute_coordinates"] = absolute
+    return ([{"toolhead": delta}] if delta else []), error
+
+
+def macro_effect_of(script):
+    """Status deltas Creality's prepare flag macros would produce."""
+    if not PRINT_PREPARED:
+        return []
+    macro = STATUS["gcode_macro START_PRINT"]
+    before = macro["prepare"]
+    for line in script.splitlines():
+        cmd = line.strip().upper()
+        if cmd in ("PRINT_PREPARED", "PRINT_PREPARE_CLEAR"):
+            macro["prepare"] = 1 if cmd == "PRINT_PREPARED" else 0
+    if macro["prepare"] == before:
+        return []
+    return [{"gcode_macro START_PRINT": {"prepare": macro["prepare"]}}]
+
+
+SET_GCODE_OFFSET_RE = re.compile(r"^\s*SET_GCODE_OFFSET\b(.*)$", re.I | re.M)
+
+
+def gcode_offset_effect_of(script):
+    """Status deltas and any error a SET_GCODE_OFFSET would produce.
+
+    Klipper applies the offset first and only then makes the MOVE=1 move, so on
+    a printer whose Z is not homed the offset changes and the command still
+    fails. Helper-Script's wrapper saves the offset after the builtin returns,
+    so that failure also costs the save. Both halves are reproduced: the delta
+    goes out, and the error comes back as the reply.
+    """
+    deltas = []
+    for m in SET_GCODE_OFFSET_RE.finditer(script):
+        args = {}
+        for word in m.group(1).split():
+            if "=" in word:
+                key, value = word.split("=", 1)
+                args[key.upper()] = value
+        origin = STATUS["gcode_move"]["homing_origin"]
+        before = origin[2]
+        try:
+            if "Z" in args:
+                origin[2] = float(args["Z"])
+            elif "Z_ADJUST" in args:
+                origin[2] += float(args["Z_ADJUST"])
+            else:
+                continue
+        except ValueError:
+            continue
+        deltas.append({"gcode_move": {"homing_origin": list(origin)}})
+
+        # A move of zero length returns before Klipper checks the axis limits,
+        # so resetting an offset that is already zero succeeds unhomed.
+        if (args.get("MOVE") == "1" and origin[2] != before
+                and "z" not in STATUS["toolhead"]["homed_axes"]):
+            # Klipper abandons the rest of the script at the first error.
+            return deltas, "Must home axis first: 0.000 0.000 %.3f [0.000]" % origin[2]
+    return deltas, None
 
 
 SET_PIN_RE = re.compile(r"SET_PIN\s+PIN=(\S+)\s+VALUE=(\S+)", re.I)
@@ -1009,13 +1328,22 @@ async def handler(ws):
             msg = json.loads(raw)
             method = msg.get("method", "")
             params = msg.get("params", {}) or {}
+            gcode_error = None
 
             if method == "printer.gcode.script":
                 script = params.get("script", "")
                 print("=== GCODE RECEIVED ===\n" + script, flush=True)
                 with open(GCODE_LOG, "a") as f:
                     f.write("--- press ---\n" + script + "\n")
-                for delta in bed_mesh_effect_of(script) + set_pin_effect_of(script):
+                # Motion first, so a script that homes and then changes the
+                # offset is judged against the axes it has just homed.
+                deltas, gcode_error = motion_effect_of(script)
+                offset_deltas, offset_error = gcode_offset_effect_of(script)
+                gcode_error = (gcode_error or offset_error
+                               or guppy_module_effect_of(script))
+                deltas += (bed_mesh_effect_of(script) + set_pin_effect_of(script)
+                           + offset_deltas + macro_effect_of(script))
+                for delta in deltas:
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "method": "notify_status_update",
                         "params": [delta, time.time()]}))
@@ -1027,6 +1355,11 @@ async def handler(ws):
                     task.add_done_callback(tasks.discard)
 
             if "id" in msg:
+                if gcode_error:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": msg["id"],
+                        "error": {"code": -32602, "message": gcode_error}}))
+                    continue
                 if method == "printer.gcode.script" and REJECT_GCODE:
                     # Reply the way Moonraker does when Klipper refuses a command.
                     # The burst counter is only worth showing when bursting, so a
@@ -1075,6 +1408,8 @@ async def main():
     # asyncio.Lock binds to whatever loop is current when it is constructed.
     SHAPER_LOCK = asyncio.Lock()
     write_thumbnails()
+    if TMC_AUTOTUNE:
+        write_klipper_tree()
     shaper = f", shaper {SHAPER}" if SHAPER else ""
     print(f"fake moonraker on 7125, extruder {TEMP}/{TARGET}, "
           f"mesh {MESH_SHAPE}{shaper}", flush=True)

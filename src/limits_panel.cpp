@@ -1,4 +1,5 @@
 #include "limits_panel.h"
+#include "utils.h"
 #include "state.h"
 #include "spdlog/spdlog.h"
 
@@ -92,24 +93,24 @@ void LimitsPanel::foreground() {
   lv_obj_move_foreground(cont);
 }
 
-void LimitsPanel::consume(json &j) {
+void LimitsPanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
-  auto v = j["/params/0/toolhead/max_velocity"_json_pointer];
+  auto v = KUtils::value_at(j, "/params/0/toolhead/max_velocity"_json_pointer);
   if (!v.is_null()) {
     velocity.update_value(v.template get<int>());
   }
 
-  v = j["/params/0/toolhead/max_accel"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/toolhead/max_accel"_json_pointer);
   if (!v.is_null()) {
     acceleration.update_value(v.template get<int>());
   }
 
-  v = j["/params/0/toolhead/max_accel_to_decel"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/toolhead/max_accel_to_decel"_json_pointer);
   if (!v.is_null()) {
     accel_to_decel.update_value(v.template get<int>());
   }
 
-  v = j["/params/0/toolhead/square_corner_velocity"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/toolhead/square_corner_velocity"_json_pointer);
   if (!v.is_null()) {
     square_corner.update_value(v.template get<int>());
   }

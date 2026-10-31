@@ -6,6 +6,7 @@
 #include "button_container.h"
 #include "selector.h"
 #include "image_label.h"
+#include "numpad.h"
 #include "websocket_client.h"
 #include "notify_consumer.h"
 
@@ -22,7 +23,7 @@ class FineTunePanel : public NotifyConsumer {
   void handle_speed(lv_event_t *event);
   void handle_flow(lv_event_t *event);
 
-  void consume(json &j);  
+  void consume(const json &j);  
   
   static void _handle_callback(lv_event_t *event) {
     KGuard::event("FineTunePanel::_handle_callback", [&] {
@@ -82,6 +83,11 @@ class FineTunePanel : public NotifyConsumer {
   ImageLabel pa;
   ImageLabel speed_factor;
   ImageLabel flow_factor;
+  // Under the Z value: whether this printer keeps a gcode offset over a restart.
+  lv_obj_t *zoffset_note;
+  // Its own rather than MainPanel's, which lives in the Home tab and would draw
+  // behind this panel. Declared last so it is created over everything else.
+  Numpad numpad;
 };
 
 #endif  // __FINETINE_PANEL_H__

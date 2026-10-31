@@ -38,17 +38,17 @@ FanPanel::~FanPanel() {
   ws.unregister_notify_update(this);
 }
 
-void FanPanel::consume(json &j) {
+void FanPanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
   for (auto &f : fans) {
     // hack for output_pin fans
-    auto fan_value = j[json::json_pointer(fmt::format("/params/0/{}/value", f.first))];
+    auto fan_value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/value", f.first)));
     if (!fan_value.is_null()) {
       int v = KUtils::fan_value_to_pct(f.first, fan_value.template get<double>());
       f.second->update_value(v);
     }
 
-    fan_value = j[json::json_pointer(fmt::format("/params/0/{}/speed", f.first))];
+    fan_value = KUtils::value_at(j, json::json_pointer(fmt::format("/params/0/{}/speed", f.first)));
     if (!fan_value.is_null()) {
       int v = static_cast<int>(fan_value.template get<double>() * 100);
       f.second->update_value(v);

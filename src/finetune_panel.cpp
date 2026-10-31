@@ -18,6 +18,38 @@ LV_IMG_DECLARE(flow_up_img);
 LV_IMG_DECLARE(flow_down_img);
 LV_IMG_DECLARE(back);
 
+// MOVE=1 is what makes a nudge show up in the first layer straight away, but
+// Klipper applies the offset before it makes that move, and the move fails on a
+// printer that is not homed. Helper-Script's SET_GCODE_OFFSET wrapper saves the
+// offset only once the builtin has returned, so the failure left the new offset
+// in effect, put up a rejection, and skipped the save. See docs/audit.md C24.
+static const char *move_if_homed() {
+  return KUtils::is_homed() ? " MOVE=1" : "";
+}
+
+// Typing an offset is bounded where the buttons are not. A slipped decimal
+// point, -1.5 for -0.15, sent with MOVE=1 drives the nozzle 1.5mm into the bed,
+// while a button only ever moves one step past what the user has just watched.
+static constexpr double MAX_TYPED_Z_OFFSET = 1.0;
+
+// Plain Klipper forgets a gcode offset on restart. Helper-Script's "save
+// z-offset" option keeps it by renaming SET_GCODE_OFFSET and wrapping it in a
+// macro that ends with SAVE_VARIABLE, then reapplying the saved value from a
+// delayed_gcode at boot. That is the shape on the development K1 Max, measured
+// 2026-10-26, so a wrapper that saves is what is looked for.
+static bool offset_is_saved() {
+  auto &gcode = State::get_instance()->get_data(
+      "/printer_state/configfile/settings/gcode_macro set_gcode_offset/gcode"_json_pointer);
+  if (!gcode.is_string()) {
+    return false;
+  }
+
+  std::string body = gcode.template get<std::string>();
+  std::transform(body.begin(), body.end(), body.begin(),
+		 [](unsigned char c) { return std::toupper(c); });
+  return body.find("SAVE_VARIABLE") != std::string::npos;
+}
+
 FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   : NotifyConsumer(l)
   , ws(websocket_client)
@@ -44,6 +76,8 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   , pa(values_cont, &pa_plus_img, 150, 100, 15, "0.0 mm/s")
   , speed_factor(values_cont, &speed_up_img, 150, 100, 15 ,"100%")
   , flow_factor(values_cont, &flow_up_img, 150, 100, 15, "100%")
+  , zoffset_note(lv_label_create(values_cont))
+  , numpad(panel_cont, true)
 {
   lv_obj_move_background(panel_cont);
   
@@ -55,6 +89,14 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   lv_obj_set_style_pad_all(values_cont, 0, 0);
   lv_obj_set_flex_flow(values_cont, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(values_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+  lv_obj_set_style_text_font(zoffset_note, &lv_font_montserrat_12, LV_STATE_DEFAULT);
+  lv_label_set_text(zoffset_note, "");
+  lv_obj_move_to_index(zoffset_note, 1);
+  // Pulled up towards the Z tile. Spaced evenly it sits halfway to the PA tile
+  // and reads as belonging to either.
+  auto hscale = (double)lv_disp_get_physical_ver_res(NULL) / 480.0;
+  lv_obj_set_style_translate_y(zoffset_note, -14 * hscale, 0);
 
   static lv_coord_t grid_main_row_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
     LV_GRID_TEMPLATE_LAST};
@@ -89,6 +131,15 @@ FineTunePanel::FineTunePanel(KWebSocketClient &websocket_client, std::mutex &l)
   lv_obj_set_grid_cell(values_cont, LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 0, 3);  
   lv_obj_set_grid_cell(back_btn.get_container(), LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 3, 1);
 
+  // Tapping the Z value types an exact offset, for when the strain gauge's own
+  // Z is off and the right number is already known. Issue #7.
+  lv_obj_add_event_cb(z_offset.get_container(), &FineTunePanel::_handle_zoffset,
+		      LV_EVENT_CLICKED, this);
+  numpad.set_range(-MAX_TYPED_Z_OFFSET, MAX_TYPED_Z_OFFSET);
+  numpad.set_callback([this](double v) {
+    ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z={:.3f}{}", v, move_if_homed()));
+  });
+
   ws.register_notify_update(this);
 }
 
@@ -106,6 +157,7 @@ void FineTunePanel::foreground() {
   if (!v.is_null()) {
     z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
+  lv_label_set_text(zoffset_note, offset_is_saved() ? "Kept on restart" : "Lost on restart");
 
   v = State::get_instance()->get_data(
 		"/printer_state/extruder/pressure_advance"_json_pointer);
@@ -143,25 +195,25 @@ void FineTunePanel::foreground() {
   lv_obj_move_foreground(panel_cont);
 }
 
-void FineTunePanel::consume(json &j) {
+void FineTunePanel::consume(const json &j) {
   std::lock_guard<std::mutex> lock(lv_lock);
-  auto v = j["/params/0/gcode_move/homing_origin/2"_json_pointer];
+  auto v = KUtils::value_at(j, "/params/0/gcode_move/homing_origin/2"_json_pointer);
   if (!v.is_null()) {
     z_offset.update_label(KUtils::short_measure(v.template get<double>(), "mm").c_str());
   }
 
-  v = j["/params/0/extruder/pressure_advance"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/extruder/pressure_advance"_json_pointer);
   if (!v.is_null()) {
     pa.update_label(KUtils::short_measure(v.template get<double>(), "mm/s").c_str());
   }
 
-  v = j["/params/0/gcode_move/speed_factor"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/gcode_move/speed_factor"_json_pointer);
   if (!v.is_null()) {
     speed_factor.update_label(fmt::format("{}%",
 	   static_cast<int>(v.template get<double>() * 100)).c_str());
   }
 
-  v = j["/params/0/gcode_move/extrude_factor"_json_pointer];
+  v = KUtils::value_at(j, "/params/0/gcode_move/extrude_factor"_json_pointer);
   if (!v.is_null()) {
     flow_factor.update_label(fmt::format("{}%",
 	   static_cast<int>(v.template get<double>() * 100)).c_str());
@@ -195,16 +247,18 @@ void FineTunePanel::handle_zoffset(lv_event_t *e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     lv_obj_t *btn = lv_event_get_current_target(e);
 
-    if (btn == zreset_btn.get_container()) {
+    if (btn == z_offset.get_container()) {
+      numpad.foreground_reset();
+    } else if (btn == zreset_btn.get_container()) {
       spdlog::trace("clicked zoffset reset");
-      ws.gcode_script("SET_GCODE_OFFSET Z=0 MOVE=1");
+      ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z=0{}", move_if_homed()));
     } else {
       const char * step = lv_btnmatrix_get_btn_text(zoffset_selector.get_selector(),
 						    zoffset_selector.get_selected_idx());
       spdlog::trace("clicked z {}", step);
-      ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z_ADJUST={}{} MOVE=1",
+      ws.gcode_script(fmt::format("SET_GCODE_OFFSET Z_ADJUST={}{}{}",
 				  btn == zup_btn.get_container() ? "+" : "-",
-				  step));
+				  step, move_if_homed()));
     }
   }
 }

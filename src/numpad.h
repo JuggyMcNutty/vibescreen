@@ -7,10 +7,14 @@
 
 class Numpad {
  public:
-  Numpad(lv_obj_t *parent);
+  // decimal adds a sign key and a decimal point. Without it the pad is digits
+  // only, which is all a temperature target needs.
+  Numpad(lv_obj_t *parent, bool decimal = false);
   ~Numpad();
 
   void set_callback(std::function<void(double)> cb);
+  // Values outside [min, max] are refused rather than handed to the callback.
+  void set_range(double min, double max);
   void handle_input(lv_event_t *event);
   void foreground_reset();
 
@@ -26,6 +30,8 @@ class Numpad {
   lv_obj_t *input;
   lv_obj_t *kb;
   std::function<void(double)> ready_cb;
+  double min_value;
+  double max_value;
 };
 
 #endif // __NUMPAD_H__

@@ -496,3 +496,187 @@ int p2p_channels_to_freqs(const struct p2p_channels *channels, int *freq_list,
 
 	return idx;
 }
+
+
+void p2p_copy_channels(struct p2p_channels *dst,
+		       const struct p2p_channels *src, bool allow_6ghz)
+{
+	size_t i, j;
+
+	if (allow_6ghz) {
+		os_memcpy(dst, src, sizeof(struct p2p_channels));
+		return;
+	}
+
+	for (i = 0, j = 0; i < src->reg_classes; i++) {
+		if (is_6ghz_op_class(src->reg_class[i].reg_class))
+			continue;
+		os_memcpy(&dst->reg_class[j], &src->reg_class[i],
+			  sizeof(struct p2p_reg_class));
+		j++;
+	}
+	dst->reg_classes = j;
+}
+
+
+int p2p_remove_6ghz_channels(struct weighted_pcl *pref_freq_list, int size)
+{
+	int i;
+
+	for (i = 0; i < size; i++) {
+		if (is_6ghz_freq(pref_freq_list[i].freq)) {
+			wpa_printf(MSG_DEBUG, "P2P: Remove 6 GHz channel %d",
+				   pref_freq_list[i].freq);
+			size--;
+			os_memmove(&pref_freq_list[i], &pref_freq_list[i + 1],
+				   (size - i) * sizeof(pref_freq_list[0]));
+			i--;
+		}
+	}
+	return i;
+}
+
+
+/**
+ * p2p_pref_freq_allowed - Based on the flags set, check if the preferred
+ * frequency is allowed
+ * @freq_list: Weighted preferred channel list
+ * @go: Whether the local device is the group owner
+ * Returns: Whether the preferred frequency is allowed
+ */
+bool p2p_pref_freq_allowed(const struct weighted_pcl *freq_list, bool go)
+{
+	if (freq_list->flag & WEIGHTED_PCL_EXCLUDE)
+		return false;
+	if (!(freq_list->flag & WEIGHTED_PCL_CLI) && !go)
+		return false;
+	if (!(freq_list->flag & WEIGHTED_PCL_GO) && go)
+		return false;
+	return true;
+}
+
+
+static int p2p_check_pref_channel(int channel, u8 op_class,
+				  const struct weighted_pcl *freq_list,
+				  unsigned int num_channels, bool go)
+{
+	unsigned int i;
+
+	/* If the channel is present in the preferred channel list, check if it
+	 * has appropriate flags for the role.
+	 */
+	for (i = 0; i < num_channels; i++) {
+		if (p2p_channel_to_freq(op_class, channel) !=
+		    (int) freq_list[i].freq)
+			continue;
+		if (!p2p_pref_freq_allowed(&freq_list[i], go))
+			return -1;
+		break;
+	}
+
+	return 0;
+}
+
+
+void p2p_pref_channel_filter(const struct p2p_channels *p2p_chan,
+			     const struct weighted_pcl *freq_list,
+			     unsigned int num_channels,
+			     struct p2p_channels *res, bool go)
+{
+	size_t i, j;
+
+	os_memset(res, 0, sizeof(*res));
+
+	for (i = 0; i < p2p_chan->reg_classes; i++) {
+		const struct p2p_reg_class *reg = &p2p_chan->reg_class[i];
+		struct p2p_reg_class *res_reg =
+			&res->reg_class[res->reg_classes];
+
+		if (num_channels > 0) {
+			for (j = 0; j < reg->channels; j++) {
+				if (p2p_check_pref_channel(reg->channel[j],
+							   reg->reg_class,
+							   freq_list,
+							   num_channels,
+							   go) < 0)
+					continue;
+
+				res_reg->channel[res_reg->channels++] =
+					reg->channel[j];
+			}
+		}
+
+		if (res_reg->channels == 0)
+			continue;
+		res->reg_classes++;
+		res_reg->reg_class = reg->reg_class;
+	}
+}
+
+
+bool is_dfs_freq_allowed(struct p2p_data *p2p, bool go, int freq)
+{
+	if (!go)
+		return true;
+	else if (!p2p->dfs_ap_connected)
+		return false;
+
+	return freq == p2p->sta_connected_freq;
+}
+
+
+static int p2p_check_dfs_channel(struct p2p_data *p2p, u8 channel, u8 op_class)
+{
+	u8 dfs_op_class, dfs_op_chan;
+
+	if (!p2p->dfs_ap_connected)
+		return -1;
+
+	if (ieee80211_chaninfo_to_channel(p2p->sta_connected_freq,
+					  p2p->sta_connected_chan_width,
+					  0, &dfs_op_class, &dfs_op_chan) < 0) {
+		p2p_info(p2p,
+			 "P2P: Frequency to channel conversion failed (%d MHz)",
+			 p2p->sta_connected_freq);
+		return -1;
+	}
+
+	if (op_class == dfs_op_class && channel == dfs_op_chan)
+		return 0;
+
+	return -1;
+}
+
+
+void p2p_dfs_channel_filter(struct p2p_data *p2p,
+			    const struct p2p_channels *p2p_chan,
+			    struct p2p_channels *res, bool go)
+{
+	size_t i, j;
+	bool is_dfs;
+
+	os_memset(res, 0, sizeof(*res));
+
+	for (i = 0; i < p2p_chan->reg_classes; i++) {
+		const struct p2p_reg_class *reg = &p2p_chan->reg_class[i];
+		struct p2p_reg_class *res_reg =
+			&res->reg_class[res->reg_classes];
+
+		for (j = 0; j < reg->channels; j++) {
+			is_dfs = p2p->cfg->is_p2p_dfs_chan(p2p->cfg->cb_ctx, 0,
+							   reg->reg_class,
+							   reg->channel[j]);
+			if (is_dfs && go &&
+			    p2p_check_dfs_channel(p2p, reg->channel[j],
+						  reg->reg_class) < 0)
+				continue;
+
+			res_reg->channel[res_reg->channels++] = reg->channel[j];
+		}
+
+		if (res_reg->channels == 0)
+			continue;
+		res->reg_classes++;
+		res_reg->reg_class = reg->reg_class;
+	}
+}

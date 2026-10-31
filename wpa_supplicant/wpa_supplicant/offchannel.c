@@ -23,12 +23,12 @@ wpas_get_tx_interface(struct wpa_supplicant *wpa_s, const u8 *src)
 {
 	struct wpa_supplicant *iface;
 
-	if (os_memcmp(src, wpa_s->own_addr, ETH_ALEN) == 0) {
+	if (ether_addr_equal(src, wpa_s->own_addr)) {
 #ifdef CONFIG_P2P
 		if (wpa_s->p2p_mgmt && wpa_s != wpa_s->parent &&
 		    wpa_s->parent->ap_iface &&
-		    os_memcmp(wpa_s->parent->own_addr,
-			      wpa_s->own_addr, ETH_ALEN) == 0 &&
+		    ether_addr_equal(wpa_s->parent->own_addr,
+				     wpa_s->own_addr) &&
 		    wpabuf_len(wpa_s->pending_action_tx) >= 2 &&
 		    *wpabuf_head_u8(wpa_s->pending_action_tx) !=
 		    WLAN_ACTION_PUBLIC) {
@@ -52,7 +52,7 @@ wpas_get_tx_interface(struct wpa_supplicant *wpa_s, const u8 *src)
 	 */
 	iface = wpa_s->global->ifaces;
 	while (iface) {
-		if (os_memcmp(src, iface->own_addr, ETH_ALEN) == 0)
+		if (ether_addr_equal(src, iface->own_addr))
 			break;
 		iface = iface->next;
 	}
@@ -124,7 +124,7 @@ static void wpas_send_action_cb(void *eloop_ctx, void *timeout_ctx)
 #endif /* CONFIG_TESTING_OPTIONS */
 			if (wpa_drv_remain_on_channel(
 				    wpa_s, wpa_s->pending_action_freq,
-				    duration) < 0) {
+				    duration, NULL) < 0) {
 				wpa_printf(MSG_DEBUG, "Off-channel: Failed to "
 					   "request driver to remain on "
 					   "channel (%u MHz) for Action Frame "
@@ -186,7 +186,7 @@ void offchannel_send_action_tx_status(
 		return;
 	}
 
-	if (os_memcmp(dst, wpa_s->pending_action_dst, ETH_ALEN) != 0) {
+	if (!ether_addr_equal(dst, wpa_s->pending_action_dst)) {
 		wpa_printf(MSG_DEBUG, "Off-channel: Ignore Action TX status - "
 			   "unknown destination address");
 		return;
@@ -226,10 +226,10 @@ void offchannel_send_action_tx_status(
 	}
 
 #ifdef CONFIG_P2P
-	if (wpa_s->p2p_long_listen > 0) {
+	if (wpa_s->global->p2p_long_listen > 0) {
 		/* Continue the listen */
 		wpa_printf(MSG_DEBUG, "P2P: Continuing long Listen state");
-		wpas_p2p_listen_start(wpa_s, wpa_s->p2p_long_listen);
+		wpas_p2p_listen_start(wpa_s, wpa_s->global->p2p_long_listen);
 	}
 #endif /* CONFIG_P2P */
 }
@@ -246,7 +246,7 @@ void offchannel_send_action_tx_status(
  * @buf: Frame to transmit starting from the Category field
  * @len: Length of @buf in bytes
  * @wait_time: Wait time for response in milliseconds
- * @tx_cb: Callback function for indicating TX status or %NULL for now callback
+ * @tx_cb: Callback function for indicating TX status or %NULL for no callback
  * @no_cck: Whether CCK rates are to be disallowed for TX rate selection
  * Returns: 0 on success or -1 on failure
  *
@@ -369,7 +369,7 @@ int offchannel_send_action(struct wpa_supplicant *wpa_s, unsigned int freq,
 		wait_time += wpa_s->extra_roc_dur;
 	}
 #endif /* CONFIG_TESTING_OPTIONS */
-	if (wpa_drv_remain_on_channel(wpa_s, freq, wait_time) < 0) {
+	if (wpa_drv_remain_on_channel(wpa_s, freq, wait_time, NULL) < 0) {
 		wpa_printf(MSG_DEBUG, "Off-channel: Failed to request driver "
 			   "to remain on channel (%u MHz) for Action "
 			   "Frame TX", freq);

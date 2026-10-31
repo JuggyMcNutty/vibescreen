@@ -212,6 +212,94 @@ took 1.6 seconds on a restart and 8.3 at boot. With the fix,
 included, so nearly all of the old figure was the wait on `/dev/random`.
 Neither start waited for the CRNG.
 
+## Z homing and the Z offset
+
+Read 2026-10-26 from `printer/objects/query` and `printer/gcode/help`, idle,
+for issue #7. Nothing was sent to the printer.
+
+Z has no switch. `stepper_z` homes on `tmc2209_stepper_z:virtual_endstop` with
+`position_endstop: 0`, and the strain gauge is Creality's `[prtouch_v2]`, a
+closed module that also registers itself as the `probe` object:
+
+| What | Value |
+| --- | --- |
+| `prtouch_v2` `z_offset` | `-0.025` |
+| `probe` status | `{"z_offset": -0.025, "last_z_result": 0.0}` |
+| `homing_override` | `_HOME_Z` for Z, then `BED_MESH_PROFILE LOAD="default"` |
+| `START_PRINT` | `CX_ROUGH_G28`, then `ACCURATE_G28`, which is `ACCURATE_HOME_Z` |
+| `gcode_move.homing_origin` | `[0, 0, 0, 0]` |
+
+`PROBE_CALIBRATE`, `Z_OFFSET_APPLY_PROBE`, `Z_OFFSET_APPLY_ENDSTOP`,
+`MANUAL_PROBE` and `SAVE_CONFIG` all exist. Whether `ACCURATE_HOME_Z` honours a
+`prtouch_v2` `z_offset` saved through them was not tested, and is why Fine Tune
+works through the gcode offset instead.
+
+**`SET_GCODE_OFFSET` is a macro here.** Helper-Script's "save z-offset" option
+is installed:
+
+- `gcode_macro SET_GCODE_OFFSET` has `rename_existing: _SET_GCODE_OFFSET`.
+  It passes its parameters to the builtin, then ends with
+  `SAVE_VARIABLE VARIABLE=zoffset`.
+- `delayed_gcode LOAD_GCODE_OFFSETS` runs two seconds after start and
+  reapplies the saved value.
+- `save_variables` holds `{"zoffset": {"z": 0}}`.
+
+So an offset set from the screen survives a restart on this machine, but only
+if the builtin succeeds. A `MOVE=1` the builtin rejects, which it does on an
+unhomed Z, abandons the macro before the save. See `docs/audit.md` C24.
+
+`configfile.settings` carries the macro as `gcode_macro set_gcode_offset`, with
+`description`, `gcode` and `rename_existing`. Fine Tune looks for
+`SAVE_VARIABLE` in that `gcode` to say whether an offset is kept.
+
+### What homing Z by hand rests on
+
+Also read 2026-10-26, for Manual Z, the answer to issue #7: how to keep
+printing when the load cell has failed. Nothing was sent.
+
+**X and Y home without the load cell.**
+
+- `G28 X Y` goes through `homing_override`, which runs `_HOME_X` and `_HOME_Y`.
+  Both home on `tmc2209_stepper_*:virtual_endstop`, stallguard and nothing
+  else. Z is homed only if `Z` was asked for or neither X nor Y was.
+- Before the first XY home, `_IF_HOME_Z` lowers the bed with `FORCE_MOVE`.
+  It moves `z_safe_g28`, 3mm, when Creality's last recorded Z,
+  `print_stats.z_pos`, is 20 or below, and 0.1mm otherwise.
+- The override ends with `BED_MESH_PROFILE LOAD="default"`, so the saved mesh
+  loads either way.
+
+**`SET_KINEMATIC_POSITION` is available.** `[force_move]` has
+`enable_force_move: true`, which is what registers it. Creality's
+`force_move.py` passes `homing_axes=(0, 1, 2)`, so it marks X, Y and Z homed
+whatever it is given. That is read from `CrealityOfficial/K1_Series_Klipper`
+on GitHub rather than from this printer. It is why Manual Z will not declare Z
+until X and Y are homed for real.
+
+Limits from `toolhead`:
+
+| Axis | Minimum | Maximum |
+| --- | --- | --- |
+| X | -2 | 306.5 |
+| Y | -2 | 306 |
+| Z | -10 | 305 |
+
+Z's minimum is below zero, so a jog can drive the nozzle into the bed.
+
+**`START_PRINT` can be told not to home Z.**
+
+- It has `variable_prepare: 0`. While that is 0 it runs `CX_ROUGH_G28`, waits
+  for the bed, runs `CX_NOZZLE_CLEAR` and `ACCURATE_G28`, then meshes.
+  `ACCURATE_G28` is `ACCURATE_HOME_Z`, on the load cell.
+- When `prepare` is 1 it skips all of that and only runs
+  `PRINT_PREPARE_CLEAR`.
+- `PRINT_PREPARED` sets it to 1, and `PRINT_PREPARE_CLEAR`, run by `END_PRINT`
+  and so by `CANCEL_PRINT`, sets it back. That makes it good for one print.
+
+A hand-set zero does not outlive the motors either. `END_PRINT` ends with
+`M84`. So does `[idle_timeout]` after 1800 seconds, unless an `M600` filament
+change is waiting. After that Klipper refuses any move until the axes are
+homed again, so a stale `prepare` fails safe.
+
 ## Raw excerpts
 
 ### CPU

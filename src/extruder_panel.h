@@ -18,7 +18,7 @@ class ExtruderPanel : public NotifyConsumer {
 
   void foreground();
   void enable_spoolman();
-  void consume(json &j);
+  void consume(const json &j);
   void handle_callback(lv_event_t *e);
 
   // Apply the printer's own extruder limits to the selectors, so options the

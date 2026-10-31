@@ -185,8 +185,8 @@ void PrintPanel::populate_files() {
   show_dir(cur_dir, ListChange::Refetch);
 }
 
-void PrintPanel::consume(json &j) {  
-  json &pstat_state = j["/params/0/print_stats/state"_json_pointer];
+void PrintPanel::consume(const json &j) {  
+  json pstat_state = KUtils::value_at(j, "/params/0/print_stats/state"_json_pointer);
   if (pstat_state.is_null()) {
     return;
   }

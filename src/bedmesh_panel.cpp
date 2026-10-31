@@ -210,8 +210,8 @@ BedMeshPanel::~BedMeshPanel() {
   }
 }
 
-void BedMeshPanel::consume(json &j) {
-  auto bm = j["/params/0/bed_mesh"_json_pointer];
+void BedMeshPanel::consume(const json &j) {
+  auto bm = KUtils::value_at(j, "/params/0/bed_mesh"_json_pointer);
   if (!bm.is_null()) {
     spdlog::trace("bedmesh panel consume {}",  bm["/profiles"_json_pointer].dump());
     refresh_views_with_lock(bm);

@@ -10,6 +10,7 @@
 #include "tmc_tune_panel.h"
 #include "tmc_status_panel.h"
 #include "power_panel.h"
+#include "manual_z_panel.h"
 #include "button_container.h"
 #include "lvgl/lvgl.h"
 
@@ -42,7 +43,8 @@ class PrinterTunePanel {
   TmcTunePanel tmc_tune_panel;
   TmcStatusPanel tmc_status_panel;
   PowerPanel power_panel;
-  ButtonContainer bedmesh_btn;  
+  ManualZPanel manual_z_panel;
+  ButtonContainer bedmesh_btn;
   ButtonContainer finetune_btn;
   ButtonContainer inputshaper_btn;
   ButtonContainer belts_calibration_btn;
@@ -50,7 +52,8 @@ class PrinterTunePanel {
   ButtonContainer tmc_tune_btn;
   ButtonContainer tmc_status_btn;
   ButtonContainer power_devices_btn;
-  
+  ButtonContainer manual_z_btn;
+
 };
 
 #endif // __PRINTERTUNE_PANEL_H__

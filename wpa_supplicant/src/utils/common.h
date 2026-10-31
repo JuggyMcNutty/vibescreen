@@ -244,6 +244,18 @@ static inline void WPA_PUT_BE24(u8 *a, u32 val)
 	a[2] = val & 0xff;
 }
 
+static inline u32 WPA_GET_LE24(const u8 *a)
+{
+	return (a[2] << 16) | (a[1] << 8) | a[0];
+}
+
+static inline void WPA_PUT_LE24(u8 *a, u32 val)
+{
+	a[2] = (val >> 16) & 0xff;
+	a[1] = (val >> 8) & 0xff;
+	a[0] = val & 0xff;
+}
+
 static inline u32 WPA_GET_BE32(const u8 *a)
 {
 	return ((u32) a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3];
@@ -267,6 +279,23 @@ static inline void WPA_PUT_LE32(u8 *a, u32 val)
 	a[3] = (val >> 24) & 0xff;
 	a[2] = (val >> 16) & 0xff;
 	a[1] = (val >> 8) & 0xff;
+	a[0] = val & 0xff;
+}
+
+static inline u64 WPA_GET_LE48(const u8 *a)
+{
+	return (((u64) a[5]) << 40) | (((u64) a[4]) << 32) |
+		(((u64) a[3]) << 24) | (((u64) a[2]) << 16) |
+		(((u64) a[1]) << 8) | ((u64) a[0]);
+}
+
+static inline void WPA_PUT_LE48(u8 *a, u64 val)
+{
+	a[5] = val >> 40;
+	a[4] = val >> 32;
+	a[3] = val >> 24;
+	a[2] = val >> 16;
+	a[1] = val >> 8;
 	a[0] = val & 0xff;
 }
 
@@ -344,6 +373,9 @@ static inline void WPA_PUT_LE64(u8 *a, u64 val)
 #ifndef ETH_P_OUI
 #define ETH_P_OUI 0x88B7
 #endif /* ETH_P_OUI */
+#ifndef ETH_P_8021Q
+#define ETH_P_8021Q 0x8100
+#endif /* ETH_P_8021Q */
 
 
 #ifdef __GNUC__
@@ -426,6 +458,19 @@ void perror(const char *s);
 #define BIT(x) (1U << (x))
 #endif
 
+#ifndef BIT_ULL
+#define BIT_ULL(x) (1ULL << (x))
+#endif
+
+#define BITS(src, mask, pos) ((src & mask) >> pos)
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+
 /*
  * Definitions for sparse validation
  * (http://kernel.org/pub/linux/kernel/people/josh/sparse/)
@@ -474,12 +519,14 @@ int hwaddr_aton(const char *txt, u8 *addr);
 int hwaddr_masked_aton(const char *txt, u8 *addr, u8 *mask, u8 maskable);
 int hwaddr_compact_aton(const char *txt, u8 *addr);
 int hwaddr_aton2(const char *txt, u8 *addr);
+int hex2num(char c);
 int hex2byte(const char *hex);
 int hexstr2bin(const char *hex, u8 *buf, size_t len);
 void inc_byte_array(u8 *counter, size_t len);
 void buf_shift_right(u8 *buf, size_t len, size_t bits);
 void wpa_get_ntp_timestamp(u8 *buf);
-int wpa_scnprintf(char *buf, size_t size, const char *fmt, ...);
+int wpa_scnprintf(char *buf, size_t size, const char *fmt, ...)
+	PRINTF_FORMAT(3, 4);
 int wpa_snprintf_hex_sep(char *buf, size_t buf_size, const u8 *data, size_t len,
 			 char sep);
 int wpa_snprintf_hex(char *buf, size_t buf_size, const u8 *data, size_t len);
@@ -526,6 +573,11 @@ static inline int is_multicast_ether_addr(const u8 *a)
 	return a[0] & 0x01;
 }
 
+static inline bool ether_addr_equal(const u8 *a, const u8 *b)
+{
+	return os_memcmp(a, b, ETH_ALEN) == 0;
+}
+
 #define broadcast_ether_addr (const u8 *) "\xff\xff\xff\xff\xff\xff"
 
 #include "wpa_debug.h"
@@ -544,10 +596,13 @@ int freq_range_list_includes(const struct wpa_freq_range_list *list,
 			     unsigned int freq);
 char * freq_range_list_str(const struct wpa_freq_range_list *list);
 
-int int_array_len(const int *a);
+size_t int_array_len(const int *a);
 void int_array_concat(int **res, const int *a);
 void int_array_sort_unique(int *a);
 void int_array_add_unique(int **res, int a);
+bool int_array_includes(const int *arr, int val);
+bool int_array_equal(const int *a, const int *b);
+int * int_array_dup(const int *a);
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -569,6 +624,18 @@ int str_starts(const char *str, const char *start);
 
 u8 rssi_to_rcpi(int rssi);
 char * get_param(const char *cmd, const char *param);
+
+#define for_each_link(__links, __i)                            \
+	for ((__i) = 0; (__i) < MAX_NUM_MLD_LINKS; (__i)++)    \
+		if ((__links) & BIT(__i))
+
+/* Iterate all links, or, if no link is defined, iterate given index */
+#define for_each_link_default(_links, _i, _def_idx)	\
+	for ((_i) = (_links) ? 0 : (_def_idx);		\
+	     ((_links) && (_i) < MAX_NUM_MLD_LINKS) ||	\
+		     (!(_links) && (_i) == (_def_idx));	\
+	     (_i)++)					\
+		if (!(_links) || (_links) & BIT(_i))
 
 void forced_memzero(void *ptr, size_t len);
 

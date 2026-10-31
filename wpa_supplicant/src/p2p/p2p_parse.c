@@ -93,6 +93,12 @@ static int p2p_parse_attribute(u8 id, const u8 *data, u16 len,
 			return -1;
 		}
 		msg->listen_channel = data;
+		if (has_ctrl_char(data, 2)) {
+			wpa_printf(MSG_DEBUG,
+				   "P2P: * Listen Channel: Country(binary) %02x %02x (0x%02x) Regulatory Class %d Channel Number %d",
+				   data[0], data[1], data[2], data[3], data[4]);
+			break;
+		}
 		wpa_printf(MSG_DEBUG, "P2P: * Listen Channel: "
 			   "Country %c%c(0x%02x) Regulatory "
 			   "Class %d Channel Number %d", data[0], data[1],
@@ -110,6 +116,12 @@ static int p2p_parse_attribute(u8 id, const u8 *data, u16 len,
 			return -1;
 		}
 		msg->operating_channel = data;
+		if (has_ctrl_char(data, 2)) {
+			wpa_printf(MSG_DEBUG,
+				   "P2P: * Operating Channel: Country(binary) %02x %02x (0x%02x) Regulatory Class %d Channel Number %d",
+				   data[0], data[1], data[2], data[3], data[4]);
+			break;
+		}
 		wpa_printf(MSG_DEBUG, "P2P: * Operating Channel: "
 			   "Country %c%c(0x%02x) Regulatory "
 			   "Class %d Channel Number %d", data[0], data[1],
@@ -123,8 +135,15 @@ static int p2p_parse_attribute(u8 id, const u8 *data, u16 len,
 		}
 		msg->channel_list = data;
 		msg->channel_list_len = len;
-		wpa_printf(MSG_DEBUG, "P2P: * Channel List: Country String "
-			   "'%c%c(0x%02x)'", data[0], data[1], data[2]);
+		if (has_ctrl_char(data, 2)) {
+			wpa_printf(MSG_DEBUG,
+				   "P2P: * Channel List: Country String (binary) %02x %02x (0x%02x)",
+				   data[0], data[1], data[2]);
+		} else {
+			wpa_printf(MSG_DEBUG,
+				   "P2P: * Channel List: Country String '%c%c(0x%02x)'",
+				   data[0], data[1], data[2]);
+		}
 		wpa_hexdump(MSG_MSGDUMP, "P2P: Channel List",
 			    msg->channel_list, msg->channel_list_len);
 		break;
@@ -398,6 +417,60 @@ static int p2p_parse_attribute(u8 id, const u8 *data, u16 len,
 					msg->persistent_ssid_len));
 		break;
 	}
+	case P2P_ATTR_CAPABILITY_EXTENSION:
+		if (len < 2) {
+			wpa_printf(MSG_DEBUG, "P2P: Too short PCEA (length %d)",
+				   len);
+			return -1;
+		}
+		msg->pcea_info = data;
+		msg->pcea_info_len = len;
+		wpa_printf(MSG_DEBUG, "P2P: * PCEA (length=%u)", len);
+		break;
+	case P2P_ATTR_PAIRING_AND_BOOTSTRAPPING:
+		if (len < 1) {
+			wpa_printf(MSG_DEBUG, "P2P: Too short PBMA (length %d)",
+				   len);
+			return -1;
+		}
+		msg->pbma_info = data;
+		msg->pbma_info_len = len;
+		wpa_printf(MSG_DEBUG, "P2P: * PBMA (length=%u)", len);
+		break;
+	case P2P_ATTR_ACTION_FRAME_WRAPPER:
+		if (len < 2) {
+			wpa_printf(MSG_DEBUG,
+				   "P2P: Too short Action Frame Wrapper attribute (length %d)",
+				   len);
+			return -1;
+		}
+		msg->action_frame_wrapper = data;
+		msg->action_frame_wrapper_len = len;
+		wpa_printf(MSG_DEBUG, "P2P: * Action frame wrapper (length=%u)",
+			   len);
+		break;
+	case P2P_ATTR_DEVICE_IDENTITY_RESOLUTION:
+		if (len < 1) {
+			wpa_printf(MSG_DEBUG, "P2P: Too short DIRA (length %d)",
+				   len);
+			return -1;
+		}
+		msg->dira = data;
+		msg->dira_len = len;
+		wpa_printf(MSG_DEBUG, "P2P: * DIRA (length=%u)", len);
+		break;
+	case P2P_ATTR_WLAN_AP_INFORMATION:
+		/* One or more AP Info fields (each being 12 octets) is required
+		 * to be included. */
+		if (len < 12) {
+			wpa_printf(MSG_DEBUG,
+				   "P2P: Too short WLAN AP info (length %d)",
+				   len);
+			return -1;
+		}
+		msg->wlan_ap_info = data;
+		msg->wlan_ap_info_len = len;
+		break;
 	default:
 		wpa_printf(MSG_DEBUG, "P2P: Skipped unknown attribute %d "
 			   "(length %d)", id, len);
@@ -526,7 +599,9 @@ int p2p_parse_ies(const u8 *data, size_t len, struct p2p_message *msg)
 {
 	struct ieee802_11_elems elems;
 
-	ieee802_11_parse_elems(data, len, &elems, 0);
+	if (ieee802_11_parse_elems(data, len, &elems, 0) == ParseFailed)
+		return -1;
+
 	if (elems.ds_params)
 		msg->ds_params = elems.ds_params;
 	if (elems.ssid)
@@ -548,6 +623,18 @@ int p2p_parse_ies(const u8 *data, size_t len, struct p2p_message *msg)
 		if (msg->p2p_attributes)
 			wpa_hexdump_buf(MSG_MSGDUMP, "P2P: P2P IE data",
 					msg->p2p_attributes);
+		p2p_parse_free(msg);
+		return -1;
+	}
+
+	msg->p2p2_attributes = ieee802_11_vendor_ie_concat(data, len,
+							   P2P2_IE_VENDOR_TYPE);
+	if (msg->p2p2_attributes &&
+	    p2p_parse_p2p_ie(msg->p2p2_attributes, msg)) {
+		wpa_printf(MSG_DEBUG, "P2P: Failed to parse P2P2 IE data");
+		if (msg->p2p2_attributes)
+			wpa_hexdump_buf(MSG_MSGDUMP, "P2P: P2P2 IE data",
+					msg->p2p2_attributes);
 		p2p_parse_free(msg);
 		return -1;
 	}
@@ -626,6 +713,8 @@ void p2p_parse_free(struct p2p_message *msg)
 {
 	wpabuf_free(msg->p2p_attributes);
 	msg->p2p_attributes = NULL;
+	wpabuf_free(msg->p2p2_attributes);
+	msg->p2p2_attributes = NULL;
 	wpabuf_free(msg->wps_attributes);
 	msg->wps_attributes = NULL;
 #ifdef CONFIG_WIFI_DISPLAY

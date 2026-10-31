@@ -17,7 +17,7 @@ class LimitsPanel : public NotifyConsumer {
 
   void init(json &j);
   void foreground();
-  void consume(json &j);
+  void consume(const json &j);
 
   void handle_callback(lv_event_t *event);
   

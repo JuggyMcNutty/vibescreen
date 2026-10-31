@@ -1,28 +1,6 @@
-all: hs20-osu-client
+ALL=hs20-osu-client
 
-ifndef CC
-CC=gcc
-endif
-
-ifndef LDO
-LDO=$(CC)
-endif
-
-ifeq ($(QUIET), 1)
-Q=@
-E=true
-else
-Q=@
-E=echo
-ifeq ($(V), 1)
-Q=
-E=true
-endif
-endif
-
-ifndef CFLAGS
-CFLAGS = -MMD -O2 -Wall -g
-endif
+include ../../src/build.rules
 
 CFLAGS += -I../../src/utils
 CFLAGS += -I../../src/common
@@ -30,17 +8,23 @@ CFLAGS += -I../../src
 
 ifndef CONFIG_NO_BROWSER
 ifndef CONFIG_BROWSER_SYSTEM
+TEST_WK := $(shell pkg-config --silence-errors --cflags webkitgtk-3.0)
+ifeq ($(TEST_WK),)
+# Try webkit2
+GTKCFLAGS := $(shell pkg-config --cflags gtk+-3.0 webkit2gtk-4.0)
+GTKLIBS := $(shell pkg-config --libs gtk+-3.0 webkit2gtk-4.0)
+CFLAGS += -DUSE_WEBKIT2
+else
 GTKCFLAGS := $(shell pkg-config --cflags gtk+-3.0 webkitgtk-3.0)
 GTKLIBS := $(shell pkg-config --libs gtk+-3.0 webkitgtk-3.0)
+endif
+
 CFLAGS += $(GTKCFLAGS)
 LIBS += $(GTKLIBS)
 endif
 endif
 
-OBJS=spp_client.o
-OBJS += oma_dm_client.o
-OBJS += osu_client.o
-OBJS += est.o
+OBJS = osu_client.o
 OBJS += ../../src/utils/xml-utils.o
 CFLAGS += -DCONFIG_CTRL_IFACE
 CFLAGS += -DCONFIG_CTRL_IFACE_UNIX
@@ -84,23 +68,11 @@ CFLAGS += -DEAP_TLS_OPENSSL
 OBJS += ../../src/crypto/tls_openssl_ocsp.o
 LIBS += -lssl -lcrypto
 
+_OBJS_VAR := OBJS
+include ../../src/objs.mk
 hs20-osu-client: $(OBJS)
 	$(Q)$(LDO) $(LDFLAGS) -o hs20-osu-client $(OBJS) $(LIBS)
 	@$(E) "  LD " $@
 
-%.o: %.c
-	$(Q)$(CC) -c -o $@ $(CFLAGS) $<
-	@$(E) "  CC " $<
-
-clean:
-	rm -f core *~ *.o *.d hs20-osu-client
-	rm -f ../../src/utils/*.o
-	rm -f ../../src/utils/*.d
-	rm -f ../../src/common/*.o
-	rm -f ../../src/common/*.d
-	rm -f ../../src/crypto/*.o
-	rm -f ../../src/crypto/*.d
-	rm -f ../../src/wps/*.o
-	rm -f ../../src/wps/*.d
-
--include $(OBJS:%.o=%.d)
+clean: common-clean
+	rm -f core *~

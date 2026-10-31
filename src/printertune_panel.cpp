@@ -13,6 +13,7 @@ LV_IMG_DECLARE(inputshaper_img);
 LV_IMG_DECLARE(limit_img);
 LV_IMG_DECLARE(motor_img);
 LV_IMG_DECLARE(chart_img);
+LV_IMG_DECLARE(home_z);
 
 #ifndef ZBOLT
 LV_IMG_DECLARE(belts_calibration_img);
@@ -31,6 +32,7 @@ PrinterTunePanel::PrinterTunePanel(KWebSocketClient &c, std::mutex &l, lv_obj_t 
   , tmc_tune_panel(c)
   , tmc_status_panel(c, l)
   , power_panel(c, l)
+  , manual_z_panel(c, l)
   , bedmesh_btn(cont, &bedmesh_img, "Bed Mesh", &PrinterTunePanel::_handle_callback, this)
   , finetune_btn(cont, &fine_tune_img, "Fine Tune", &PrinterTunePanel::_handle_callback, this)
   , inputshaper_btn(cont, &inputshaper_img, "Input Shaper", &PrinterTunePanel::_handle_callback, this)
@@ -47,6 +49,7 @@ PrinterTunePanel::PrinterTunePanel(KWebSocketClient &c, std::mutex &l, lv_obj_t 
 #else
   , power_devices_btn(cont, &print, "Power Devices", &PrinterTunePanel::_handle_callback, this)
 #endif
+  , manual_z_btn(cont, &home_z, "Manual Z", &PrinterTunePanel::_handle_callback, this)
 {
   KWidget::null_on_delete(&cont);
   lv_obj_move_background(cont);
@@ -56,7 +59,8 @@ PrinterTunePanel::PrinterTunePanel(KWebSocketClient &c, std::mutex &l, lv_obj_t 
 
   tmc_tune_btn.disable();
 
-  static lv_coord_t grid_main_row_dsc[] = {LV_GRID_FR(2), LV_GRID_FR(5), LV_GRID_FR(5), LV_GRID_TEMPLATE_LAST};
+  static lv_coord_t grid_main_row_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(4), LV_GRID_FR(4), LV_GRID_FR(4),
+      LV_GRID_TEMPLATE_LAST};
   static lv_coord_t grid_main_col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
       LV_GRID_TEMPLATE_LAST};
 
@@ -73,6 +77,9 @@ PrinterTunePanel::PrinterTunePanel(KWebSocketClient &c, std::mutex &l, lv_obj_t 
   lv_obj_set_grid_cell(tmc_tune_btn.get_container(), LV_GRID_ALIGN_CENTER, 1, 1, LV_GRID_ALIGN_START, 2, 1);
   lv_obj_set_grid_cell(tmc_status_btn.get_container(), LV_GRID_ALIGN_CENTER, 2, 1, LV_GRID_ALIGN_START, 2, 1);
   lv_obj_set_grid_cell(power_devices_btn.get_container(), LV_GRID_ALIGN_CENTER, 3, 1, LV_GRID_ALIGN_START, 2, 1);
+
+  // row 3
+  lv_obj_set_grid_cell(manual_z_btn.get_container(), LV_GRID_ALIGN_CENTER, 0, 1, LV_GRID_ALIGN_START, 3, 1);
 }
 
 PrinterTunePanel::~PrinterTunePanel() {
@@ -141,6 +148,9 @@ void PrinterTunePanel::handle_callback(lv_event_t *event) {
     } else if (btn == power_devices_btn.get_container()) {
       spdlog::trace("power devices pressed");
       power_panel.foreground();
+    } else if (btn == manual_z_btn.get_container()) {
+      spdlog::trace("manual z pressed");
+      manual_z_panel.foreground();
     }
   }
 }

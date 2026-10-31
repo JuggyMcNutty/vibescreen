@@ -178,13 +178,15 @@ TmcTunePanel::TmcTunePanel(KWebSocketClient &c)
   : ws(c)
   , cont(lv_obj_create(lv_scr_act()))
   , controls_cont(lv_obj_create(cont))
+  , status_label(lv_label_create(controls_cont))
   , btns_cont(lv_obj_create(cont))
-  , save_btn(btns_cont, &sd_img, "Save/Restart", [](lv_event_t *e) {
-    TmcTunePanel *panel = (TmcTunePanel*)e->user_data;
-    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-      panel->save_config();
-    }
-  }, this)
+  // Always prompted, never governed by the emergency stop setting. SAVE_CONFIG
+  // restarts Klipper, which ends any print, even one that is only paused. With
+  // a prompt that cannot be turned off the click goes to the prompt, so the
+  // event callback here is never registered and does nothing.
+  , save_btn(btns_cont, &sd_img, "Save/Restart", [](lv_event_t *) {}, this,
+	     "Save these TMC settings to printer.cfg?\nKlipper restarts, which stops any print.",
+	     [this]() { this->save_config(); }, false)
   , back_btn(btns_cont, &back, "Back", [](lv_event_t *e) {
     TmcTunePanel *panel = (TmcTunePanel*)e->user_data;
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
@@ -204,6 +206,10 @@ TmcTunePanel::TmcTunePanel(KWebSocketClient &c)
   lv_obj_set_flex_grow(controls_cont, 1);
 
   lv_obj_set_flex_flow(controls_cont, LV_FLEX_FLOW_COLUMN);
+
+  lv_obj_set_width(status_label, LV_PCT(100));
+  lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
+  lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_set_flex_flow(btns_cont, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all(btns_cont, 0, 0);
@@ -240,6 +246,32 @@ void TmcTunePanel::init(json &j, fs::path &kp) {
 
   State *s = State::get_instance();
   auto v = s->get_data("/printer_state/configfile/config"_json_pointer);
+
+  // Saving goes through two of our klippy extras. _GUPPY_LOAD_MODULE comes
+  // from [guppy_module_loader], which guppy_cmd.cfg declares, and it loads
+  // guppy_config_helper.py, which installer.sh links into klippy/extras on a
+  // K1. A Debian install has neither. The loader is looked for in the raw
+  // config because it reads no options, so configfile.settings never lists it.
+  // The helper is a file on this machine, found the same way as the motor
+  // database beside it.
+  std::vector<std::string> missing;
+  if (!v.contains("guppy_module_loader")) {
+    missing.push_back("[guppy_module_loader]");
+  }
+  if (!fs::exists(kp.parent_path() / "guppy_config_helper.py")) {
+    missing.push_back("klippy/extras/guppy_config_helper.py");
+  }
+
+  if (missing.empty()) {
+    save_btn.enable();
+    lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    save_btn.disable();
+    spdlog::warn("tmc autotune cannot save, printer is missing {}", fmt::join(missing, ", "));
+    lv_label_set_text(status_label,
+		      fmt::format("Saving needs {}", fmt::join(missing, " and ")).c_str());
+    lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+  }
 
   std::map<std::string, json> tuned_config;
   std::vector<std::string> configured_steppers;
@@ -332,10 +364,17 @@ void TmcTunePanel::background() {
 }
 
 void TmcTunePanel::save_config() {
-  std::vector<std::string> save_configs;
+  // Nothing has ever declared [guppy_config_helper], so _GUPPY_SAVE_CONFIG was
+  // never registered. Klipper refused the first line as an unknown command and
+  // abandoned the SAVE_CONFIG after it, so Save did nothing. Loading the helper
+  // here, the way TMC Metrics loads tmcstatus, needs no config change and no
+  // restart, and the loader skips a module that is already loaded. See
+  // docs/audit.md C25.
+  std::vector<std::string> lines = {"_GUPPY_LOAD_MODULE SECTION=guppy_config_helper"};
   for (auto &s : steppers) {
-    save_configs.push_back(s->get_config_macro());
+    lines.push_back(s->get_config_macro());
   }
+  lines.push_back("SAVE_CONFIG");
 
-  ws.gcode_script(fmt::format("{}\nSAVE_CONFIG", fmt::join(save_configs, "\n")));
+  ws.gcode_script(fmt::format("{}", fmt::join(lines, "\n")));
 }
