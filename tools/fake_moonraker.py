@@ -13,6 +13,7 @@ printer. Needs the websockets package: pip install websockets
     python3 tools/fake_moonraker.py 240 240 --reject   # reject every command
     python3 tools/fake_moonraker.py 240 240 --reject --burst
     python3 tools/fake_moonraker.py --mesh bowl        # pick a bed mesh shape
+    python3 tools/fake_moonraker.py 25 0 --heater-hysteresis 3
     python3 tools/fake_moonraker.py --wiper            # pretend WIPE_NOZZLE exists
     python3 tools/fake_moonraker.py --shaper           # run resonance tests
     python3 tools/fake_moonraker.py --shaper fail      # and have them fail
@@ -30,6 +31,10 @@ the panel does not list gets in front of it, and --no-shaper-config withholds
 the config sections the panel checks before offering to calibrate.
 
 Received gcode is appended to $GCODE_LOG, default /tmp/guppy_gcode_received.txt.
+
+Heaters follow their targets instead of reporting fixed temperatures. The
+default hysteresis band is 2C; --extruder-heat-rate, --bed-heat-rate,
+--extruder-cool-rate, --bed-cool-rate and --heater-hysteresis tune the model.
 
 --print [complete|cancelled|error] walks a print from standby to that ending,
 over --print-seconds seconds, default 30. It reports a rising Z as it goes, so
@@ -153,6 +158,31 @@ def _mode_value(name, default, choices):
               f"choices: {', '.join(choices)}", flush=True)
         return default
     return value
+
+
+def _float_arg(name, default):
+    try:
+        return float(_arg_value(name, str(default)))
+    except ValueError:
+        print(f"invalid {name}, using {default}", flush=True)
+        return default
+
+
+HEATER_AMBIENT = _float_arg("--ambient-temp", 25.0)
+HEATER_HYSTERESIS = max(0.1, _float_arg("--heater-hysteresis", 2.0))
+HEATER_PROFILES = {
+    "extruder": {
+        "heat_rate": max(0.1, _float_arg("--extruder-heat-rate", 5.0)),
+        "cool_rate": max(0.1, _float_arg("--extruder-cool-rate", 1.0)),
+        "max_temp": 350.0,
+    },
+    "heater_bed": {
+        "heat_rate": max(0.1, _float_arg("--bed-heat-rate", 1.0)),
+        "cool_rate": max(0.1, _float_arg("--bed-cool-rate", 0.25)),
+        "max_temp": 130.0,
+    },
+}
+CONNECTED_CLIENTS = set()
 
 
 # Pretend klipper_tmc_autotune is installed, which the TMC Autotune panel
@@ -429,7 +459,7 @@ def write_png(path, width, height, axis):
 
 STATUS = {
     "extruder": {"temperature": TEMP, "target": TARGET, "power": 0.0},
-    "heater_bed": {"temperature": 25.0, "target": 0.0, "power": 0.0},
+    "heater_bed": {"temperature": HEATER_AMBIENT, "target": 0.0, "power": 0.0},
     "configfile": {
         "settings": {"extruder": EXTRUDER_SETTINGS,
                      "printer": {"max_velocity": 800.0, "max_accel": 20000.0,
@@ -1005,6 +1035,133 @@ def set_pin_effect_of(script):
     return [{obj: {"value": STATUS[obj]["value"]}}]
 
 
+def heater_effect_of(script):
+    """Apply the heater target commands used by the UI and report their deltas."""
+    changed = {}
+
+    def set_target(name, value):
+        heater = STATUS[name]
+        profile = HEATER_PROFILES[name]
+        target = max(0.0, min(profile["max_temp"], value))
+        power = heater["power"]
+        half_band = HEATER_HYSTERESIS / 2
+        if target <= HEATER_AMBIENT:
+            power = 0.0
+        elif heater["temperature"] < target - half_band:
+            power = 1.0
+        elif heater["temperature"] > target + half_band:
+            power = 0.0
+
+        update = changed.setdefault(name, {})
+        if target != heater["target"]:
+            heater["target"] = target
+            update["target"] = target
+        if power != heater["power"]:
+            heater["power"] = power
+            update["power"] = power
+
+    for line in script.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        command = words[0].upper()
+        args = {}
+        for word in words[1:]:
+            if "=" in word:
+                key, value = word.split("=", 1)
+                args[key.upper()] = value
+            elif word[:1].isalpha():
+                args[word[0].upper()] = word[1:]
+
+        if command == "SET_HEATER_TEMPERATURE":
+            name = args.get("HEATER", "").lower()
+            target = args.get("TARGET")
+            if name in HEATER_PROFILES and target is not None:
+                try:
+                    set_target(name, float(target))
+                except ValueError:
+                    continue
+        elif command in ("M104", "M109", "M140", "M190"):
+            name = "heater_bed" if command in ("M140", "M190") else "extruder"
+            if "S" in args:
+                try:
+                    set_target(name, float(args["S"]))
+                except ValueError:
+                    continue
+        elif command == "TURN_OFF_HEATERS":
+            for name in HEATER_PROFILES:
+                set_target(name, 0.0)
+
+    return [{name: update} for name, update in changed.items() if update]
+
+
+def update_heaters(elapsed):
+    """Advance simple bang-bang heater control with a visible hysteresis band."""
+    delta = {}
+    half_band = HEATER_HYSTERESIS / 2
+    for name, profile in HEATER_PROFILES.items():
+        heater = STATUS[name]
+        temperature = heater["temperature"]
+        target = heater["target"]
+        power = heater["power"]
+
+        if target <= HEATER_AMBIENT:
+            power = 0.0
+            temperature = max(
+                HEATER_AMBIENT,
+                temperature - profile["cool_rate"] * elapsed,
+            )
+        else:
+            if power > 0.5 and temperature >= target + half_band:
+                power = 0.0
+            elif power <= 0.5 and temperature <= target - half_band:
+                power = 1.0
+
+            if power > 0.5:
+                temperature = min(
+                    target + half_band,
+                    temperature + profile["heat_rate"] * elapsed,
+                )
+            else:
+                temperature = max(
+                    target - half_band,
+                    temperature - profile["cool_rate"] * elapsed,
+                )
+
+        temperature = round(temperature, 1)
+        update = {}
+        if temperature != heater["temperature"]:
+            heater["temperature"] = temperature
+            update["temperature"] = temperature
+        if power != heater["power"]:
+            heater["power"] = power
+            update["power"] = power
+        if update:
+            delta[name] = update
+    return delta
+
+
+async def heater_status_loop():
+    previous = time.monotonic()
+    while True:
+        await asyncio.sleep(1.0)
+        current = time.monotonic()
+        elapsed = min(current - previous, 2.0)
+        previous = current
+        delta = update_heaters(elapsed)
+        if not delta:
+            continue
+        message = json.dumps({
+            "jsonrpc": "2.0", "method": "notify_status_update",
+            "params": [delta, time.time()],
+        })
+        for client in tuple(CONNECTED_CLIENTS):
+            try:
+                await client.send(message)
+            except Exception:
+                CONNECTED_CLIENTS.discard(client)
+
+
 def bed_mesh_effect_of(script):
     """Status deltas a bed mesh command would produce, applied to STATUS too.
 
@@ -1303,20 +1460,7 @@ async def run_print(ws):
 
 async def handler(ws):
     print("guppyscreen connected", flush=True)
-
-    async def push_status():
-        # Keep re-announcing so the panel's cached values stay fresh.
-        while True:
-            await asyncio.sleep(1.0)
-            try:
-                await ws.send(json.dumps({
-                    "jsonrpc": "2.0", "method": "notify_status_update",
-                    "params": [{"extruder": {"temperature": TEMP, "target": TARGET}},
-                               time.time()]}))
-            except Exception:
-                return
-
-    pusher = asyncio.create_task(push_status())
+    CONNECTED_CLIENTS.add(ws)
     printer = asyncio.create_task(run_print(ws)) if PRINT_RUN else None
     dropper = asyncio.create_task(drop_a_file(ws)) if FILE_DROP_SECONDS else None
     announcer = asyncio.create_task(announce_no_change(ws)) if ANNOUNCE_EVERY else None
@@ -1342,7 +1486,8 @@ async def handler(ws):
                 gcode_error = (gcode_error or offset_error
                                or guppy_module_effect_of(script))
                 deltas += (bed_mesh_effect_of(script) + set_pin_effect_of(script)
-                           + offset_deltas + macro_effect_of(script))
+                           + heater_effect_of(script) + offset_deltas
+                           + macro_effect_of(script))
                 for delta in deltas:
                     await ws.send(json.dumps({
                         "jsonrpc": "2.0", "method": "notify_status_update",
@@ -1374,7 +1519,7 @@ async def handler(ws):
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg["id"],
                                           "result": result_for(method, params)}))
     finally:
-        pusher.cancel()
+        CONNECTED_CLIENTS.discard(ws)
         if printer is not None:
             printer.cancel()
         if dropper is not None:
@@ -1414,8 +1559,12 @@ async def main():
     print(f"fake moonraker on 7125, extruder {TEMP}/{TARGET}, "
           f"mesh {MESH_SHAPE}{shaper}", flush=True)
     print(f"gcodes root {GCODES_ROOT}", flush=True)
-    async with websockets.serve(handler, "127.0.0.1", 7125,
-                                process_request=check_api_key):
-        await asyncio.Future()
+    heaters = asyncio.create_task(heater_status_loop())
+    try:
+        async with websockets.serve(handler, "127.0.0.1", 7125,
+                                    process_request=check_api_key):
+            await asyncio.Future()
+    finally:
+        heaters.cancel()
 
 asyncio.run(main())

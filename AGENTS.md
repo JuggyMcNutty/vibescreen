@@ -767,6 +767,22 @@ python3 tools/fake_moonraker.py --tmc-autotune    # or no-loader, no-helper
 python3 tools/fake_moonraker.py --unhomed         # Manual Z, see below
 ```
 
+For a one-command simulator smoke test, run `tools/run-simulator.sh`. It starts
+the fake Moonraker on `127.0.0.1:7125`, refuses a non-local simulator config or
+an already occupied port, and stops the fake when the simulator exits. It does
+not start Klipper or connect to a real printer. Received G-code and fake-server
+output are written under `build/bin/`. If the system Python lacks `websockets`,
+the launcher installs it in a venv under the user's cache directory.
+
+The fake starts cold in that launcher. Heater targets from
+`SET_HEATER_TEMPERATURE`, `M104`/`M109` and `M140`/`M190` are acted on; the
+extruder and bed temperatures then rise or fall once a second. Power switches
+across a 2 C hysteresis band by default, so the status panel shows both the
+ramp and thermostat cycling without a printer. Tune it with
+`--heater-hysteresis`, `--extruder-heat-rate`, `--extruder-cool-rate`,
+`--bed-heat-rate`, `--bed-cool-rate` and `--ambient-temp` on
+`tools/fake_moonraker.py`.
+
 That second line is the file panel's hard case, and every part of it earns its
 place. `--files` pads the list until it scrolls, since a list that cannot
 scroll cannot show a scroll position being lost. `--drop-every` keeps announcing
