@@ -37,27 +37,28 @@ LVGL 10 и mbedTLS 4 не совместимы с текущими исходн�
 
 ## Что изменено
 
-1. Выставлены проверенные совместимые pins подмодулей, перечисленные выше.
+- Выставлены проверенные совместимые pins подмодулей, перечисленные выше.
    После этого все четыре патча из `patches/` применяются или распознаются как
    уже применённые через `scripts/apply-patches.sh`.
-2. Существующее локальное изменение `libhv/ssl/mbedtls.c` сохранено. Оно
+- Существующее локальное изменение `libhv/ssl/mbedtls.c` сохранено. Оно
    обрабатывает CA bundle в TLS backend и не было заменено при смене pin.
-3. В `tools/fake_moonraker.py` добавлена тепловая модель для `extruder` и
-   `heater_bed`. Fake обрабатывает `SET_HEATER_TEMPERATURE`, `M104`, `M109`,
-  `M140`, `M190` и `TURN_OFF_HEATERS`, меняет targets и рассылает обновления
-  температур и мощности через `notify_status_update`.
-4. Нагрев идёт с конечной скоростью. Мощность включается/выключается в полосе
+- В `tools/fake_moonraker.py` добавлена тепловая модель для `extruder` и
+  `heater_bed`.
+  Fake обрабатывает `SET_HEATER_TEMPERATURE`, `M104`, `M109`, `M140`, `M190` и
+  `TURN_OFF_HEATERS`, меняет targets и рассылает обновления через
+  `notify_status_update`.
+- Нагрев идёт с конечной скоростью. Мощность включается/выключается в полосе
   гистерезиса 2 C. Начальные значения модели: ambient 25 C, скорость нагрева
   сопла 5 C/с, стола 1 C/с; охлаждения 1 C/с и 0.25 C/с соответственно.
   Параметры настраиваются CLI-флагами fake.
-5. Добавлен `tools/run-simulator.sh`. Он требует simulator config с адресом
+- Добавлен `tools/run-simulator.sh`. Он требует simulator config с адресом
   `127.0.0.1:7125`, отказывается работать при занятом порте, запускает fake с
   cold-start 25/0 C и bowl mesh, пишет журналы в `build/bin/` и останавливает
   fake при выходе из GUI. Если `websockets` отсутствует, создаёт venv в cache.
-6. Проверка WSL показала, что процессов Klipper/Moonraker, systemd units и их
+- Проверка WSL показала, что процессов Klipper/Moonraker, systemd units и их
   конфигов там нет. Launcher использует fake Moonraker на loopback; настоящий
   Klipper не запускается и к принтеру соединения нет.
-7. `AGENTS.md` дополнен инструкциями по launcher и thermal model.
+- `AGENTS.md` дополнен инструкциями по launcher и thermal model.
 
 ## Ошибки, найденные при восстановлении
 
@@ -98,6 +99,7 @@ MIPS ELF проверен как ELF32 little-endian `EXEC`, flags `0x50001007`,
 `INTERP`/`DYNAMIC`. Simulator собран как x86-64 PIE и использует системную
 SDL2 2.32.10. Автоматически созданный `build/bin/guppyconfig.json` прошёл
 проверку JSON.
+
 Все targets используют один путь `build/bin/guppyscreen`; сейчас по нему
 находится x86-64 simulator.
 
