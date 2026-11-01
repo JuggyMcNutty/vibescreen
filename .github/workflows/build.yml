@@ -334,6 +334,8 @@ jobs:
             so running it will not pick this up. Use the installer to switch
             across; it keeps your existing `guppyconfig.json`.
 
+            **Локализация интерфейса на русский язык находится в разработке.**
+
             ### What changed
 
             ${{ steps.changes.outputs.log }}
