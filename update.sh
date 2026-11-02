@@ -15,12 +15,15 @@
 set -u
 
 GUPPY_DIR=$(cd "$(dirname "$0")" && pwd)
+PRINTER_DATA_DIR=$(dirname "$GUPPY_DIR")
+BACKUP_DIR=$PRINTER_DATA_DIR/guppyify-backup
+ORIGINAL_BACKUP=$BACKUP_DIR/guppyscreen-original.tar.gz
 VERSION_FILE=$GUPPY_DIR/.version
 CUSTOM_UPGRADE_SCRIPT=$GUPPY_DIR/custom_upgrade.sh
 TARBALL=/tmp/guppyscreen-update.tar.gz
 
 # Overridable so a fork or a test can point somewhere else.
-REPO=${GUPPY_UPDATE_REPO:-JuggyMcNutty/vibescreen}
+REPO=${GUPPY_UPDATE_REPO:-Vasinok/vibescreen_ru}
 
 FORCE=false
 # --check answers "is there a newer release" and installs nothing. The UI polls
@@ -249,23 +252,23 @@ if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
     exit 0
 fi
 
-# Two version shapes exist and only one of them is protected:
+# Published releases update normally. Development and Beta builds are protected:
 #
 #   dev-<sha>        built locally by scripts/build.sh, published nowhere
+#   *.beta_test      distributed separately, not published as a release
 #   <date>-<sha>     published by CI from main, a real artifact
 #
-# Replacing a local build throws away whatever was being tested, which is
-# almost never what someone wants from a button on the printer. Rolling builds
-# are published artifacts and update normally.
+# Replacing a local test build throws away what is being tested. The UI checker
+# reports these as devbuild, and replacement requires the explicit --force.
 case "$CURRENT_VERSION" in
-    dev-*)
+    dev-*|*.beta_test)
         if [ "$FORCE" != true ]; then
             check_result devbuild "$LATEST_VERSION"
-            echo "This is a development build ($CURRENT_VERSION), refusing to replace it"
+            echo "This is a local test build ($CURRENT_VERSION), refusing to replace it"
             echo "with release $LATEST_VERSION. Re-run with --force if that is what you want."
             exit 0
         fi
-        echo "Development build, but --force given."
+        echo "Local test build, but --force given."
         ;;
 esac
 
@@ -294,9 +297,45 @@ if ! tar tzf "$TARBALL" > /dev/null 2>&1; then
 fi
 
 if ! tar tzf "$TARBALL" 2>/dev/null | grep -q 'guppyscreen/guppyscreen$'; then
-    echo "Archive does not contain guppyscreen/guppyscreen, leaving the install alone."
+    echo "Archive does not contain the VibeScreen binary, leaving the install alone."
     rm -f "$TARBALL"
     exit 1
+fi
+
+if ! tar tzf "$TARBALL" 2>/dev/null | grep -q 'guppyscreen/restore-guppyscreen.sh$'; then
+    echo "Archive has no recovery script, leaving the install alone."
+    rm -f "$TARBALL"
+    exit 1
+fi
+
+
+# Keep the first installation so one recovery command always returns to it.
+if [ -f "$ORIGINAL_BACKUP" ]; then
+    if ! tar tzf "$ORIGINAL_BACKUP" 2>/dev/null | grep -qx 'guppyscreen/guppyscreen'; then
+        echo "The saved VibeScreen backup is invalid, leaving the install alone."
+        rm -f "$TARBALL"
+        exit 1
+    fi
+else
+    mkdir -p "$BACKUP_DIR"
+    BACKUP_TEMP=$ORIGINAL_BACKUP.tmp.$$
+    if ! (umask 077 && tar czf "$BACKUP_TEMP" -C "$PRINTER_DATA_DIR" "$(basename "$GUPPY_DIR")"); then
+        rm -f "$BACKUP_TEMP" "$TARBALL"
+        echo "Could not save the current VibeScreen, leaving the install alone."
+        exit 1
+    fi
+    if ! tar tzf "$BACKUP_TEMP" 2>/dev/null | grep -qx 'guppyscreen/guppyscreen'; then
+        rm -f "$BACKUP_TEMP" "$TARBALL"
+        echo "Could not verify the saved VibeScreen, leaving the install alone."
+        exit 1
+    fi
+    chmod 600 "$BACKUP_TEMP"
+    if ! mv "$BACKUP_TEMP" "$ORIGINAL_BACKUP"; then
+        rm -f "$BACKUP_TEMP" "$TARBALL"
+        echo "Could not install the verified backup, leaving the install alone."
+        exit 1
+    fi
+    echo "Saved the original VibeScreen in $ORIGINAL_BACKUP"
 fi
 
 echo "Installing $LATEST_VERSION"
@@ -307,6 +346,14 @@ if ! tar xzf "$TARBALL" -C "$GUPPY_DIR/.."; then
 fi
 rm -f "$TARBALL"
 
+if ! cp -p "$GUPPY_DIR/restore-guppyscreen.sh" "$PRINTER_DATA_DIR/restore-guppyscreen.sh"; then
+    echo "Update installed, but could not install the recovery command."
+    exit 1
+fi
+chmod 700 "$PRINTER_DATA_DIR/restore-guppyscreen.sh"
+
+echo "Recovery command installed successfully."
+
 
 echo "Refreshing the Klipper macros and modules"
 refresh_klipper_files
@@ -316,7 +363,7 @@ if [ -f "$CUSTOM_UPGRADE_SCRIPT" ]; then
     "$CUSTOM_UPGRADE_SCRIPT"
 fi
 
-echo "Updated Guppy Screen to $LATEST_VERSION"
+echo "Updated VibeScreen to $LATEST_VERSION"
 
 if grep -Fqs "ID=buildroot" /etc/os-release; then
     [ -f /etc/init.d/S99guppyscreen ] && /etc/init.d/S99guppyscreen stop > /dev/null 2>&1

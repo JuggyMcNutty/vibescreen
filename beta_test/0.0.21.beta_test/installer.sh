@@ -99,7 +99,7 @@ if [ -n "$LOCAL_ARCHIVE" ]; then
     }
 else
     # Every push to main publishes its own release, so latest is the newest build.
-    ASSET_URL="https://github.com/JuggyMcNutty/vibescreen/releases/latest/download/$ASSET_NAME.tar.gz"
+    ASSET_URL="https://github.com/Vasinok/vibescreen_ru/releases/latest/download/$ASSET_NAME.tar.gz"
 
     printf "${green} Downloading asset: $ASSET_NAME.tar.gz ${white}\n"
 

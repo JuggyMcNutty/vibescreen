@@ -23,7 +23,7 @@ CUSTOM_UPGRADE_SCRIPT=$GUPPY_DIR/custom_upgrade.sh
 TARBALL=/tmp/guppyscreen-update.tar.gz
 
 # Overridable so a fork or a test can point somewhere else.
-REPO=${GUPPY_UPDATE_REPO:-JuggyMcNutty/vibescreen}
+REPO=${GUPPY_UPDATE_REPO:-Vasinok/vibescreen_ru}
 
 FORCE=false
 # --check answers "is there a newer release" and installs nothing. The UI polls
