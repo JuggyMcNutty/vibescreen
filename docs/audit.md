@@ -359,13 +359,15 @@ disk for a thumbnail.
 The frequency is the part that is not obvious, and one half of the explanation
 is measured and the other is not. Measured: `subscribe` did `root.clear()`,
 which threw away every cached `Tree::metadata`, so each refresh re-requested
-`server.files.metadata` for whatever it had just selected. Not measured, because
-it wants a real moonraker rather than the fake: whether moonraker then announces
-a filelist change for the scan it does to answer, which would close the loop and
-mean the announcements the user sees are largely the panel's own. Worth checking
-against the development printer if this ever comes back. Nothing in the fix
-rests on it either way; the cache is worth keeping for the round trip and the
-thumbnail decode it saves on its own.
+`server.files.metadata` for whatever it had just selected. This entry used to
+leave open whether moonraker announces a filelist change for a scan it does to
+answer, which would have closed the loop and made the announcements largely the
+panel's own. It does no scan to answer. `server.files.metadata` reads what is
+stored and returns a 404 for anything else. That was settled from Moonraker's
+source at the version the development K1 Max runs, see C26, so the loop never
+existed. A scan Moonraker does for other reasons is announced, through the
+thumbnails it writes, which is the no-op case this fix handles. The cache is
+worth keeping anyway, for the round trip and the thumbnail decode it saves.
 
 `show_dir` now takes why it is redrawing. A refetch builds the row strings
 first and returns without touching the table when they match what is already

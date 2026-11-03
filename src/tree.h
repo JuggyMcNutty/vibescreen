@@ -119,9 +119,7 @@ Tree(const std::string &filename, const std::string &path, uint32_t modified)
 
   // Metadata survives the rebuild in PrintPanel::subscribe, which throws the
   // whole tree away and asks moonraker for the list again. Without this every
-  // refresh re-requests server.files.metadata for whatever is on screen, and
-  // moonraker announces a filelist change whenever it has to scan a file it has
-  // no metadata for, so the refresh and the request feed each other. See
+  // refresh re-requests server.files.metadata for whatever is on screen. See
   // docs/audit.md C23.
   //
   // Keyed by full_path and qualified by date_modified, so a file replaced under

@@ -228,9 +228,8 @@ void PrintPanel::subscribe() {
     std::string cur_file_path = cur_file != NULL ? cur_file->full_path : "";
 
     // The tree is thrown away and rebuilt below, which used to take every
-    // cached metadata with it. Moonraker announces a filelist change when it
-    // has to scan a file it holds no metadata for, so a refresh that discards
-    // the cache asks again and is told again. See docs/audit.md C23.
+    // cached metadata with it, and a refresh that discards the cache has to ask
+    // again. See docs/audit.md C23.
     std::map<std::string, std::pair<uint32_t, json>> metadata;
     root.collect_metadata(metadata);
 

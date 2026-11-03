@@ -788,11 +788,12 @@ That second line is the file panel's hard case, and every part of it earns its
 place. `--files` pads the list until it scrolls, since a list that cannot
 scroll cannot show a scroll position being lost. `--drop-every` keeps announcing
 new files, which is a slicer sending a batch. `--announce-every` announces a
-change that changes nothing, which is what moonraker sends after scanning a
-file's metadata and is most of what the panel really receives. See
-`docs/audit.md` C23 for why the third one matters most: asking for metadata is
-what makes moonraker scan, so a panel that re-asks on every refresh keeps its
-own announcements coming.
+change that changes nothing. Moonraker sends those for the thumbnails a scan
+writes, which `server.files.list` leaves out because it lists gcode files only.
+See `docs/audit.md` C23 for why the third one matters most: a panel that
+redraws for one loses the user's place. Asking for metadata does not make
+moonraker scan, whatever this file used to say. `server.files.metadata` returns
+what moonraker has stored, or a 404. See C26.
 
 `--layer-info none` is worth knowing about. By default the fake reports layer
 numbers in `print_stats.info`, and our K1 Max never does, because no file on it

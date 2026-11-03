@@ -45,9 +45,9 @@ way Moonraker does after an upload. --drop-every <seconds> keeps doing it, which
 is what a slicer sending a batch looks like from here.
 
 --announce-every <seconds> announces a change that changes nothing, by
-re-sending an existing file. Moonraker does this whenever it scans metadata it
-did not already hold, and the file panel has to treat it as a no-op: issue #5
-was the list jumping back to the top on every one of them.
+re-sending an existing file. Moonraker does this for the thumbnails a scan
+writes, which server.files.list leaves out, and the file panel has to treat it
+as a no-op: issue #5 was the list jumping back to the top on every one of them.
 
 --files <n> pads the gcode list out to n entries, since two files cannot scroll
 and a list that cannot scroll cannot show a scroll position being lost.
@@ -311,9 +311,8 @@ if FILE_DROP_EVERY and not FILE_DROP_SECONDS:
     # one rather than needing --drop-file beside it to arm the task.
     FILE_DROP_SECONDS = FILE_DROP_EVERY
 
-# Announce a filelist change that does not change the list. Moonraker sends one
-# whenever it has had to scan a file's metadata, so the panel sees these without
-# anyone uploading anything, and rewriting the table for one is issue #5.
+# Announce a filelist change that does not change the list. Moonraker sends these
+# for the thumbnails a scan writes, and rewriting the table for one is issue #5.
 ANNOUNCE_EVERY = float(_arg_value("--announce-every", "0")) if "--announce-every" in sys.argv else 0
 
 # Send fake_benchy.gcode again under the same name, the way a slicer does after
@@ -1377,12 +1376,12 @@ async def klippy_restart(ws):
 async def announce_no_change(ws):
     """Announce a filelist change that leaves the list exactly as it was.
 
-    This is the shape Moonraker sends after scanning a file's metadata, and it
-    is the majority of what the panel receives, because asking for metadata is
-    what makes moonraker scan. The correct response to one is to do nothing at
-    all: not to re-sort, not to scroll, not to reload the thumbnail, and above
-    all not to ask for the metadata again, which would bring the next one
-    straight back.
+    This is the shape Moonraker sends for the thumbnails a scan writes, and the
+    majority of what the panel receives. The correct response to one is to do
+    nothing at all: not to re-sort, not to scroll, not to reload the thumbnail,
+    and not to ask for the metadata again. Asking does not make Moonraker scan,
+    which this used to say it did: server.files.metadata answers from what is
+    stored, or with a 404.
     """
     while True:
         await asyncio.sleep(ANNOUNCE_EVERY)
