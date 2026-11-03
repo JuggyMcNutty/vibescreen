@@ -765,6 +765,9 @@ python3 tools/fake_moonraker.py --api-key secret  # refuse an anonymous handshak
 python3 tools/fake_moonraker.py --unhomed --zoffset-macro   # Fine Tune's Z, see below
 python3 tools/fake_moonraker.py --tmc-autotune    # or no-loader, no-helper
 python3 tools/fake_moonraker.py --unhomed         # Manual Z, see below
+python3 tools/fake_moonraker.py --usb             # or fail, old: an unscanned stick
+python3 tools/fake_moonraker.py --reslice 9       # resend a file under its own name
+python3 tools/fake_moonraker.py --klippy-restart 8  # FIRMWARE_RESTART, socket kept
 ```
 
 That second line is the file panel's hard case, and every part of it earns its
@@ -805,6 +808,30 @@ abandons the rest of the script, so a jog refused after `G91` leaves the fake in
 relative mode. It also serves Creality's `PRINT_PREPARED` and the `prepare`
 flag on `START_PRINT`. `--no-force-move` and `--no-print-prepared` take those
 away, the way a printer without them would be.
+
+`--usb` is the file browser's USB folder, issue #8. It puts three files under
+`usb/sda1`, where `installer.sh`'s symlink shows a stick. Like Moonraker for a
+file it has not scanned, it answers `server.files.metadata` for them with a
+404 until `server.files.metascan` has scanned them, which takes two seconds.
+`fail` scans and extracts nothing, and `old` refuses metascan as Moonraker did
+before v0.8. The stick's previews are blue and every other file's are orange,
+so a stale preview is wrong on sight. See `docs/audit.md` C26.
+
+`--reslice <seconds>` sends `fake_benchy.gcode` again that long after
+connecting, as a slicer does after a reslice. It gets a new modified time and
+green previews written at the old paths. LVGL caches decoded images by path,
+so a panel that does not drop the old decode shows the old picture. See C27.
+
+The fake renders each preview once per size and colour into
+`<gcodes root>/.fake_renders/` and copies it into place on every start. A
+preview a run recoloured is therefore put back on the next run.
+
+`--klippy-restart <seconds>` sends `notify_klippy_disconnected` and then, a
+second later, `notify_klippy_ready`, as `FIRMWARE_RESTART` and `SAVE_CONFIG` do,
+over a websocket that stays open. Guppyscreen runs its whole connected handler
+again for that, while every reply it is waiting on still arrives. Restarting
+the fake process is the other case, a real reconnect, and those replies never
+come.
 
 **The wifi panel does not go through Moonraker at all**, so the fake above
 cannot reach it: it opens wpa_supplicant's control socket and speaks its text

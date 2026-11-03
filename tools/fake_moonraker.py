@@ -52,6 +52,26 @@ was the list jumping back to the top on every one of them.
 --files <n> pads the gcode list out to n entries, since two files cannot scroll
 and a list that cannot scroll cannot show a scroll position being lost.
 
+--reslice <seconds> sends fake_benchy.gcode again that long after connect, as an
+upload replacing a file of the same name does: a new modified time, new
+previews at the same paths, drawn green, and a create_file announcement.
+
+--klippy-restart <seconds> restarts Klipper that long after connect, the way
+FIRMWARE_RESTART or SAVE_CONFIG does: notify_klippy_disconnected, then
+notify_klippy_ready a second later, over the same websocket. Guppyscreen runs
+its connected handler again for that, while every reply it is waiting on still
+arrives.
+
+--usb [scan|fail|old] adds a USB stick's files under usb/sda1, where
+installer.sh's gcodes/usb symlink to /tmp/udisk puts one on a K1, and leaves
+them unscanned. Moonraker answers server.files.metadata with a 404 for any
+file it has not scanned, and server.files.metascan is what scans one on
+demand. scan answers that after two seconds, the way a K1 takes a while over a
+big file. fail answers with the size and date Moonraker falls back on when
+extraction fails, so no preview. old refuses metascan, as Moonraker did before
+v0.8. The stick's previews are blue where every other file's is orange, so a
+panel still showing the previous file's cannot pass for the right one. Issue #8.
+
 --belts [normal|slow|fail|timeout|empty] answers the belts panel's half-axis
 sweeps and its analysis, ending the way the mode says.
 
@@ -148,6 +168,8 @@ def _mode_value(name, default, choices):
     if name not in sys.argv:
         return None
     value = _arg_value(name, default)
+    if value.startswith("-"):
+        return default
     if value not in choices:
         print(f"unknown {name} {value}, using {default}. "
               f"choices: {', '.join(choices)}", flush=True)
@@ -293,6 +315,15 @@ if FILE_DROP_EVERY and not FILE_DROP_SECONDS:
 # whenever it has had to scan a file's metadata, so the panel sees these without
 # anyone uploading anything, and rewriting the table for one is issue #5.
 ANNOUNCE_EVERY = float(_arg_value("--announce-every", "0")) if "--announce-every" in sys.argv else 0
+
+# Send fake_benchy.gcode again under the same name, the way a slicer does after
+# a reslice. Its previews keep their paths and change their pixels, which is
+# what an image cache keyed by path gets wrong.
+RESLICE_SECONDS = float(_arg_value("--reslice", "0")) if "--reslice" in sys.argv else 0
+
+# Restart Klipper under a websocket that stays open. See --klippy-restart above.
+KLIPPY_RESTART_SECONDS = (float(_arg_value("--klippy-restart", "0"))
+                          if "--klippy-restart" in sys.argv else 0)
 
 # Global rather than per connection. Reconnecting used to restart the numbering
 # and re-announce paths the list already had, which is a change that changes
@@ -610,6 +641,25 @@ for _n in range(len(FILES), FILE_COUNT):
                   "modified": time.time() - (FILE_COUNT - _n) * 3600,
                   "size": 100000 + _n * 1000})
 
+# A stick in the K1's USB port. See --usb above. The panel opens on the root
+# and selects its newest file, so that file's preview is the one issue #8 saw
+# left on screen after picking a file from the stick.
+USB_MODES = ("scan", "fail", "old")
+USB = _mode_value("--usb", "scan", USB_MODES)
+USB_DIR = "usb/sda1"
+UNSCANNED = set()
+if USB:
+    for _n, _name in enumerate(("stick_bracket.gcode", "stick_hook.gcode",
+                                "stick_vase.gcode")):
+        _path = f"{USB_DIR}/{_name}"
+        FILES.append({"path": _path, "modified": time.time() - (7 + _n) * 86400,
+                      "size": 731136 + _n * 52224})
+        UNSCANNED.add(_path)
+# How long a scan takes, and the lock Moonraker's sync_lock stands for: it
+# scans one file at a time, so a second metascan waits for the first.
+SCAN_SECONDS = 2.0
+SCAN_LOCK = None
+
 # Every slicer worth using embeds preview images now, and the file browser and
 # the print status panel both draw one, so a fake without them exercises only
 # the path where there is nothing to show.
@@ -643,8 +693,13 @@ def _boat_voxels():
     return v
 
 
-def _thumbnail_png(size):
-    """Render the boat isometrically and return PNG bytes.
+ORANGE = (0xE8, 0x83, 0x4A)
+BLUE = (0x4A, 0x8F, 0xE8)
+GREEN = (0x4F, 0xC0, 0x6A)
+
+
+def _thumbnail_png(size, base=ORANGE):
+    """Render the boat isometrically in a filament colour and return PNG bytes.
 
     Written out by hand because the point of this file is to need nothing
     installed but websockets. Supersampled four times and box filtered, which
@@ -654,7 +709,6 @@ def _thumbnail_png(size):
     px = [[(0, 0, 0, 0)] * ss for _ in range(ss)]
     tw, th, tz = ss * 0.072, ss * 0.041, ss * 0.062
     ox, oy = ss * 0.47, ss * 0.34
-    base = (0xE8, 0x83, 0x4A)                # a filament orange
 
     def fill(poly, shade):
         colour = tuple(int(c * shade) for c in base) + (255,)
@@ -718,16 +772,43 @@ def thumbnails_for(path):
 
 
 def write_thumbnails():
-    """Put the preview images on disk where the local path will look."""
+    """Put the preview images on disk where the local path will look.
+
+    The stick's are written here too, although Moonraker writes them during the
+    scan. The panel only looks for one once metadata names it, so it cannot
+    tell, and rendering inside a scan would stall every other reply meanwhile.
+    """
     for f in FILES:
-        d = os.path.join(GCODES_ROOT, os.path.dirname(f["path"]), ".thumbs")
-        os.makedirs(d, exist_ok=True)
-        for thumb in thumbnails_for(f["path"]):
-            dest = os.path.join(GCODES_ROOT, os.path.dirname(f["path"]),
-                                thumb["relative_path"])
-            if not os.path.exists(dest):
-                with open(dest, "wb") as fh:
-                    fh.write(_thumbnail_png(thumb["width"]))
+        write_previews(f, BLUE if f["path"] in UNSCANNED else ORANGE)
+    if RESLICE_SECONDS:
+        for n in THUMB_SIZES:
+            _thumbnail_bytes(n, GREEN)
+
+
+def _thumbnail_bytes(size, colour):
+    """One preview's PNG, rendered once per size and colour and kept on disk.
+
+    Rendering is slow in pure Python, so it is cached. The cache is keyed by
+    colour so that a preview can be rewritten every run, and a file the last
+    run resliced does not stay green.
+    """
+    path = os.path.join(GCODES_ROOT, ".fake_renders",
+                        "%02x%02x%02x-%d.png" % (colour + (size,)))
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(_thumbnail_png(size, colour))
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def write_previews(f, colour):
+    for thumb in thumbnails_for(f["path"]):
+        dest = os.path.join(GCODES_ROOT, os.path.dirname(f["path"]),
+                            thumb["relative_path"])
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(_thumbnail_bytes(thumb["width"], colour))
 
 
 def write_klipper_tree():
@@ -781,6 +862,62 @@ def guppy_module_effect_of(script):
     return None
 
 
+class RpcError(Exception):
+    """An error reply. result_for raises it, and the handler sends the code."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+# Files on the stick whose scan extracted nothing, under --usb fail.
+EXTRACT_FAILED = set()
+
+
+def metadata_for(f):
+    """What Moonraker holds for one scanned file.
+
+    A failed extraction still leaves a record behind: once its retries run out
+    Moonraker stores the size and date from the filesystem and nothing else, and
+    answers with that, so a file that would not parse reads as one with no
+    preview rather than as an error.
+    """
+    if f["path"] in EXTRACT_FAILED:
+        return {"size": f["size"], "modified": f["modified"],
+                "print_start_time": None, "job_id": None,
+                "filename": f["path"]}
+    return dict(f, estimated_time=int(PRINT_SECONDS),
+                layer_count=LAYER_COUNT,
+                first_layer_height=FIRST_LAYER_HEIGHT,
+                layer_height=LAYER_HEIGHT,
+                object_height=OBJECT_HEIGHT,
+                filament_total=4210.0,
+                filament_weight_total=12.56,
+                thumbnails=thumbnails_for(f["path"]))
+
+
+async def metascan(ws, msg_id, name):
+    """Scan one file on demand and answer, as server.files.metascan does.
+
+    Run as a task of its own because a scan takes SCAN_SECONDS and Moonraker
+    goes on answering everything else meanwhile. One at a time, behind the lock
+    that stands for Moonraker's.
+    """
+    async with SCAN_LOCK:
+        await asyncio.sleep(SCAN_SECONDS)
+        f = next((f for f in FILES if f["path"] == name), None)
+        if f is None:
+            reply = {"error": {"code": 404,
+                               "message": f"File '{name}' does not exist"}}
+        else:
+            if name in UNSCANNED and USB == "fail":
+                EXTRACT_FAILED.add(name)
+            UNSCANNED.discard(name)
+            reply = {"result": metadata_for(f)}
+    print(f"fake scanned {name}", flush=True)
+    await ws.send(json.dumps(dict({"jsonrpc": "2.0", "id": msg_id}, **reply)))
+
+
 def result_for(method, params):
     if method == "server.info":
         return {"klippy_connected": True, "klippy_state": "ready",
@@ -809,17 +946,18 @@ def result_for(method, params):
     if method == "server.files.list":
         return FILES
     if method == "server.files.metadata":
-        for f in FILES:
-            if f["path"] == params.get("filename"):
-                return dict(f, estimated_time=int(PRINT_SECONDS),
-                            layer_count=LAYER_COUNT,
-                            first_layer_height=FIRST_LAYER_HEIGHT,
-                            layer_height=LAYER_HEIGHT,
-                            object_height=OBJECT_HEIGHT,
-                            filament_total=4210.0,
-                            filament_weight_total=12.56,
-                            thumbnails=thumbnails_for(f["path"]))
-        return {}
+        name = params.get("filename")
+        f = next((f for f in FILES if f["path"] == name), None)
+        if f is None or name in UNSCANNED:
+            # Moonraker reads metadata from what it has stored and never scans
+            # to answer, so a file it has not scanned and a file it does not
+            # have get the same reply.
+            raise RpcError(404, f"Metadata not available for <{name}>")
+        return metadata_for(f)
+    if method == "server.files.metascan":
+        # Only reached under --usb old: otherwise the handler scans the file
+        # before answering. Moonraker before v0.8 has no such method.
+        raise RpcError(-32601, "Method not found")
     if method == "machine.system_info":
         return {"system_info": {"cpu_info": {"cpu_count": 2}}}
     return {}
@@ -1208,6 +1346,34 @@ async def drop_a_file(ws):
         await asyncio.sleep(FILE_DROP_EVERY)
 
 
+async def reslice(ws):
+    """Replace fake_benchy.gcode with a file of the same name, once.
+
+    Only the modified time and the previews change. The previews are written in
+    place, at the paths the old metadata named, which is what Moonraker leaves
+    behind after re-extracting them.
+    """
+    await asyncio.sleep(RESLICE_SECONDS)
+    f = next(f for f in FILES if f["path"] == "fake_benchy.gcode")
+    f["modified"] = time.time()
+    write_previews(f, GREEN)
+    await ws.send(json.dumps({
+        "jsonrpc": "2.0", "method": "notify_filelist_changed",
+        "params": [{"action": "create_file", "item": dict(f, root="gcodes")}]}))
+    print("fake resliced %s" % f["path"], flush=True)
+
+
+async def klippy_restart(ws):
+    """Restart Klipper once, leaving the websocket and Moonraker alone."""
+    await asyncio.sleep(KLIPPY_RESTART_SECONDS)
+    await ws.send(json.dumps({"jsonrpc": "2.0",
+                              "method": "notify_klippy_disconnected"}))
+    print("fake klippy disconnected", flush=True)
+    await asyncio.sleep(1.0)
+    await ws.send(json.dumps({"jsonrpc": "2.0", "method": "notify_klippy_ready"}))
+    print("fake klippy ready", flush=True)
+
+
 async def announce_no_change(ws):
     """Announce a filelist change that leaves the list exactly as it was.
 
@@ -1320,6 +1486,9 @@ async def handler(ws):
     printer = asyncio.create_task(run_print(ws)) if PRINT_RUN else None
     dropper = asyncio.create_task(drop_a_file(ws)) if FILE_DROP_SECONDS else None
     announcer = asyncio.create_task(announce_no_change(ws)) if ANNOUNCE_EVERY else None
+    reslicer = asyncio.create_task(reslice(ws)) if RESLICE_SECONDS else None
+    restarter = (asyncio.create_task(klippy_restart(ws))
+                 if KLIPPY_RESTART_SECONDS else None)
     # Held only so the tasks are not garbage collected while they run, which
     # asyncio does not otherwise prevent for a task nobody awaits.
     tasks = set()
@@ -1371,8 +1540,21 @@ async def handler(ws):
                             "error": {"code": -32602,
                                       "message": f"Extrude below minimum temp{detail}"}}))
                     continue
+                if method == "server.files.metascan" and USB != "old":
+                    task = asyncio.create_task(
+                        metascan(ws, msg["id"], params.get("filename")))
+                    tasks.add(task)
+                    task.add_done_callback(tasks.discard)
+                    continue
+                try:
+                    result = result_for(method, params)
+                except RpcError as e:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": msg["id"],
+                        "error": {"code": e.code, "message": str(e)}}))
+                    continue
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg["id"],
-                                          "result": result_for(method, params)}))
+                                          "result": result}))
     finally:
         pusher.cancel()
         if printer is not None:
@@ -1381,6 +1563,10 @@ async def handler(ws):
             dropper.cancel()
         if announcer is not None:
             announcer.cancel()
+        if reslicer is not None:
+            reslicer.cancel()
+        if restarter is not None:
+            restarter.cancel()
         for task in tasks:
             task.cancel()
 
@@ -1403,10 +1589,11 @@ def check_api_key(connection, request):
 
 
 async def main():
-    global SHAPER_LOCK
+    global SHAPER_LOCK, SCAN_LOCK
     # Built here rather than at import, because before Python 3.10 an
     # asyncio.Lock binds to whatever loop is current when it is constructed.
     SHAPER_LOCK = asyncio.Lock()
+    SCAN_LOCK = asyncio.Lock()
     write_thumbnails()
     if TMC_AUTOTUNE:
         write_klipper_tree()
@@ -1414,6 +1601,9 @@ async def main():
     print(f"fake moonraker on 7125, extruder {TEMP}/{TARGET}, "
           f"mesh {MESH_SHAPE}{shaper}", flush=True)
     print(f"gcodes root {GCODES_ROOT}", flush=True)
+    if USB:
+        print(f"usb stick at {USB_DIR}, {len(UNSCANNED)} files unscanned, "
+              f"metascan {USB}", flush=True)
     async with websockets.serve(handler, "127.0.0.1", 7125,
                                 process_request=check_api_key):
         await asyncio.Future()
