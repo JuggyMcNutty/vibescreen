@@ -24,7 +24,12 @@ using json = nlohmann::json;
 KWebSocketClient::KWebSocketClient(EventLoopPtr loop)
   : WebSocketClient(loop)
   , id(0)
+  , opened(0)
 {
+}
+
+uint32_t KWebSocketClient::connection_id() const {
+  return opened;
 }
 
 KWebSocketClient::~KWebSocketClient() {
@@ -64,6 +69,7 @@ void KWebSocketClient::drain() {
     KGuard::event("websocket dispatch", [&] {
       switch (ev.kind) {
       case Event::Connected:
+	opened++;
 	if (on_connected) {
 	  on_connected();
 	}

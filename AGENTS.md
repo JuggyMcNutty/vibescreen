@@ -733,6 +733,20 @@ the floats, since rounding alone can tip a marginal quad over.
 If you add anything that fills a computed polygon, prove it is convex or
 triangulate it. `lv_canvas_draw_line` has no such problem.
 
+## Never scan a file that might be printing
+
+The development K1 Max runs Moonraker with `enable_object_processing` on. Then
+`server.files.metascan` runs `preprocess_cancellation` over a file whose slicer
+only labelled its objects, and copies the processed version back over the
+original. Between filesystems that is a write into the same file, not a rename.
+Moonraker does not hold a print start while it runs. Klipper keeps the file
+open and reads on from its offset into content that has moved.
+
+So the file browser holds Print while the selected file is being scanned, and
+`PrintStatusPanel` never scans at all: its file is the one printing. Anything
+new that asks Moonraker to scan has to answer the same question. See
+`docs/audit.md` C26.
+
 ## Testing UI changes without touching the printer
 
 Pressing Extrude against a live Moonraker really does heat the hotend, and
@@ -968,6 +982,14 @@ it deadlocks on the first consumer. It also takes only what is queued at entry
 rather than looping until empty: handlers send requests whose replies come back
 onto the same queue, so draining to empty would run for as long as the printer
 keeps answering.
+
+**A reply that has not arrived when the socket closes never will.** Pending
+callbacks stay in the map rather than being failed, and the reconnected
+Moonraker knows nothing of the old request ids. `KWebSocketClient::connection_id`
+counts websocket opens, for code that has to tell a lost reply from a slow one,
+as `PrintPanel`'s scans do. It does not count Klipper restarts. Those reach the
+connected handler through `notify_klippy_ready` but keep the socket, and with
+it every reply still on its way.
 
 **Every consumer is handed the same notification, so read it, never write it.**
 `consume` takes a `const json &`. Read it with `KUtils::value_at(j, ptr)`, which

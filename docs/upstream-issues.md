@@ -209,7 +209,7 @@ ignored and sends people round the recalibration loop.
 | #51, layer counts not updating | Upstream `e21b163` and `9c52e8a` removed the monotonic guard, and `6f355f8` closed the residual where `reset()` left `current_file` set so the previous file's count showed until the metadata landed. A third cause was still live until `83bcdc2`: `consume()` called `update_layers` unguarded, so every temperature delta, arriving about once a second and carrying no `print_stats.info`, overwrote the reported layer with the estimate. That last fix was verified against the fake, which reports layer numbers. **Our K1 Max never does**, measured 2026-08-20: no file on it calls `SET_PRINT_STATS_INFO`, so `info` is `{null, null}` for the whole print and the counter here rides on the estimate alone. The estimate path is now reachable in the simulator with `--layer-info none`. See `docs/k1max-facts.md` |
 | #158, #119, Android | Android was removed from this fork in `b827111` |
 | #114, #81, input shaper problems | Largely addressed by the input shaper round, `cf4f60b` through `ad40b2a`. Audit C13 to C17 |
-| #155, #108, USB access | `installer.sh:152` symlinks `/tmp/udisk` into the gcodes root, so a stick appears as a folder in the file browser |
+| #155, #108, USB access | `installer.sh` symlinks `/tmp/udisk` into the gcodes root as `usb`, so a stick appears as a folder in the file browser. Picking a file there kept the previous file's preview until `docs/audit.md` C26, our issue #8 |
 
 ### Declined
 

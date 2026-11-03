@@ -16,10 +16,16 @@ class FilePanel {
 
   void foreground();
   void refresh_view(json &j, const std::string &gcode_path);  
+  // A file with no metadata to show: its name, a line saying why, and the date
+  // the file list gave. No preview.
+  void show_without_metadata(const std::string &gcode_path, uint32_t modified,
+			     const std::string &why);
   lv_obj_t *get_container();
   const char* get_thumbnail_path();
 
  private:
+  void clear_thumbnail();
+
   lv_obj_t *file_cont;
   lv_obj_t *thumbnail;
   lv_obj_t *fname_label;

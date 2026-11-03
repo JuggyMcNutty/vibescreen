@@ -11,6 +11,8 @@
 #include "tree.h"
 
 #include <atomic>
+#include <map>
+#include <string>
 
 class PrintPanel : public NotifyConsumer {
  public:
@@ -22,7 +24,8 @@ class PrintPanel : public NotifyConsumer {
   void handle_filelist_changed(json &j);
   void foreground();
   void handle_callback(lv_event_t *event);
-  void handle_metadata(Tree *, json & data);
+  void handle_metadata(const std::string &path, const std::string &method,
+		       uint32_t asked_on, json &data);
   void handle_back_btn(lv_event_t *event);
   void handle_print_callback(lv_event_t *event);
   void handle_status_btn(lv_event_t *event);
@@ -81,6 +84,9 @@ class PrintPanel : public NotifyConsumer {
   void handle_refresh_timer();
   void show_dir(Tree *dir, ListChange why);
   void show_file_detail(Tree *f);
+  void request_metadata(const std::string &path, const std::string &method);
+  void update_print_btn();
+  bool scan_lost(const std::string &path);
   
   KWebSocketClient &ws;
   lv_obj_t *files_cont;
@@ -120,6 +126,15 @@ class PrintPanel : public NotifyConsumer {
   // and the refetch is the whole gcodes list, so they are worth coalescing.
   std::atomic<bool> refresh_pending;
   lv_timer_t *refresh_timer;
+
+  // Files whose latest server.files.metascan has not answered, each with the
+  // KWebSocketClient::connection_id it was asked under. A scan is not asked
+  // twice on one connection, and one whose reply was lost with an earlier
+  // connection is asked again.
+  std::map<std::string, uint32_t> scans;
+  // Files whose scan was refused, and the connection it was refused on. A
+  // refetch does not ask again on the same one.
+  std::map<std::string, uint32_t> unscannable;
 };
 
 #endif // __PRINT_PANEL_H__

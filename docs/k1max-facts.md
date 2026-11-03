@@ -126,6 +126,22 @@ Components enabled include `authorization`, `webcam`, `update_manager`,
 `timelapse` and `octoprint_compat`, so this is a helper-script style install
 rather than stock.
 
+Version `v0.10.0-31-gd5ee171`, read from `server.info` on 2026-11-02. Its
+`[file_manager]` section sets `enable_object_processing: True` and
+`queue_gcode_uploads: False`, read from `server.config` the same day.
+Everything else there is default, including the 20 second
+`default_metadata_parser_timeout`, which object processing raises to 300.
+
+Object processing only rewrites a file whose slicer labelled its objects without
+defining them. This machine's files do define them: the newest, from OrcaSlicer
+2.4.2, has `EXCLUDE_OBJECT_DEFINE` straight after `; EXECUTABLE_BLOCK_START`
+and no `Pre-Processed for Cancel-Object support` line, so Moonraker never
+touched it. Someone else's slicer may not. See `docs/audit.md` C26 for why that
+matters while a print is starting.
+
+With no USB stick in, `gcodes/usb` does not resolve: `server.files.directory`
+for it answers `Directory does not exist`. Nobody has looked with a stick in.
+
 This is the address to point the simulator at:
 
 ```sh

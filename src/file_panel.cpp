@@ -47,17 +47,17 @@ FilePanel::~FilePanel() {
   }
 }
 
+static std::string format_modified(std::time_t timestamp) {
+  std::tm lt = *std::localtime(&timestamp);
+  std::stringstream time_stream;
+  time_stream << std::put_time(&lt, "%Y-%m-%d %H:%M");
+  return time_stream.str();
+}
+
 void FilePanel::refresh_view(json &j, const std::string &gcode_path) {
   auto v = j["/result/modified"_json_pointer];
-  std::stringstream time_stream;  
-  if (!v.is_null()) {
-    std::time_t timestamp = v.template get<std::time_t>();
-    std::tm lt = *std::localtime(&timestamp);
-    time_stream << std::put_time(&lt, "%Y-%m-%d %H:%M");
-  } else {
-    time_stream << "(unknown)";
-  }
-  
+  const std::string modified = v.is_null() ? "(unknown)" : format_modified(v.template get<std::time_t>());
+
   v = j["/result/estimated_time"_json_pointer];
   int eta =  v.is_null() ? -1 : v.template get<int>();
   v = j["/result/filament_weight_total"_json_pointer];
@@ -65,28 +65,44 @@ void FilePanel::refresh_view(json &j, const std::string &gcode_path) {
 
   auto filename = fs::path(gcode_path).filename();
   lv_label_set_text(fname_label, filename.string().c_str());
-  
+
   std::string detail = fmt::format("Filament Weight: {} g\nPrint Time: {}\nSize: {} MB\nModified: {}",
 				   fweight > 0 ? std::to_string(fweight) : "(unknown)",
 				   eta > 0 ? KUtils::eta_string(eta) : "(unknown)",
 				   KUtils::bytes_to_mb(j["result"]["size"].template get<size_t>()),
-				   time_stream.str());
+				   modified);
+  // Written whether or not there is a preview. It used to be set only beside
+  // one, so a file without a thumbnail went on showing the details of the
+  // file shown before it.
+  lv_label_set_text(detail_label, detail.c_str());
 
   auto width_scale = (double)lv_disp_get_physical_hor_res(NULL) / 800.0;
   auto thumb_detail = KUtils::get_thumbnail(gcode_path, j, width_scale);
-  std::string fullpath = thumb_detail.first;    
+  std::string fullpath = thumb_detail.first;
   if (fullpath.length() > 0) {
-    lv_label_set_text(detail_label, detail.c_str());
     auto screen_width = lv_disp_get_physical_hor_res(NULL);
     uint32_t normalized_thumb_scale = ((0.29 * (double)screen_width) / (double)thumb_detail.second) * 256;
     lv_img_set_src(thumbnail, ("A:" + fullpath).c_str());
     lv_img_set_zoom(thumbnail, normalized_thumb_scale);
   } else {
-    // free src
-    lv_img_set_src(thumbnail, NULL);
-    // hack to color in empty space.
-    ((lv_img_t*)thumbnail)->src_type = LV_IMG_SRC_SYMBOL;
+    clear_thumbnail();
   }
+}
+
+void FilePanel::show_without_metadata(const std::string &gcode_path,
+				      uint32_t modified,
+				      const std::string &why) {
+  lv_label_set_text(fname_label, fs::path(gcode_path).filename().string().c_str());
+  lv_label_set_text(detail_label,
+		    fmt::format("{}\nModified: {}", why, format_modified(modified)).c_str());
+  clear_thumbnail();
+}
+
+void FilePanel::clear_thumbnail() {
+  // free src
+  lv_img_set_src(thumbnail, NULL);
+  // hack to color in empty space.
+  ((lv_img_t*)thumbnail)->src_type = LV_IMG_SRC_SYMBOL;
 }
 
 void FilePanel::foreground() {

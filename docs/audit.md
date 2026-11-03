@@ -463,6 +463,109 @@ refuses `_GUPPY_SAVE_CONFIG` until the helper is loaded, as Klipper does.
 no such check, so on a Debian install its toggle is refused as an unknown
 command.
 
+### C26. A file picked from a USB stick kept the previous file's preview (fixed)
+
+Reported as issue #8: with a USB stick in, clicking a file on it leaves the
+preview of the file printed before it on screen.
+
+`PrintPanel::handle_metadata` acted on a reply carrying a `result` and dropped
+anything else without a word. Moonraker answers `server.files.metadata` from
+the metadata it has stored, and with a 404 for a file it has not scanned. It
+never scans to answer. That is so in master and at `v0.10.0-31-gd5ee171`, which
+is what the development K1 Max runs, and the 404 has been there since
+Moonraker's first commit. So an unscanned file left the panel as it was: the
+previous file's name, details and preview, with the new one selected in the
+list. That selection is what Print would have started.
+
+A stick can be listed without ever being scanned. `installer.sh` links
+`gcodes/usb` to `/tmp/udisk`, and `server.files.list` walks that link afresh on
+every request. Moonraker only scans a file when it walks its roots at startup,
+when inotify reports one, when one is uploaded, or when `server.files.metascan`
+asks it to. On the development printer, with no stick in, `gcodes/usb` does not
+resolve (`Directory does not exist`), so there is nothing behind it to watch
+when Moonraker starts. **Not measured:** whether a stick inserted later is ever
+seen. That needs a stick in the development printer. The fix does not rest on
+it. Whatever the reason, a listed file with no metadata gets a 404, and that is
+the case the panel now handles.
+
+What changed:
+
+- On a miss the panel names the selected file, with the modified time the list
+  already gave, says it is scanning, and clears the preview. Then it sends
+  `server.files.metascan`, which scans on demand and replies like
+  `server.files.metadata`. Metascan has been in Moonraker since v0.8.0,
+  February 2023. An older Moonraker refuses it, which is logged, and the file
+  stays named with "No details" and no preview. Metascan is only sent after a
+  miss, and only once per file per connection, because on a file Moonraker has
+  already scanned it deletes the thumbnails and extracts them again.
+- Print waits for the scan. With `enable_object_processing` on, which it is on
+  the development K1 Max (read from `server.config` on 2026-11-02), a scan
+  runs `preprocess_cancellation` over the file. That writes a processed copy
+  into a temporary directory and `shutil.move`s it over the original. Between
+  filesystems, which `/tmp` and a USB stick are, that move is a copy into the
+  same file, not a rename. Moonraker does not hold `printer.print.start` while
+  it runs, and Klipper keeps the file open and reads on from its offset into
+  content that has shifted. So Print is disabled, and refused in its handler as
+  well, while the selected file's scan is outstanding. A file whose slicer
+  already wrote `EXCLUDE_OBJECT_DEFINE` is left alone. The development printer's
+  OrcaSlicer files are, measured on its newest. A slicer that only labels its
+  objects gets the rewrite, and the panel cannot tell in advance which a file
+  is.
+- A scan's reply dies with the connection it was asked on, because pending
+  callbacks are neither answered nor dropped on a disconnect. So each scan is
+  recorded with its connection. On a reconnect the selection is asked about
+  again and Print stays held meanwhile. If Moonraker is still scanning, a
+  second scan queues behind the first rather than the panel assuming it ended,
+  and only the second's reply releases Print.
+- The connection is `KWebSocketClient::connection_id`, a count of websocket
+  opens. Counting calls to the connected handler instead would be wrong. A
+  Klipper restart runs that handler too, through `notify_klippy_ready`, while
+  the websocket and every reply on it carry on. A scan in flight across a
+  `FIRMWARE_RESTART` would be asked for a second time, which deletes the
+  thumbnails the first had just written, and the first reply would release
+  Print with the second still queued.
+- `FilePanel::refresh_view` wrote the details only when it had a thumbnail to
+  show. A file without one went on showing the weight, time and size of the
+  file before it. The details are now written every time.
+- Replies are matched to the selection by path. The callback used to hold the
+  `Tree` node, and `subscribe()` frees every node on a refetch, which a scan
+  lasting seconds leaves plenty of time for. A reply for a file the user had
+  already left could also overwrite the view of the file they moved to.
+
+Measured against the fake. `--usb` serves three files under `usb/sda1` that get
+a 404 until scanned. Their previews are blue and everything else is orange.
+
+- Before: inside `usb/sda1`, with `stick_bracket.gcode` selected, the panel
+  still showed `fake_benchy.gcode` with its preview and details. It still did
+  after two more files were picked.
+- After: 0.3 s after entering the folder, the panel names
+  `stick_bracket.gcode` with its date and says it is scanning, with no preview
+  and Print greyed. The scan replies at 2 s and its preview and details appear.
+  Picking `stick_hook` and then `stick_vase` 1.2 s apart, the reply for
+  `stick_hook` arrived while `stick_vase` was selected and was dropped. Then
+  `stick_vase`'s own arrived. `--usb fail` shows the size and date with no
+  preview. `--usb old` logs the refusal and shows "No details".
+- Print pressed 0.8 s into a scan sent nothing. Pressed after the scan
+  answered, `printer.print.start` went out.
+- With the fake restarted 0.6 s into a scan, so its reply never came, the
+  reconnect asked again, got a 404 and sent a scan on the new connection. Print
+  stayed held until that answered, and then the preview appeared.
+- With `--klippy-restart` landing 0.3 s into a scan, the connected handler ran
+  again and its refetch asked about the selection. It found the scan still
+  running on the same websocket and did not ask again: one metascan in all,
+  and its reply arrived.
+- With `--drop-every 1`, 18 refetches landed during three scans, and exactly
+  three metascans were sent. With `--usb old` and the same churn, three
+  refused scans and no retries.
+
+**Deliberately not done:** `PrintStatusPanel` asks for the same metadata when a
+print starts, and on a 404 it still shows no preview, no time estimate and no
+layer count. It must not fall back to metascan, because its file is printing,
+and that is the file a scan must not rewrite. The code says so where the
+request is made. A print started from the file browser no longer meets this,
+because Print waits for the scan. A print started from another client, on a file
+nothing has scanned, goes without.
+
 ### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget

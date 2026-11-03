@@ -261,7 +261,18 @@ void PrintPanel::subscribe() {
       }
     }
 
+    Tree *kept = cur_file;
     this->populate_files();
+
+    // A selection that came through the rebuild without its metadata is out of
+    // date on screen. Either the file was sent again under the same name, so
+    // its modified time no longer matches the cache, or its scan was asked on
+    // a connection that has gone and will not answer, which also needs asking
+    // about with metadata cached.
+    if (kept != NULL && (!kept->contains_metadata() || scan_lost(kept->full_path))) {
+      show_file_detail(kept);
+    }
+    update_print_btn();
   });
 }
 
@@ -317,6 +328,7 @@ void PrintPanel::handle_callback(lv_event_t *e) {
       if (cur_file != cur_dir->get_child(filename)) {
 	cur_file = cur_dir->get_child(filename);
 	show_file_detail(cur_file);
+	update_print_btn();
       }
     }
   }
@@ -441,31 +453,133 @@ void PrintPanel::show_dir(Tree *dir, ListChange why) {
 	break;
       }
     }
+    update_print_btn();
   }
 }
+
+// Shown in place of a file's details while Moonraker scans it, and after a scan
+// that could not be run.
+static const char *SCANNING = "Scanning this file...\nPrint waits for the scan.";
+static const char *NO_DETAILS = "No details for this file.";
 
 void PrintPanel::show_file_detail(Tree *f) {
   if (f->is_leaf()) {
     if (f->contains_metadata()) {
       file_panel.refresh_view(f->metadata, f->full_path);
-    } else {
-      spdlog::trace("getting metadata for {}", f->name);
-      ws.send_jsonrpc("server.files.metadata",
-		      json::parse(R"({"filename":")" + f->full_path + R"("})"),
-		      [f, this](json &d) { this->handle_metadata(f, d); });
+    } else if (scans.count(f->full_path) > 0) {
+      // Picked again while its scan runs. Say so now, rather than leave the
+      // last file on screen until the metadata request misses.
+      file_panel.show_without_metadata(f->full_path, f->date_modified, SCANNING);
+    }
+    // Asked when there is nothing to show, and also when this file's scan was
+    // asked on a connection that has gone, even with metadata in hand. Only an
+    // answer releases Print, and that scan's own answer is never coming.
+    if (!f->contains_metadata() || scan_lost(f->full_path)) {
+      request_metadata(f->full_path, "server.files.metadata");
     }
   }
 }
 
-void PrintPanel::handle_metadata(Tree *f, json &j) {
-  spdlog::trace("handling metadata callback");  
-  if (f->is_leaf()) {
-    if (j.contains("result")) {
-      std::lock_guard<std::mutex> lock(lv_lock);
-      f->set_metadata(j);
-      file_panel.refresh_view(f->metadata, f->full_path);
+bool PrintPanel::scan_lost(const std::string &path) {
+  const auto s = scans.find(path);
+  return s != scans.end() && s->second != ws.connection_id();
+}
+
+// Print is held while the selected file is being scanned. With Moonraker's
+// object processing on, as it is on the development K1 Max, a scan can rewrite
+// the gcode by copying a processed version back over it. Klipper printing the
+// file meanwhile reads on from its offset into different content.
+void PrintPanel::update_print_btn() {
+  if (cur_file != NULL && scans.count(cur_file->full_path) > 0) {
+    print_btn.disable();
+  } else {
+    print_btn.enable();
+  }
+}
+
+// The reply is matched by path, not by node. subscribe() frees and rebuilds the
+// whole tree on every refetch, and a scan takes long enough for one to land
+// while it runs.
+void PrintPanel::request_metadata(const std::string &path, const std::string &method) {
+  spdlog::trace("{} for {}", method, path);
+  const uint32_t asked_on = ws.connection_id();
+  ws.send_jsonrpc(method, json{{"filename", path}},
+		  [this, path, method, asked_on](json &d) {
+		    this->handle_metadata(path, method, asked_on, d);
+		  });
+}
+
+void PrintPanel::handle_metadata(const std::string &path, const std::string &method,
+				 uint32_t asked_on, json &j) {
+  std::lock_guard<std::mutex> lock(lv_lock);
+  const bool scanned = method == "server.files.metascan";
+  const bool found = j.contains("result");
+  const uint32_t now = ws.connection_id();
+
+  const auto s = scans.find(path);
+  if (s != scans.end()) {
+    if (scanned && s->second != asked_on) {
+      // A later scan of this file has been asked for since, and its reply is
+      // the one that says the file is no longer being rewritten.
+      spdlog::trace("{} answered for {}, a later scan is still due", method, path);
+      return;
+    }
+    // A scan ends with its own reply. Metadata turning up also ends one whose
+    // reply was lost with an earlier connection, because Moonraker stores it
+    // only once extraction and object processing are done. It does not end
+    // one asked on this connection: a file asked for again after a reconnect
+    // can have a second scan queued behind the first, and only the second's
+    // reply says both are done.
+    if (scanned || (found && s->second != now)) {
+      scans.erase(s);
     }
   }
+
+  // Only the file still selected gets the view. A scan takes seconds, and the
+  // user can have picked another file by the time it answers.
+  if (cur_file == NULL || cur_file->full_path != path) {
+    spdlog::trace("{} answered for {}, no longer selected", method, path);
+    return;
+  }
+
+  if (found) {
+    cur_file->set_metadata(j);
+    file_panel.refresh_view(cur_file->metadata, path);
+    update_print_btn();
+    return;
+  }
+
+  auto err = KUtils::value_at(j, "/error/message"_json_pointer);
+  const std::string why = err.is_string() ? err.template get<std::string>() : j.dump();
+  if (scanned) {
+    spdlog::warn("moonraker could not scan {}: {}", path, why);
+    unscannable[path] = asked_on;
+  }
+  const auto u = unscannable.find(path);
+  if (u != unscannable.end() && u->second == now) {
+    file_panel.show_without_metadata(path, cur_file->date_modified, NO_DETAILS);
+    update_print_btn();
+    return;
+  }
+
+  // Leaving the view alone here left it describing the previous file, preview
+  // and all, while this one was selected.
+  file_panel.show_without_metadata(path, cur_file->date_modified, SCANNING);
+
+  // Moonraker answers server.files.metadata only from what it has already
+  // scanned, and a file on a USB stick behind gcodes/usb can be listed without
+  // ever having been. Issue #8. Only on a miss, because metascan on a file
+  // Moonraker has scanned deletes its thumbnails and extracts them again, and
+  // only once per connection, for the same reason.
+  const auto due = scans.find(path);
+  if (due != scans.end() && due->second == now) {
+    spdlog::trace("no metadata for {} yet, its scan is still running", path);
+  } else {
+    spdlog::info("no metadata for {}, asking moonraker to scan it: {}", path, why);
+    scans[path] = now;
+    request_metadata(path, "server.files.metascan");
+  }
+  update_print_btn();
 }
 
 void PrintPanel::handle_back_btn(lv_event_t *event) {
@@ -478,7 +592,11 @@ void PrintPanel::handle_back_btn(lv_event_t *event) {
 
 void PrintPanel::handle_print_callback(lv_event_t *event) {
   lv_event_code_t code = lv_event_get_code(event);
-  if (code == LV_EVENT_CLICKED && cur_file != NULL) {
+  // The button is disabled for this already. Checked here as well because a
+  // print started on a file being rewritten is not something to rely on one
+  // widget state to prevent. See update_print_btn.
+  if (code == LV_EVENT_CLICKED && cur_file != NULL
+      && scans.count(cur_file->full_path) == 0) {
 
     const json &pstat_state = State::get_instance()
       ->get_data("/printer_state/print_stats/state"_json_pointer);

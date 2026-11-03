@@ -294,6 +294,11 @@ void PrintStatusPanel::populate() {
   if (!printfile.is_null()) {
     const std::string fname = printfile.template get<std::string>();
     if (fname.length() > 0) {
+      // Never fall back to server.files.metascan here the way PrintPanel does.
+      // This file is printing, and with Moonraker's object processing on a scan
+      // can copy a rewritten version over it while Klipper is reading it. A
+      // file printed from our browser has already been scanned, because Print
+      // waits for that. One started elsewhere goes without a preview instead.
       json fname_input = {{"filename", fname }};
       ws.send_jsonrpc("server.files.metadata", fname_input,
 		      [fname, this](json &d) { this->handle_metadata(fname, d); });

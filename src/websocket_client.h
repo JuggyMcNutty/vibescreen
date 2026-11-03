@@ -37,6 +37,14 @@ class KWebSocketClient : public hv::WebSocketClient {
 				std::string handler_name,
 				std::function<void(json&)> cb);
 
+  // How many times the websocket has opened. A reply only comes back on the
+  // connection its request went out on, so a request made under an earlier
+  // count will never be answered: pending callbacks are kept, not failed, when
+  // the socket closes. A Klipper restart calls the connected handler as well,
+  // through notify_klippy_ready, but keeps the websocket and its replies, so it
+  // does not count. Read and written on the LVGL thread only.
+  uint32_t connection_id() const;
+
   // Called with the message text whenever Klipper rejects a gcode command.
   // Install it before connect(), it is read from the libhv thread afterwards.
   void set_error_handler(std::function<void(const std::string&)> cb);
@@ -104,6 +112,7 @@ class KWebSocketClient : public hv::WebSocketClient {
   // method_name : { <unique-name-cb-handler> :handler-cb }
   std::map<std::string, std::map<std::string, std::function<void(json&)>>> method_resp_cbs;
   std::atomic_uint64_t id;
+  uint32_t opened;
 
   // Set once before connect(), so it needs no lock of its own.
   std::function<void(const std::string&)> error_handler;
