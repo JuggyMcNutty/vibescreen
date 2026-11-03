@@ -365,6 +365,10 @@ void PrintStatusPanel::handle_metadata(const std::string &gcode_file, json &j) {
 
     auto screen_width = lv_disp_get_physical_hor_res(NULL);
     uint32_t normalized_thumb_scale = ((0.34 * (double)screen_width) / (double)thumb_detail.second) * 256;
+    // Metadata is fetched fresh for every print, and the file may have been
+    // replaced under the same name since LVGL last decoded its preview. See
+    // FilePanel::refresh_view.
+    lv_img_cache_invalidate_src(img_path.c_str());
     lv_img_set_src(thumbnail, img_path.c_str());
     lv_img_set_zoom(thumbnail, normalized_thumb_scale);
     mini_print_status.update_img(img_path, thumb_detail.second);

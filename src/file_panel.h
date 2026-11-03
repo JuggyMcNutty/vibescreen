@@ -15,7 +15,9 @@ class FilePanel {
   ~FilePanel();
 
   void foreground();
-  void refresh_view(json &j, const std::string &gcode_path);  
+  // reload drops LVGL's cached decode of the preview first. Pass it for
+  // metadata just fetched, since the file may have been replaced in place.
+  void refresh_view(json &j, const std::string &gcode_path, bool reload = false);
   // A file with no metadata to show: its name, a line saying why, and the date
   // the file list gave. No preview.
   void show_without_metadata(const std::string &gcode_path, uint32_t modified,

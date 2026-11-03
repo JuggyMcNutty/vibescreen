@@ -566,6 +566,55 @@ request is made. A print started from the file browser no longer meets this,
 because Print waits for the scan. A print started from another client, on a file
 nothing has scanned, goes without.
 
+### C27. A file sent again under the same name kept its old preview (fixed)
+
+Found while working through C26's leftovers. Nobody reported it.
+
+LVGL keeps five decoded images (`LV_IMG_CACHE_DEF_SIZE`), keyed by the source
+path, which `lv_img_cache_match` compares with `strcmp`. Nothing in LVGL's
+image widget or in `src/` ever called `lv_img_cache_invalidate_src`. Moonraker
+writes a file's previews to `.thumbs/<name>-<w>x<h>.png` beside it, so a file
+resliced and sent again under the same name gets new previews at the old
+paths. Any of them still cached was drawn from the old pixels.
+
+A second fault kept the panel from asking at all. A refetch that finds the
+same rows leaves the view alone, which is C23's fix, and the selection survives
+the rebuild by path. Its cached metadata does not, because the cache is
+qualified by modified time, but nothing noticed the selection had lost it. So
+the old details and preview stayed up until the user left the file and came
+back, and then the new details came up over the old preview.
+
+Fixed:
+
+- A refetch that brings the selection back without its metadata asks for it
+  again. That check came in with C26, for a scan whose reply was lost with its
+  connection, and it covers this case too.
+- Metadata just fetched drops LVGL's cached decode of the file's preview before
+  it is shown. That happens in `FilePanel` and in `PrintStatusPanel`, whose
+  metadata is fetched afresh for every print. Cached metadata does not drop it,
+  so going back to a file still costs no decode.
+
+Measured against the fake with `--reslice 9`. Nine seconds after connecting it
+sends `fake_benchy.gcode` again, with green previews written over the orange
+ones.
+
+- Before: with the file selected, the panel kept the old modified time after
+  the reslice. Leaving the file and coming back showed the new time with the
+  orange preview, while the file on disk was byte-identical to the green
+  render.
+- After: the refetch asked for the selection again, and the green preview and
+  the new time appeared with nothing pressed. They stayed after leaving the file
+  and coming back.
+- C23's churn case, `--files 30 --drop-every 6 --announce-every 4` for 30
+  seconds, made one metadata request across 12 refetches, before and after.
+
+**Still open, not measured:** when Moonraker is not on localhost,
+`KUtils::get_thumbnail` downloads each preview to `thumbnail_path/<basename>`,
+again on every view. Two gcode files with the same name in different
+directories share that local file, so with the cache either can be drawn with
+the other's preview. The fake cannot serve files over HTTP, so this was read in
+the source and not driven.
+
 ### C11. Panel destructors double-delete their own widgets (fixed)
 
 Every panel destructor calls `lv_obj_del` on its root container, and its widget

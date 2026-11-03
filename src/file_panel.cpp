@@ -54,7 +54,7 @@ static std::string format_modified(std::time_t timestamp) {
   return time_stream.str();
 }
 
-void FilePanel::refresh_view(json &j, const std::string &gcode_path) {
+void FilePanel::refresh_view(json &j, const std::string &gcode_path, bool reload) {
   auto v = j["/result/modified"_json_pointer];
   const std::string modified = v.is_null() ? "(unknown)" : format_modified(v.template get<std::time_t>());
 
@@ -80,9 +80,16 @@ void FilePanel::refresh_view(json &j, const std::string &gcode_path) {
   auto thumb_detail = KUtils::get_thumbnail(gcode_path, j, width_scale);
   std::string fullpath = thumb_detail.first;
   if (fullpath.length() > 0) {
+    const std::string src = "A:" + fullpath;
+    // LVGL keeps decoded images keyed by path, and a file sent again under the
+    // same name gets new previews at the old paths, so its old pixels would be
+    // drawn. Fresh metadata is when the file can have changed.
+    if (reload) {
+      lv_img_cache_invalidate_src(src.c_str());
+    }
     auto screen_width = lv_disp_get_physical_hor_res(NULL);
     uint32_t normalized_thumb_scale = ((0.29 * (double)screen_width) / (double)thumb_detail.second) * 256;
-    lv_img_set_src(thumbnail, ("A:" + fullpath).c_str());
+    lv_img_set_src(thumbnail, src.c_str());
     lv_img_set_zoom(thumbnail, normalized_thumb_scale);
   } else {
     clear_thumbnail();

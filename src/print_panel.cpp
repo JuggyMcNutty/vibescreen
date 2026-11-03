@@ -544,7 +544,7 @@ void PrintPanel::handle_metadata(const std::string &path, const std::string &met
 
   if (found) {
     cur_file->set_metadata(j);
-    file_panel.refresh_view(cur_file->metadata, path);
+    file_panel.refresh_view(cur_file->metadata, path, true);
     update_print_btn();
     return;
   }
