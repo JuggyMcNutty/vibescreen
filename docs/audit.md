@@ -655,7 +655,7 @@ demonstrated failing first. What is live is the destructor path itself:
 `MacrosPanel` its `MacroItem`s, on every refresh. Both were driven in the
 simulator and both still draw.
 
-### C18. Startup crashes about one time in six, in the connect callback (open)
+### C18. Startup crashes about one time in six, in the connect callback (cause removed, `68e4455`)
 
 `InitPanel::connected` runs on the libhv websocket thread and builds widgets
 from there. Measured 2026-08-17 against `tools/fake_moonraker.py`: one startup
@@ -700,6 +700,15 @@ This is the same disease as C1 and C9 and wants the same cure: dispatch onto a
 queue drained by the LVGL loop, so that no websocket callback ever touches a
 widget. Until then, every new websocket-thread path needs `lv_lock` and an
 audit of the ones already there.
+
+That cure is `68e4455`. Connection events go through the queue too, so
+`InitPanel::connected` and the `MainPanel::create_sensors` in the stack above
+run on the main thread now, which was measured by breaking on
+`create_sensors`. The crash itself did not reproduce in 40 runs of the binary
+from before that change, so there was no failure rate to show falling, and 20
+runs after it were clean. The mechanism is gone, but the crash was never
+measured gone. The heading said open until 2026-11-03, while the summary at the
+end of this file counted it done.
 
 ### C19. `WpaEvent` shares one control socket across two threads (fixed)
 
@@ -1428,8 +1437,8 @@ from elsewhere again.
 
 ## Suggested order
 
-Done: everything except C7, C22, B10, M2 and M9. C1 to C6, C8 to C21, C23, B1
-to B9, M1, M3 to M8, and the `KUtils` parse helpers.
+Done: everything except C7, C22, B10, M2, M9 and M11. C1 to C6, C8 to C21,
+C23 to C27, B1 to B9, M1, M3 to M8, M10, and the `KUtils` parse helpers.
 
 Remaining:
 
@@ -1442,5 +1451,7 @@ Remaining:
    and status text, not a mechanism.
 4. M9, `sort_map_values` copying its map. Cosmetic now that the one call site
    where it was expensive is gone.
+5. M11, confirmation text drawn behind its own buttons on the `--small` build.
+   On Input Shaper's Save the hidden half is the warning that Klipper restarts.
 
 M2, the four leaked singletons, is harmless and stays open.
